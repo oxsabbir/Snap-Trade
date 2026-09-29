@@ -26,6 +26,7 @@ export function useLiveCandles(
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeKey, setActiveKey] = useState(`${symbol}:${timeframe.key}`);
+  const [activeSymbol, setActiveSymbol] = useState(symbol);
   const mountedRef = useRef(true);
   const bucketRef = useRef(0);
   const [guard] = useState(createGenerationGuard);
@@ -33,16 +34,28 @@ export function useLiveCandles(
 
   // Reset during render so a timeframe switch never flashes the previous chart.
   // bucketRef is left to the fetch effect, which owns it outside render.
+  //
+  // `status` is deliberately NOT reset here. It describes the socket, whose lifecycle is
+  // keyed on `symbol` alone, so it must survive a timeframe change. A timeframe switch also
+  // cannot restore it: the socket is not recreated, and start() is a no-op on a live socket,
+  // so nothing would ever move the badge back off "connecting". The socket effect below sets
+  // it for a symbol switch, where a new connection genuinely is being made.
+  //
+  // A new timeframe and a new symbol are not the same kind of event. A timeframe is a
+  // different view of the *same* pair, so the socket stays connected and the live price stays
+  // valid — the header must not blank out while the chart refetches. A new symbol is a
+  // different pair, so nothing from the previous one may survive: not the candles, and not
+  // the ticker, which would otherwise price the new coin in the old coin's currency.
   const key = `${symbol}:${timeframe.key}`;
   if (key !== activeKey) {
     setActiveKey(key);
     setCandles([]);
-    setTicker(null);
     setError(null);
     setIsLoading(enabled);
-    // The previous symbol's connection is torn down in an effect, so the badge would
-    // otherwise keep claiming the new series is live before it has ever connected.
-    setStatus('connecting');
+    if (symbol !== activeSymbol) {
+      setActiveSymbol(symbol);
+      setTicker(null);
+    }
   }
 
   // Only the ordinary timeframes have a bucket width. Under `enabled: false` — the

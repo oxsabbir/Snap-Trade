@@ -16,6 +16,7 @@ import { TimeframeTabs } from '@/components/TimeframeTabs';
 import { useLifetimeSeries } from '@/hooks/useLifetimeSeries';
 import { useLiveCandles } from '@/hooks/useLiveCandles';
 import { timeframeByKey, LINE_TIMEFRAME, type TimeframeOrLine } from '@/lib/kucoin/candles';
+import { deriveQuote } from '@/lib/quote';
 import { colors, radius, spacing } from '@/theme';
 import { formatPercent, formatPrice } from '@/utils/format';
 
@@ -73,16 +74,12 @@ export function CoinDetail({ symbol, name, decimals }: Props) {
   // the array. A range summary used to be computed over all 100 candles on every tick.
   const current = candles.length > 0 ? candles[candles.length - 1]! : null;
 
-  const livePrice = ticker?.price ?? current?.close;
-  // Measured against the current bucket's open, so the pill matches what is on screen.
-  // Using the oldest of the 100 loaded candles would report, say, four days of change
-  // next to a live 1H price. On the Line tab the bucket is a week, so this reads as
-  // change-this-week rather than change-since-listing.
-  const change =
-    current && current.open !== 0 && livePrice !== undefined
-      ? ((livePrice - current.open) / current.open) * 100
-      : 0;
-  const isUp = change >= 0;
+  // The header is derived from the price and the bucket open separately, because they are
+  // not available at the same time. Changing timeframe clears the candles while the chart
+  // refetches, but the pair — and therefore its price — has not changed, so the header must
+  // stay put. The socket keeps ticking throughout, so the price stays live rather than
+  // freezing on the outgoing bucket's close. See deriveQuote.
+  const quote = deriveQuote(ticker?.price ?? current?.close, current?.open);
   const base = symbol.split('-')[0] ?? '';
 
   const onSelectTimeframe = useCallback((next: TimeframeOrLine) => setTimeframeKey(next.key), []);
@@ -125,19 +122,21 @@ export function CoinDetail({ symbol, name, decimals }: Props) {
         </Pressable>
       </View>
 
-      {current ? (
+      {quote ? (
         <View style={styles.priceBlock}>
-          <Text style={styles.price}>{formatPrice(livePrice ?? 0, decimals)}</Text>
-          <View
-            style={[
-              styles.changePill,
-              { backgroundColor: isUp ? 'rgba(35,175,137,0.14)' : 'rgba(246,70,93,0.14)' },
-            ]}
-          >
-            <Text style={[styles.change, { color: isUp ? colors.up : colors.down }]}>
-              {formatPercent(change)}
-            </Text>
-          </View>
+          <Text style={styles.price}>{formatPrice(quote.price, decimals)}</Text>
+          {quote.change !== null ? (
+            <View
+              style={[
+                styles.changePill,
+                { backgroundColor: quote.isUp ? 'rgba(35,175,137,0.14)' : 'rgba(246,70,93,0.14)' },
+              ]}
+            >
+              <Text style={[styles.change, { color: quote.isUp ? colors.up : colors.down }]}>
+                {formatPercent(quote.change)}
+              </Text>
+            </View>
+          ) : null}
           <View style={styles.liveBadge}>
             <View
               style={[

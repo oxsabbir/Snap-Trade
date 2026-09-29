@@ -193,6 +193,36 @@ reaching the next. Three things had to be closed:
 
 The browse list and the search bar both render the same `SpotRow`, so this covers both paths.
 
+### Live badge
+
+`status` describes the socket, and the socket's lifecycle is keyed on `symbol` alone, so the
+status is deliberately **not** reset alongside the candles on a series change. A timeframe switch
+deliberately keeps the connection alive, and nothing would ever move the badge back off
+"connecting": the effect does not re-run, and `start()` is a no-op on a live socket. A symbol
+switch does reset it, because the new `TickerSocket` reports `connecting` as its first act. The
+badge is rendered inside the price block, so it is hidden while a switch is in flight rather than
+showing the previous symbol's state.
+
+### Timeframe change vs symbol change
+
+These are different events and only the chart should react to the first one.
+
+Changing **timeframe** is a new view of the same pair. The candles are cleared so the chart
+cannot flash the outgoing series, but the socket is left connected, so the header price and the
+Live badge stay put and keep ticking. Clearing the ticker here as well was what made the whole
+header disappear on every timeframe change.
+
+Changing **symbol** is a different pair, so the candles *and* the ticker are cleared. The ticker
+in particular must go, or the new coin gets priced in the old coin's currency for as long as the
+fetch takes.
+
+The price and the change pill are derived separately (`src/lib/quote.ts`) because they are not
+available at the same time. The price comes from the socket and is valid whenever a pair is
+selected, but the bucket's open only exists once history for the current series has landed — and
+that gap is exactly the timeframe-change window. So the price is always shown and the change is
+withheld until its bucket arrives. Reusing the outgoing bucket's open instead would report a 1m
+move against a 1D open, which is not a small error.
+
 ### Default view
 
 `DEFAULT_SPAN = 35` is the window shown on load, out of the 100 candles fetched for an ordinary
