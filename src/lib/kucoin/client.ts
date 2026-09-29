@@ -1,11 +1,10 @@
 import { hmac } from '@noble/hashes/hmac.js';
 import { sha256 } from '@noble/hashes/sha2.js';
-import Constants from 'expo-constants';
 
-import type { KuCoinCredentials } from './types';
+import { loadCredentials } from './credentials';
 
 const BASE_URL = 'https://api.kucoin.com';
-const API_VERSION = '2';
+const API_VERSION = '3';
 const REQUEST_TIMEOUT_MS = 15_000;
 
 const B64_ALPHABET =
@@ -24,22 +23,6 @@ function toBase64(bytes: Uint8Array): string {
     out += b2 === undefined ? '=' : B64_ALPHABET[b2 & 0x3f];
   }
   return out;
-}
-
-function readCredentials(): KuCoinCredentials {
-  const extra = Constants.expoConfig?.extra as { kucoin?: Partial<KuCoinCredentials> } | undefined;
-  const fromExtra: Partial<KuCoinCredentials> = extra?.kucoin ?? {};
-  return {
-    apiKey: fromExtra.apiKey || undefined,
-    apiSecret: fromExtra.apiSecret || undefined,
-    apiPassphrase: fromExtra.apiPassphrase || undefined,
-  };
-}
-
-export const credentials: KuCoinCredentials = readCredentials();
-
-export function hasCredentials(): boolean {
-  return Boolean(credentials.apiKey && credentials.apiSecret && credentials.apiPassphrase);
 }
 
 function utf8(value: string): Uint8Array {
@@ -90,23 +73,21 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
 
   if (signed) {
-    if (!hasCredentials()) {
-      throw new KuCoinApiError(
-        'NO_CREDENTIALS',
-        'Signed request requires KUCOIN_API_KEY, KUCOIN_API_SECRET and KUCOIN_API_PASSPHRASE.'
-      );
+    const credentials = await loadCredentials();
+    if (!credentials) {
+      throw new KuCoinApiError('NO_CREDENTIALS', 'Connect a KuCoin API key to use this endpoint.');
     }
     const { apiKey, apiSecret, apiPassphrase } = credentials;
     const timestamp = Date.now().toString();
 
     // Sign the *unencoded* path, per KuCoin's spec.
-    headers['KC-API-KEY'] = apiKey!;
+    headers['KC-API-KEY'] = apiKey;
     headers['KC-API-TIMESTAMP'] = timestamp;
     headers['KC-API-SIGN'] = hmacBase64(
-      apiSecret!,
+      apiSecret,
       `${timestamp}${method}${requestPath}${queryString}${bodyString}`
     );
-    headers['KC-API-PASSPHRASE'] = hmacBase64(apiSecret!, apiPassphrase!);
+    headers['KC-API-PASSPHRASE'] = hmacBase64(apiSecret, apiPassphrase);
     headers['KC-API-KEY-VERSION'] = API_VERSION;
   }
 

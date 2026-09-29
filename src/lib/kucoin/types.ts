@@ -1,7 +1,27 @@
 export type KuCoinCredentials = {
-  apiKey: string | undefined;
-  apiSecret: string | undefined;
-  apiPassphrase: string | undefined;
+  apiKey: string;
+  apiSecret: string;
+  apiPassphrase: string;
+};
+
+/** Raw `GET /api/v1/accounts` row. Balances are decimal strings. */
+export type KuCoinAccount = {
+  id: string;
+  currency: string;
+  type: string;
+  balance: string;
+  available: string;
+  holds: string;
+};
+
+/** An account row joined with its USDT valuation from the ticker feed. */
+export type PortfolioAsset = {
+  currency: string;
+  balance: number;
+  available: number;
+  holds: number;
+  price: number;
+  value: number;
 };
 
 export type SymbolInfo = {

@@ -1,9 +1,9 @@
 # kucoin
 
-A KuCoin **spot markets** app. Two screens: a searchable, filterable list of every trading
-pair, and a per-pair chart screen with live streaming prices.
+A KuCoin **spot markets** app. Three tabs: a searchable, filterable list of every trading
+pair, a per-pair chart with live streaming prices, and a read-only account view with balances.
 
-Dark theme, no auth, no orders. Market data only.
+Dark theme, no orders. Market data is public; balances use the user's own read-only API key.
 
 ## Stack
 
@@ -14,11 +14,12 @@ Dark theme, no auth, no orders. Market data only.
 | React | `19.2.3` |
 | TypeScript | `~6.0.3`, `strict: true` |
 | Router | `expo-router` `~57.0.23`, typed routes enabled |
-| Crypto | `@noble/hashes` `^2.4.0` |
+| Crypto | `@noble/hashes` `^2.4.0` — HMAC-SHA256 signing in pure JS |
+| Storage | `expo-secure-store` for credentials, AsyncStorage for preferences |
 | Native dirs | none — Continuous Native Generation, never hand-edit `ios/`/`android/` |
 
-Expo loads `.env` automatically; every `EXPO_PUBLIC_*` / `KUCOIN_*` key is inlined into the
-bundle at build time.
+The KuCoin key is **entered at runtime and stored in the device keystore**. Nothing secret is
+read from `.env` or baked into the bundle — see "Account and credentials" below.
 
 ## Commands
 
@@ -35,32 +36,36 @@ Both `typecheck` and `lint` pass clean as of the last commit.
 ## Layout
 
 ```
-app.config.ts          merges app.json + scheme + typedRoutes + extra.kucoin (secrets, see below)
+app.config.ts          merges app.json + scheme + typedRoutes. No secrets.
 app.json               static Expo config (name, icon, dark UI, plugins)
 src/app/               ROUTES — every file here is a screen
   _layout.tsx          SafeAreaProvider + ActiveCoinProvider + Stack
   (tabs)/_layout.tsx   Tabs navigator — Home / Trade / Account
   (tabs)/index.tsx     Home: markets list, search, favorites, recent searches
   (tabs)/trade.tsx     Trade: chart for the currently selected coin
-  (tabs)/account.tsx   Account: minimal shell, private balances not wired
+  (tabs)/account.tsx   Account: connect form, total value, asset list
 src/components/        presentational only, no data fetching
-  SearchBar  QuoteTabs  PopularSearches  RecentSearches  SpotRow
+  SearchBar  QuoteTabs  PopularSearches  RecentSearches  SpotRow  AssetRow
   CoinAvatar  RangeBar  Icons  TimeframeTabs  ChartModeToggle  PriceChart
   CoinDetail           shared chart view used by the Trade tab
+  ConnectAccountForm   API key / secret / passphrase entry
 src/hooks/
   useSpotMarkets.ts    list data — REST fetch, 10s poll, AppState, pull-to-refresh
   useRecentSearches.ts AsyncStorage-backed recent search history (max 8)
   useLiveCandles.ts    chart data — REST history + WebSocket live price
+  useAccount.ts        balances — signed REST, 30s poll, connect/disconnect
 src/state/
   activeCoin.tsx       selected market, AsyncStorage-persisted, split contexts
 src/lib/kucoin/
   client.ts            fetch wrapper, HMAC signing, error type
+  credentials.ts       SecureStore read/write/delete for the API key triple
+  account.ts           signed account endpoint, USDT valuation, portfolio shape
   market.ts            endpoint fns, symbol/ticker join, search ranking
   candles.ts           candle endpoint, timeframe table, helpers
   socket.ts            TickerSocket — public WS feed, ping, backoff reconnect
   types.ts             wire types + the joined SpotMarket shape
 src/theme/index.ts     colors / spacing / radius, all `as const`
-src/utils/format.ts    price, percent, compact volume, hue hashing
+src/utils/format.ts    price, percent, amount, compact volume, hue hashing
 ```
 
 Import alias `@/*` → `./src/*`. Use it; do not write relative paths that climb out of `src/`.
@@ -73,7 +78,10 @@ Three **public** KuCoin endpoints, no credentials required:
 |---|---|---|
 | `fetchSymbols` | `GET /api/v1/symbols` | once per app session |
 | `fetchCurrencies` | `GET /api/v1/currencies` | once per app session |
-| `fetchAllTickers` | `GET /api/v1/market/allTickers` | every 10s |
+| `fetchAllTickers` | `GET /api/v1/market/allTickers` | every 10s on Home, 30s on Account |
+
+The Account tab adds one **signed** call, `GET /api/v1/accounts`, described under
+"Account and credentials" below.
 
 `useSpotMarkets` caches the two slow reference sets in refs and only re-fetches tickers on
 the poll. It clears both refs on pull-to-refresh so symbol changes are picked up. Polling
@@ -165,44 +173,68 @@ These have all cost time. Don't regress them.
 
 ## State that does not persist
 
-Favorites live in `useState` in `(tabs)/index.tsx` and are **lost on reload**. Recent searches
-and the active-coin selection *do* persist, via AsyncStorage. Persisting favorites the same way
-is the obvious next step.
+Favorites live in `useState` in `(tabs)/index.tsx` and are **lost on reload**. Recent searches,
+the active-coin selection and API credentials *do* persist — the first two in AsyncStorage, the
+credentials in SecureStore. Persisting favorites the same way is the obvious next step.
 
-## ⚠️ Secrets are currently compiled into the client bundle
+## Account and credentials
 
-`app.config.ts:7-11` reads `KUCOIN_API_KEY` / `KUCOIN_API_SECRET` / `KUCOIN_API_PASSPHRASE`
-from the environment and places them in `extra.kucoin`. Expo inlines `extra` into the
-JavaScript bundle, and `client.ts:29` reads them back at runtime via
-`Constants.expoConfig.extra`. **The secret and passphrase ship inside the app.**
+Balances live behind KuCoin's **private** API, which requires HMAC-SHA256 signed requests.
+The signing itself is fine to do on-device; the only thing that must never be shipped is the
+**secret**. So the key is entered at runtime and kept in the OS keystore:
 
-`client.ts` also implements full HMAC-SHA256 request signing (`KC-API-KEY`, `KC-API-SIGN`,
-`KC-API-PASSPHRASE`), but nothing calls it with `signed: true` — the only screens use
-public market data. So today the signing code is dead, and the credentials riding along in
-the bundle protect nothing.
+- `ConnectAccountForm` collects API Key / Secret / Passphrase.
+- `credentials.ts` stores them with `expo-secure-store` — iOS Keychain, Android
+  EncryptedSharedPreferences. Never AsyncStorage, which is plain text on disk.
+- `client.ts` reads them at request time and signs `timestamp + method + path + query + body`.
+  The passphrase is HMAC'd with the secret, per KuCoin's spec.
+- `useAccount` calls `GET /api/v1/accounts` and `GET /api/v1/market/allTickers` together,
+  then values each holding in USDT.
 
-`.env.example` already states the rule this violates: *"Never ship a secret in a client
-build — proxy through your backend."*
+Signing details that are easy to get wrong:
 
-Before adding any signed/private endpoint:
+- **API key version must match the key.** `client.ts` sends `KC-API-KEY-VERSION: 3`, which is
+  what newly-created keys are. A v2 key would fail; if you ever add one, make the version
+  configurable rather than guessing.
+- **`KC-API-PASSPHRASE` is not the raw passphrase.** It is `base64(HMAC-SHA256(secret, passphrase))`.
+  Sending the plaintext is a common bug.
+- **Balance rows are per account type, not per currency.** `GET /api/v1/accounts` returns a row
+  per `(currency, type)` pair, so a coin can appear two or three times. `buildPortfolio` merges
+  them and filters to `main` / `trade` / `trade_hf`. Margin is excluded on purpose — those
+  balances can be borrowed funds, so counting them would overstate net worth.
+- **Most rows have zero balance.** KuCoin returns an account for every currency it knows, which
+  is hundreds of rows of `"0"`. They are dropped in `buildPortfolio`.
+- **Valuation is best-effort.** Direct `XXX-USDT` pair first, then `XXX-BTC × BTC-USDT` for the
+  long tail, then 0. USDT itself has no pair, so it is pinned to 1. A `price` of 0 renders as
+  `—`, meaning "unpriceable", not "worth nothing".
 
-1. Delete the `kucoin` block from `app.config.ts` and `readCredentials`/`hasCredentials`
-   from `client.ts`.
-2. Stand up a small backend that holds the keys in *its* env and signs there.
-3. Point the app at that backend.
+`connect()` verifies before committing: it saves, tries one fetch, and on failure clears the
+key and rethrows so the form shows the error inline rather than dropping you on the error card.
 
-`/profile/apikey/new` on kucoin.com issues dev keys. The local `.env` is gitignored
-(`.gitignore:34`) — keep it that way, and never commit real values.
+The Account tab is read-only. The key needs the **General** permission and nothing else —
+leave Spot Trading and Withdrawal **off**. Even if this device were compromised, a
+General-only key cannot move funds. IP whitelisting is not usable here: mobile carrier IPs
+change.
+
+### Why there is no backend
+
+A signing proxy is the right call if you ever distribute this. For a single-user app it is
+infrastructure with no payoff: it holds the same secret, adds a deploy target, and buys
+nothing. KuCoin's own OAuth login exists but is restricted to approved brokers (you email them
+your IP list and they issue a `client_id`), so it is not a self-serve option.
+
+`.env.example` is kept only as a note for a future backend; **the app does not read it**.
 
 ## Known gaps
 
 - No tests, no test runner, no CI.
-- `package.json` declares `"lint"` twice (lines 31 and 33). Harmless, last one wins, but
-  worth cleaning up.
-- The Account tab is a shell only. Balances come from `GET /api/v1/accounts`, which needs
-  the signing proxy described above — until that exists there is nothing to show, so the
-  screen says so rather than inventing numbers.
-- No order entry, no deposits/withdrawals — all of which need the same proxy.
+- The Account tab is read-only and single-key. No multi-account, no order entry, no
+  deposits/withdrawals.
+- No 24h portfolio change. Total value is a spot snapshot; it would need a cost-basis or
+  historical equity series to show a percentage.
+- The Account tab polls every 30s. KuCoin has a private WebSocket `/account/balance` topic for
+  real-time pushes; it needs a private token from `POST /api/v1/bullet-private`, which is
+  signed. Natural next step if the polling feels stale.
 - No pin/zoom on the chart. It renders the full 100-candle window with a crosshair only.
 - The markets list is still on 10s REST polling. If you want the list live too, the topic is
   `/market/ticker:all`, but at 996 symbols that is a firehose — filter server-side or

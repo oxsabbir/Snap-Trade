@@ -35,6 +35,17 @@ export function formatPercent(value: number): string {
   return `${sign}${value.toFixed(2)}%`;
 }
 
+/** Balances: significant digits, trailing zeros trimmed, thousands grouped. */
+export function formatAmount(value: number): string {
+  if (!Number.isFinite(value) || value === 0) return '0';
+  const abs = Math.abs(value);
+  const precision = abs >= 1 ? 6 : abs >= 0.0001 ? 8 : 12;
+  const trimmed = value.toFixed(precision).replace(/\.?0+$/, '');
+  const [whole = '0', fraction] = trimmed.split('.');
+  const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, groupSeparator);
+  return fraction ? `${grouped}.${fraction}` : grouped;
+}
+
 const COMPACT_UNITS = [
   { threshold: 1_000_000_000, suffix: 'B' },
   { threshold: 1_000_000, suffix: 'M' },
