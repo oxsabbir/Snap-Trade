@@ -1,23 +1,18 @@
 import { useCallback, useMemo, useState } from 'react';
-import {
-  ActivityIndicator,
-  Pressable,
-  StyleSheet,
-  Text,
-  View,
-  useWindowDimensions,
-} from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { CoinInfoSheet } from '@/components/CoinInfoSheet';
 import { InfoIcon } from '@/components/Icons';
 import { PriceChart } from '@/components/PriceChart';
 import { TimeframeTabs } from '@/components/TimeframeTabs';
+import { TradePanel } from '@/components/TradePanel';
 import { useLifetimeSeries } from '@/hooks/useLifetimeSeries';
 import { useLiveCandles } from '@/hooks/useLiveCandles';
+import { useStableChartHeight } from '@/hooks/useStableChartHeight';
 import { timeframeByKey, LINE_TIMEFRAME, type TimeframeOrLine } from '@/lib/kucoin/candles';
 import { deriveQuote } from '@/lib/quote';
-import { colors, radius, spacing, standardChartHeight } from '@/theme';
+import { colors, radius, spacing } from '@/theme';
 import { formatPercent, formatPrice } from '@/utils/format';
 
 type Props = {
@@ -36,9 +31,9 @@ export function CoinDetail({ symbol, name, decimals }: Props) {
 
   // A fixed standard height, not the leftover space. Measuring the chart from the leftover
   // gave it whatever the device had going, which on a tall phone left no room at all for the
-  // ordering UI below.
-  const { height: windowHeight } = useWindowDimensions();
-  const chartHeight = useMemo(() => standardChartHeight(windowHeight), [windowHeight]);
+  // ordering UI below. The hook holds that height steady while the order form's keyboard is
+  // open, which on Android would otherwise shrink the window and collapse the chart.
+  const chartHeight = useStableChartHeight();
 
   // This is one component instance shared by every pair the user opens, so opening a new
   // symbol has to put it back exactly as it looked on first open. Observed on device: a
@@ -47,7 +42,7 @@ export function CoinDetail({ symbol, name, decimals }: Props) {
   // happened to survive, this restores the defaults outright and the `key` on PriceChart
   // guarantees a real remount.
   //
-  // chartHeight needs no reset: it is derived from the window, not chosen by the user.
+  // chartHeight needs no reset: it is derived from the device, not chosen by the user.
   const [activeSymbol, setActiveSymbol] = useState(symbol);
   if (symbol !== activeSymbol) {
     setActiveSymbol(symbol);
@@ -200,16 +195,17 @@ export function CoinDetail({ symbol, name, decimals }: Props) {
             height={chartHeight}
             decimals={decimals}
             defaultSpan={isLine ? candles.length : undefined}
-            hideVolume={isLine}
             resetKey={`${symbol}:${timeframe.key}`}
             onVisibleRangeChange={onVisibleRangeChange}
           />
         )}
       </View>
 
-      {/* Holds the space under the chart so the ordering UI can claim it later without
-          reworking the chart's sizing. */}
-      <View style={styles.belowChart} />
+      {/* The order form reclaims the space under the chart. It prefills Price from the same
+          live price the header shows, so the first keystroke is never a stale number. */}
+      <View style={styles.belowChart}>
+        <TradePanel symbol={symbol} lastPrice={quote?.price ?? null} />
+      </View>
 
       <CoinInfoSheet symbol={symbol} visible={infoOpen} onClose={onCloseInfo} decimals={decimals} />
     </SafeAreaView>

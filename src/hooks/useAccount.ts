@@ -5,7 +5,7 @@ import { buildPortfolio, fetchAccounts, type Portfolio } from '@/lib/kucoin/acco
 import { clearCredentials, loadCredentials, saveCredentials } from '@/lib/kucoin/credentials';
 import { fetchAllTickers } from '@/lib/kucoin/market';
 import { clearAccountInfoCache, fetchAccountInfo } from '@/lib/kucoin/profile';
-import { KuCoinApiError } from '@/lib/kucoin/client';
+import { describeError } from '@/lib/kucoin/errors';
 import type { AccountInfo, KuCoinCredentials, PortfolioAsset } from '@/lib/kucoin/types';
 
 const POLL_INTERVAL_MS = 30_000;
@@ -34,18 +34,6 @@ const EMPTY_PORTFOLIO: Portfolio = {
   onHold: 0,
   unpricedCount: 0,
 };
-
-function describe(error: unknown): string {
-  if (error instanceof KuCoinApiError) {
-    if (error.code === '400003') return 'Invalid API key, secret or passphrase.';
-    if (error.code === '400004') return 'Passphrase does not match this API key.';
-    if (error.status === 401 || error.code === '401000') return 'KuCoin rejected these credentials.';
-    if (error.code === 'NETWORK_ERROR') return 'Network unavailable. Check your connection.';
-    if (error.code === 'NO_CREDENTIALS') return 'No credentials found on this device.';
-    return `${error.code}: ${error.message}`;
-  }
-  return error instanceof Error ? error.message : 'Failed to load account';
-}
 
 export function useAccount(): AccountState {
   const mountedRef = useRef(true);
@@ -93,7 +81,7 @@ export function useAccount(): AccountState {
       loadAccountInfo();
     } catch (caught) {
       if (!mountedRef.current) return;
-      setError(describe(caught));
+      setError(describeError(caught, 'Failed to load account'));
       setStatus('error');
     }
   }, [fetchPortfolio, loadAccountInfo]);
@@ -137,7 +125,7 @@ export function useAccount(): AccountState {
           setPortfolio(EMPTY_PORTFOLIO);
           setStatus('disconnected');
         }
-        throw new Error(describe(caught));
+        throw new Error(describeError(caught, 'Failed to load account'));
       }
     },
     [fetchPortfolio, loadAccountInfo]

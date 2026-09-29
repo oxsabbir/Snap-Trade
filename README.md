@@ -48,7 +48,7 @@ src/app/               ROUTES — every file here is a screen
 src/components/        presentational only, no data fetching
   SearchBar  QuoteTabs  PopularSearches  RecentSearches  SpotRow  AssetRow  CoinAvatar  RangeBar
   Icons  TimeframeTabs
-  PriceChart             interactive chart: drag to pan, pinch to zoom, latching crosshair, volume panel
+  PriceChart             interactive chart: drag to pan, pinch to zoom, latching crosshair
   CoinDetail           shared chart view used by the Trade tab
   CoinInfoSheet        slide-up market info modal opened from the chart header
   Stat                 shared label/value tile, used by CoinInfoSheet
@@ -297,8 +297,7 @@ Two consequences of the tab being a lifetime view rather than an interval:
 - `PriceChart` labels years instead of clock times when the span is long, and falls back to a single
   dot when there is only one point, since a line through one point is invisible.
 
-The `Line` view passes `hideVolume`, so the volume panel and its axis are gone; `PriceChart` keeps
-the rest of its viewport behaviour, including the crosshair.
+`PriceChart` keeps the same viewport behaviour on the `Line` view, including the crosshair.
 
 ### Plot inset
 
@@ -308,11 +307,11 @@ clipped** — the one candle that matters most sits sliced against the right-han
 is already `width - AXIS_WIDTH`, so there was no room to spare at the right edge.
 
 The inset cannot just be a constant, or be added after the width is known. Bars are centred on
-their slot, so the last one needs `pad >= (innerWidth - 2*pad) * R / (2n)`, where `R` is the widest
-bar ratio and `n` the visible span. Solving that — rather than substituting a width into a pad that
+their slot, so the last one needs `pad >= (innerWidth - 2*pad) * R / (2n)`, where `R` is the candle
+body ratio and `n` the visible span. Solving that — rather than substituting a width into a pad that
 has already been applied — gives `pad >= R*innerWidth / (2*(n+R))`, which is what `plotInset`
-returns, floored at 6px for breathing room. `R` is `max(CANDLE_BODY_RATIO, VOLUME_BAR_RATIO)`,
-since sizing off the narrower candle body let the wider volume bar overflow.
+returns, floored at 6px for breathing room. `R` is `CANDLE_BODY_RATIO` (0.72); it tracks the body
+width so a wide candle cannot overflow the edge.
 
 It depends on `n` because a symbol with only a handful of candles has far wider bars than one
 zoomed to the `MIN_VISIBLE` floor, so sizing for 20 alone is not enough. For a normal 100-candle
@@ -356,20 +355,17 @@ lands exactly on the lattice and would snap to a zero-height band, at which poin
 returns null and **the chart renders nothing**. `niceBand` widens that case by one gap either
 side. Also caught by simulation rather than by reading the code.
 
-## Volume sub-panel
+## No volume sub-panel
 
-Volume bars sit below the price series in candle mode, tinted by each candle's own direction so they
-never fight the price line for attention. The `Line` view passes `hideVolume`, so the panel and its
-axis are gone and the series takes the whole band. The split is `VOLUME_RATIO` (0.16) and
-`VOLUME_GAP` (8) — the single place to retune if the panel needs more or less room. 0.24 was too
-greedy on a short chart, leaving the price series the minority of the band; the volume panel is a
-secondary readout, since the crosshair popup already reports volume and turnover for the candle
-under the finger. Whatever the panel gives up goes to the price series, which is computed as the
-remainder. The ceiling is quantised with the same `niceBand`, so the scale moves only on round
-numbers.
+The chart is **price only**. A volume sub-panel used to sit below the price series, splitting the
+plot band and reserving a lower slice for bars; it was removed so the price series takes the whole
+band and the space below the chart stays free for the ordering UI. Volume is not lost — the
+crosshair popup still reports `Vol` and turnover for the candle under the finger, and
+`Candle.volume`/`turnover` remain on the model and are still accumulated by the live ticker. Only
+the visual panel, its axis, the volume ceiling quantisation and the band split are gone.
 
-The crosshair's horizontal price line stops at the bottom of the price band rather than cutting
-through the bars; the vertical line spans both bands, as it does elsewhere.
+With one band there is no split to straddle: the crosshair's horizontal price line and the vertical
+time line both span the price band.
 
 ## Live volume accuracy
 
@@ -385,11 +381,11 @@ before touching the candle array, and the API snapshot for the new candle alread
 trades, so adding them would double count. `TickerUpdate` is internal and `useLiveCandles` is its
 only consumer, so redefining `size` is contained.
 
-**Candle mode is now ~400 SVG nodes rebuilt 5×/sec** (3 per candle for the body, plus 1 volume bar
-per candle). That is unmeasured — no device profiling was done, so treat the frame rate as
-unknown rather than assumed fine. Line mode is unaffected, being a single `<Path>` plus bars.
-`react-native-svg` diffs by key so the nodes are reconciled rather than recreated, but the volume
-panel did raise the ceiling and this is the obvious thing to profile next.
+**Candle mode rebuilds two SVG nodes per candle 5×/sec** (a wick `Line` and a body `Rect`). That is
+unmeasured — no device profiling was done, so treat the frame rate as unknown rather than assumed
+fine. Line mode is unaffected, being a single `<Path>`. `react-native-svg` diffs by key so the
+nodes are reconciled rather than recreated. Removing the volume panel cut one bar per candle from
+that count; profiling the remaining candle path is still the obvious next step.
 
 ## Performance notes
 
@@ -428,7 +424,7 @@ on BTC-USDT: ~9.5 messages/sec, ~105ms average interval, connection held over a 
 with zero disconnects.
 
 Ticks update the last candle's `close`/`high`/`low` and accumulated `volume`/`turnover` in place,
-so the chart, the volume bars and the header price all move together. When a tick
+so the chart, the crosshair popup and the header price all move together. When a tick
 lands in a new period bucket, the hook refetches history to pick up the new candle. The socket is
 torn down on background and restarted on foreground.
 
@@ -460,10 +456,12 @@ The chart sits at a **standard height** rather than filling whatever space is le
 other trading apps and leaving the space below it for the ordering UI that is still to come.
 `standardChartHeight` in `src/theme/index.ts` takes 38% of the window height clamped to
 260–340: floored so a short device cannot squeeze the candles into a sliver, capped so a tall one
-cannot stretch them until the volume panel is out of proportion. A `belowChart` view with
-`flex: 1` claims the remainder, so the ordering UI can move into it without revisiting the
-chart's sizing. `PriceChart` measures its own width and takes its height as a prop, so nothing
-here depends on a parent layout callback.
+cannot stretch them past a standard reading height. `useStableChartHeight` wraps it so the height
+survives the soft keyboard: on Android focusing an input resizes the window, and a height-only
+change would otherwise collapse the chart. It recomputes on a **width** change instead, which is
+what rotation and split screen produce. A `belowChart` view with `flex: 1` claims the remainder,
+so the ordering UI can move into it without revisiting the chart's sizing. `PriceChart` measures
+its own width and takes its height as a prop, so nothing here depends on a parent layout callback.
 
 ## Navigation
 

@@ -21,7 +21,7 @@ import Svg, {
 
 import type { Candle, ChartMode } from '@/lib/kucoin/types';
 import { colors, radius, spacing } from '@/theme';
-import { formatAmount, formatCompact, formatPercent, formatPrice } from '@/utils/format';
+import { formatAmount, formatPercent, formatPrice } from '@/utils/format';
 
 const PAD_TOP = 8;
 const PAD_BOTTOM = 18;
@@ -52,36 +52,22 @@ const PLOT_PAD = 6;
  * sits against the price axis, so it gets more clearance than the left edge.
  */
 const RIGHT_EDGE_GAP = 10;
-/** Candle body and volume bar widths as fractions of one slot. */
+/** Candle body width as a fraction of one slot. */
 const CANDLE_BODY_RATIO = 0.72;
-const VOLUME_BAR_RATIO = 0.7;
-/** The pad is sized against the widest of the two, or bars still clip when zoomed in. */
-const WIDEST_BAR_RATIO = Math.max(CANDLE_BODY_RATIO, VOLUME_BAR_RATIO);
 
 /**
- * Inset that keeps the outermost bars clear of both SVG edges for `n` candles.
+ * Inset that keeps the outermost candles clear of both SVG edges for `n` candles.
  *
- * The last candle's centre sits at `innerWidth - pad` and its bar half-width is
+ * The last candle's centre sits at `innerWidth - pad` and its body half-width is
  * `(innerWidth - 2*pad) * R / (2n)`, so clearing the right edge means
  * `pad >= (innerWidth - 2*pad) * R / (2n)`. Solving for `pad` (the width depends on the
  * pad, so it cannot simply be added afterwards) gives `pad >= R*innerWidth / (2*(n+R))`.
  * `PLOT_PAD` is a floor so a normal chart keeps a little breathing room at the edges.
  */
 function plotInset(innerWidth: number, n: number): number {
-  const exact = (WIDEST_BAR_RATIO * innerWidth) / (2 * (n + WIDEST_BAR_RATIO));
+  const exact = (CANDLE_BODY_RATIO * innerWidth) / (2 * (n + CANDLE_BODY_RATIO));
   return Math.max(PLOT_PAD, exact);
 }
-
-/**
- * Share of the plot band given to the volume sub-panel, and the gap above it.
- *
- * 0.24 left the price series with too little of a short chart. The volume panel is a
- * secondary readout — the crosshair popup already reports volume and turnover for the
- * candle under the finger — so it is sized to stay glanceable rather than to compete.
- * Whatever it gives up goes to the price series, which is computed as the remainder.
- */
-const VOLUME_RATIO = 0.16;
-const VOLUME_GAP = 8;
 
 type Props = {
   candles: Candle[];
@@ -94,11 +80,6 @@ type Props = {
    * opposite of a lifetime chart.
    */
   defaultSpan?: number;
-  /**
-   * Drops the volume sub-panel and gives its share of the height to the price series.
-   * Used by the lifetime view, where weekly volume across years is noise.
-   */
-  hideVolume?: boolean;
   /** Change this to force the viewport back to the full range, e.g. on timeframe switch. */
   resetKey?: string;
   onVisibleRangeChange?: (visible: number, total: number) => void;
@@ -185,7 +166,6 @@ function PriceChartComponent({
   height = 250,
   decimals,
   defaultSpan,
-  hideVolume = false,
   resetKey,
   onVisibleRangeChange,
 }: Props) {
@@ -212,10 +192,7 @@ function PriceChartComponent({
 
   const count = candles.length;
   const innerWidth = Math.max(width - AXIS_WIDTH, 0);
-  const innerHeight = Math.max(height - PAD_TOP - PAD_BOTTOM, 0);
-  const volumeHeight = hideVolume ? 0 : innerHeight * VOLUME_RATIO;
-  const priceHeight = Math.max(innerHeight - (hideVolume ? 0 : VOLUME_GAP) - volumeHeight, 0);
-  const volumeTop = PAD_TOP + priceHeight + (hideVolume ? 0 : VOLUME_GAP);
+  const priceHeight = Math.max(height - PAD_TOP - PAD_BOTTOM, 0);
 
   const { span: resolvedSpan, offset: resolvedOffset, start } = useMemo<ResolvedViewport>(() => {
     if (count === 0) return { span: 0, offset: 0, start: 0 };
@@ -263,15 +240,13 @@ function PriceChartComponent({
 
     let min = Number.POSITIVE_INFINITY;
     let max = Number.NEGATIVE_INFINITY;
-    let volumeMax = 0;
     for (const candle of slice) {
       if (candle.low < min) min = candle.low;
       if (candle.high > max) max = candle.high;
-      if (candle.volume > volumeMax) volumeMax = candle.volume;
     }
     if (!Number.isFinite(min) || !Number.isFinite(max)) return null;
 
-    return { candles: slice, min, max, volumeMax };
+    return { candles: slice, min, max };
   }, [candles, count, innerWidth, resolvedSpan, start]);
 
   /**
@@ -300,12 +275,9 @@ function PriceChartComponent({
     const n = window.candles.length;
     const x = (index: number) => (n === 1 ? plotLeft + plotWidth / 2 : plotLeft + (index / (n - 1)) * plotWidth);
     const y = (value: number) => PAD_TOP + (1 - (value - domain.lower) / range) * priceHeight;
-    // Volume ceiling is quantised too, so the scale only moves on round numbers.
-    const volumeCeiling = niceBand(0, window.volumeMax).upper;
-    const vy = (value: number) => volumeTop + volumeHeight * (1 - value / volumeCeiling);
 
-    return { x, y, vy, volumeCeiling, n };
-  }, [domain, innerWidth, plotLeft, plotWidth, priceHeight, volumeHeight, volumeTop, window]);
+    return { x, y, n };
+  }, [domain, innerWidth, plotLeft, plotWidth, priceHeight, window]);
 
   const pinchRef = useRef<PinchBaseline | null>(null);
   const panRef = useRef<PanBaseline | null>(null);
@@ -483,7 +455,7 @@ function PriceChartComponent({
     return <View style={{ height }} onLayout={onLayout} />;
   }
 
-  const { x, y, vy, volumeCeiling, n } = scales;
+  const { x, y, n } = scales;
   const visible = window.candles;
   const first = visible[0]!;
   const last = visible[n - 1]!;
@@ -502,7 +474,6 @@ function PriceChartComponent({
   }
 
   const bodyWidth = Math.max(1, (plotWidth / n) * CANDLE_BODY_RATIO);
-  const barWidth = Math.max(1, (plotWidth / n) * VOLUME_BAR_RATIO);
 
   return (
     <View onLayout={onLayout} style={styles.container}>
@@ -575,26 +546,6 @@ function PriceChartComponent({
             })
           )}
 
-          {/* Volume sub-panel, shown for both line and candle mode unless hidden. */}
-          {hideVolume
-            ? null
-            : visible.map((candle, i) => {
-                const isUp = candle.close >= candle.open;
-                const cx = x(i);
-                const top = vy(candle.volume);
-                return (
-                  <Rect
-                    key={`vol-${candle.time}`}
-                    x={cx - barWidth / 2}
-                    y={top}
-                    width={barWidth}
-                    height={Math.max(volumeTop + volumeHeight - top, 1)}
-                    fill={isUp ? colors.up : colors.down}
-                    fillOpacity={isUp ? 0.3 : 0.4}
-                  />
-                );
-              })}
-
           {Array.from({ length: X_LABELS }, (_, i) => {
             const index = Math.round((i / (X_LABELS - 1)) * (n - 1));
             const candle = visible[index];
@@ -625,12 +576,11 @@ function PriceChartComponent({
                 x1={x(localIndex)}
                 y1={PAD_TOP}
                 x2={x(localIndex)}
-                y2={volumeTop + volumeHeight}
+                y2={PAD_TOP + priceHeight}
                 stroke={colors.textMuted}
                 strokeWidth={1}
                 strokeDasharray="3 3"
               />
-              {/* Price line stops at the price band so it does not cut the volume bars. */}
               <Line
                 x1={0}
                 y1={y(active.close)}
@@ -656,11 +606,6 @@ function PriceChartComponent({
             );
           })}
         </View>
-        {!hideVolume ? (
-          <View style={{ marginTop: VOLUME_GAP, height: volumeHeight, justifyContent: 'flex-start' }}>
-            <Text style={styles.axisLabel}>{formatCompact(volumeCeiling)}</Text>
-          </View>
-        ) : null}
       </View>
 
       {active ? (

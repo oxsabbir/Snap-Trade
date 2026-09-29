@@ -148,3 +148,28 @@ export function EyeOffIcon({ size = 18, color = colors.textMuted }: IconProps) {
     </Svg>
   );
 }
+
+export function PlusIcon({ size = 14, color = colors.textMuted }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Line x1={12} y1={5} x2={12} y2={19} stroke={color} strokeWidth={2.2} strokeLinecap="round" />
+      <Line x1={5} y1={12} x2={19} y2={12} stroke={color} strokeWidth={2.2} strokeLinecap="round" />
+    </Svg>
+  );
+}
+
+export function CaretUpIcon({ size = 12, color = colors.textMuted }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path d="M6 15l6-6 6 6" stroke={color} strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round" />
+    </Svg>
+  );
+}
+
+export function CaretDownIcon({ size = 12, color = colors.textMuted }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path d="M6 9l6 6 6-6" stroke={color} strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round" />
+    </Svg>
+  );
+}

@@ -34,7 +34,7 @@ export const radius = {
  * space, which is what the other trading apps do and what leaves room for the ordering UI
  * below it. It is derived from the window so it scales with the device, then clamped at both
  * ends: a short device would otherwise squeeze the candles into a sliver, and a tall one
- * would stretch them past the point where the volume panel is worth showing.
+ * would stretch them past a standard reading height.
  */
 export const CHART_HEIGHT_RATIO = 0.38;
 export const CHART_MIN_HEIGHT = 260;
@@ -49,4 +49,24 @@ export function standardChartHeight(windowHeight: number): number {
     CHART_MAX_HEIGHT,
     Math.max(CHART_MIN_HEIGHT, Math.round(windowHeight * CHART_HEIGHT_RATIO))
   );
+}
+
+/**
+ * Next chart height, holding steady through a soft-keyboard resize.
+ *
+ * On Android the window is resized when an input is focused, so `useWindowDimensions().height`
+ * shrinks even though the device did not change. The chart is a share of the window, so a
+ * height-only change would collapse it while the order form is open. Real device changes —
+ * rotation, split screen — change the width too. So the height is only recomputed when the
+ * width changes; otherwise the previous value is kept. Extracted so the decision is testable
+ * without a renderer.
+ */
+export function stableChartHeight(
+  current: number,
+  previousWidth: number,
+  width: number,
+  windowHeight: number
+): number {
+  if (width === previousWidth) return current;
+  return standardChartHeight(windowHeight);
 }

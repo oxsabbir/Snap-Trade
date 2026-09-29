@@ -4,6 +4,8 @@ export type KuCoinCredentials = {
   apiPassphrase: string;
 };
 
+export type OrderSide = 'buy' | 'sell';
+
 /** Raw `GET /api/v1/accounts` row. Balances are decimal strings. */
 export type KuCoinAccount = {
   id: string;
