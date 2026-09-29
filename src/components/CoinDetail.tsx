@@ -25,11 +25,31 @@ type Props = {
   decimals?: number;
 };
 
+/** Timeframe a freshly opened pair starts on. */
+const DEFAULT_TIMEFRAME_KEY = '1min';
+
 export function CoinDetail({ symbol, name, decimals }: Props) {
-  const [timeframeKey, setTimeframeKey] = useState('1hour');
+  const [timeframeKey, setTimeframeKey] = useState(DEFAULT_TIMEFRAME_KEY);
   const [infoOpen, setInfoOpen] = useState(false);
   const [visibleCount, setVisibleCount] = useState<number | null>(null);
   const [chartHeight, setChartHeight] = useState(250);
+
+  // This is one component instance shared by every pair the user opens, so opening a new
+  // symbol has to put it back exactly as it looked on first open. Observed on device: a
+  // symbol switch could leave the chart broken, while a timeframe switch — which changes
+  // the same resetKey — always cleared it. Rather than depend on which internal state
+  // happened to survive, this restores the defaults outright and the `key` on PriceChart
+  // guarantees a real remount.
+  //
+  // chartHeight is deliberately left alone: it is measured from the layout, not chosen by
+  // the user, so keeping it avoids one frame at the fallback height.
+  const [activeSymbol, setActiveSymbol] = useState(symbol);
+  if (symbol !== activeSymbol) {
+    setActiveSymbol(symbol);
+    setTimeframeKey(DEFAULT_TIMEFRAME_KEY);
+    setVisibleCount(null);
+    setInfoOpen(false);
+  }
 
   const timeframe = useMemo(() => timeframeByKey(timeframeKey), [timeframeKey]);
   // The Line tab is a separate series, not a mode: it pages `endAt` backwards for the
@@ -172,6 +192,11 @@ export function CoinDetail({ symbol, name, decimals }: Props) {
           </View>
         ) : (
           <PriceChart
+            // Remounts on a symbol change, which discards the pan offset, zoom level,
+            // latched crosshair and cached price band outright. The chart's own resetKey
+            // only handles a timeframe change; relying on it alone for the symbol left
+            // enough state behind to render a broken chart.
+            key={symbol}
             candles={candles}
             mode={mode}
             height={chartHeight}

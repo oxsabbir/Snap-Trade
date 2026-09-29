@@ -149,8 +149,49 @@ the same reason.
 
 The viewport is **index-based, which is what makes it survive live ticks**: `useLiveCandles`
 replaces the last candle object every 200ms, so array identity changes constantly while length
-and indices stay fixed. `CoinDetail` passes `resetKey={symbol:timeframe}` so a timeframe switch
-resets to the default window during render, matching the reset pattern in `useLiveCandles`.
+and indices stay fixed.
+
+### Starting state
+
+`CoinDetail` is a single instance shared by every pair, so opening a new symbol has to put it back
+the way it looked on first open. That is done in two places, and the second is the one that matters.
+
+- `CoinDetail` resets its own state during render when `symbol` changes: timeframe back to
+  `DEFAULT_TIMEFRAME_KEY` (`1min`), visible count and info sheet cleared. `chartHeight` is left
+  alone — it is measured from the layout, not chosen by the user.
+- `PriceChart` gets `key={symbol}`, so a symbol change **remounts** it. The chart's own
+  `resetKey={symbol:timeframe}` handles a timeframe change, but on its own it was not enough:
+  observed on device, a symbol switch could render a broken chart while a timeframe switch — which
+  changes that same key — always cleared it. Rather than track down which internal state survived
+  (the price band, the latched crosshair, the pan offset and the zoom level are all candidates),
+  the remount discards all of them at once. Cost is one fresh layout per symbol, which the
+  `isLoading` loader was already causing anyway.
+
+### Symbol isolation
+
+Remounting the chart resets its viewport, but the candles and the ticker live in
+`useLiveCandles`, above the chart, so that alone did nothing to stop one symbol's data from
+reaching the next. Three things had to be closed:
+
+- **A stopped socket is inert.** Closing a WebSocket is asynchronous and does not discard work
+  the event loop has already dispatched, so a `trade.ticker` frame for the previous symbol could
+  still be parsed after `stop()` and delivered by its pending 200ms throttle timer.
+  `TickerSocket` now re-checks `stopped` in `onopen`, `onmessage`, `onerror` and the flush
+  callback, and drops the un-flushed tick in `stop()`. The `onopen` guard also stops a
+  `stop()` that lands mid-handshake from leaking a live ping interval onto a dead socket.
+- **Only the active socket's ticks are applied.** `useLiveCandles` tracks the current socket in
+  a ref and drops anything from a socket that is no longer the active one. This is keyed on
+  identity rather than on the payload, because `tickRef` is refreshed in an effect and so still
+  holds the previous symbol's closure for one commit — a `update.symbol` check inside
+  `handleTick` would let a stale tick straight through.
+- **Superseded history responses are dropped.** A symbol switch starts a second request while
+  the first is still in flight, and both resolve into the same hook. Guarding on
+  `mountedRef` is not enough: the effect for the new symbol sets it straight back to `true`, so
+  a slow response for the old symbol passed the check and wrote its candles and ticker into the
+  new view. That happened on every symbol switch, not only on rapid tapping. A generation
+  counter (`src/lib/generation.ts`) invalidates outstanding requests instead.
+
+The browse list and the search bar both render the same `SpotRow`, so this covers both paths.
 
 ### Default view
 

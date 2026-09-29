@@ -91,6 +91,11 @@ export class TickerSocket {
   stop(): void {
     this.stopped = true;
     this.clearTimers();
+    // Drop anything already parsed but not yet flushed. Without this a tick that
+    // arrived just before stop() is still delivered by its pending throttle timer,
+    // which would land in whatever series the view has moved on to.
+    this.latest = null;
+    this.pendingSize = 0;
     this.socket?.close();
     this.socket = null;
   }
@@ -121,7 +126,12 @@ export class TickerSocket {
     const socket = new WebSocket(url);
     this.socket = socket;
 
+    // Every handler below re-checks `stopped`. Closing a WebSocket is asynchronous and
+    // does not discard work the JS event loop has already dispatched, so a message or
+    // error from the previous symbol can still run after stop() returned. Callers rely
+    // on a stopped socket being completely inert.
     socket.onopen = () => {
+      if (this.stopped) return;
       this.attempt = 0;
       socket.send(
         JSON.stringify({
@@ -140,6 +150,7 @@ export class TickerSocket {
     };
 
     socket.onmessage = (event: WebSocketMessageEvent) => {
+      if (this.stopped) return;
       let message: { type?: string; subject?: string; data?: RawTicker };
       try {
         message = JSON.parse(String(event.data));
@@ -164,7 +175,7 @@ export class TickerSocket {
       if (!this.flushTimer) {
         this.flushTimer = setTimeout(() => {
           this.flushTimer = null;
-          if (!this.latest) return;
+          if (this.stopped || !this.latest) return;
           const size = this.pendingSize;
           this.pendingSize = 0;
           this.listener.onTick({ ...this.latest, size });
@@ -173,6 +184,7 @@ export class TickerSocket {
     };
 
     socket.onerror = () => {
+      if (this.stopped) return;
       this.listener.onStatus('offline');
     };
 
