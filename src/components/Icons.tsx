@@ -128,3 +128,13 @@ export function StarIcon({ size = 16, color = colors.textFaint, filled = false }
     </Svg>
   );
 }
+
+export function InfoIcon({ size = 16, color = colors.textMuted }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Circle cx={12} cy={12} r={9} stroke={color} strokeWidth={1.8} />
+      <Path d="M12 11V16.5" stroke={color} strokeWidth={1.8} strokeLinecap="round" />
+      <Circle cx={12} cy={7.8} r={1.1} fill={color} />
+    </Svg>
+  );
+}

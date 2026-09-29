@@ -3,7 +3,10 @@ import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-nati
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ChartModeToggle } from '@/components/ChartModeToggle';
+import { CoinInfoSheet } from '@/components/CoinInfoSheet';
+import { InfoIcon } from '@/components/Icons';
 import { PriceChart } from '@/components/PriceChart';
+import { Stat } from '@/components/Stat';
 import { TimeframeTabs } from '@/components/TimeframeTabs';
 import { useLiveCandles } from '@/hooks/useLiveCandles';
 import { priceExtremes, timeframeByKey, type Timeframe } from '@/lib/kucoin/candles';
@@ -20,6 +23,8 @@ type Props = {
 export function CoinDetail({ symbol, name, decimals }: Props) {
   const [timeframeKey, setTimeframeKey] = useState('1hour');
   const [mode, setMode] = useState<ChartMode>('line');
+  const [infoOpen, setInfoOpen] = useState(false);
+  const [visibleCount, setVisibleCount] = useState<number | null>(null);
 
   const timeframe = useMemo(() => timeframeByKey(timeframeKey), [timeframeKey]);
   const { candles, ticker, status, isLoading, error, refresh } = useLiveCandles(symbol, timeframe);
@@ -44,6 +49,10 @@ export function CoinDetail({ symbol, name, decimals }: Props) {
   const [base, quote] = symbol.split('-');
 
   const onSelectTimeframe = useCallback((next: Timeframe) => setTimeframeKey(next.key), []);
+  const onOpenInfo = useCallback(() => setInfoOpen(true), []);
+  const onCloseInfo = useCallback(() => setInfoOpen(false), []);
+  const onVisibleRangeChange = useCallback((visible: number) => setVisibleCount(visible), []);
+  const isZoomed = visibleCount !== null && visibleCount < candles.length;
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
@@ -52,6 +61,15 @@ export function CoinDetail({ symbol, name, decimals }: Props) {
           <Text style={styles.symbol}>{symbol || '—'}</Text>
           {name && name !== base ? <Text style={styles.name}>{name}</Text> : null}
         </View>
+        <Pressable
+          onPress={onOpenInfo}
+          hitSlop={12}
+          style={styles.infoButton}
+          accessibilityRole="button"
+          accessibilityLabel={`About ${symbol}`}
+        >
+          <InfoIcon size={17} color={colors.textMuted} />
+        </Pressable>
       </View>
 
       {stats ? (
@@ -86,8 +104,10 @@ export function CoinDetail({ symbol, name, decimals }: Props) {
       </View>
 
       <View style={styles.toolbar}>
-        <Text style={styles.periodLabel}>
-          {candles.length} × {timeframe.label}
+        <Text style={styles.periodLabel} numberOfLines={1}>
+          {isZoomed
+            ? `${visibleCount} of ${candles.length} × ${timeframe.label} · 2-finger pan, double tap to reset`
+            : `${candles.length} × ${timeframe.label} · pinch to zoom`}
         </Text>
         <ChartModeToggle value={mode} onChange={setMode} />
       </View>
@@ -102,7 +122,13 @@ export function CoinDetail({ symbol, name, decimals }: Props) {
             <Text style={styles.errorHint}>Tap to retry.</Text>
           </Pressable>
         ) : (
-          <PriceChart candles={candles} mode={mode} decimals={decimals} />
+          <PriceChart
+            candles={candles}
+            mode={mode}
+            decimals={decimals}
+            resetKey={`${symbol}:${timeframe.key}`}
+            onVisibleRangeChange={onVisibleRangeChange}
+          />
         )}
       </View>
 
@@ -116,16 +142,9 @@ export function CoinDetail({ symbol, name, decimals }: Props) {
           <Stat label={`Turnover (${quote})`} value={formatCompact(stats.turnover)} />
         </View>
       ) : null}
-    </SafeAreaView>
-  );
-}
 
-function Stat({ label, value }: { label: string; value: string }) {
-  return (
-    <View style={styles.stat}>
-      <Text style={styles.statLabel}>{label}</Text>
-      <Text style={styles.statValue}>{value}</Text>
-    </View>
+      <CoinInfoSheet symbol={symbol} visible={infoOpen} onClose={onCloseInfo} decimals={decimals} />
+    </SafeAreaView>
   );
 }
 
@@ -214,6 +233,7 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '600',
     letterSpacing: 0.4,
+    flexShrink: 1,
   },
   chartWrap: {
     minHeight: 240,
@@ -249,20 +269,9 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.border,
   },
-  stat: {
-    width: '50%',
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.md,
-    gap: 3,
-  },
-  statLabel: {
-    color: colors.textFaint,
-    fontSize: 11,
-  },
-  statValue: {
-    color: colors.text,
-    fontSize: 14,
-    fontWeight: '600',
-    fontVariant: ['tabular-nums'],
+  infoButton: {
+    padding: spacing.xs,
+    marginLeft: spacing.xs,
+    borderRadius: radius.pill,
   },
 });

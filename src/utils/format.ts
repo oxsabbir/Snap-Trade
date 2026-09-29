@@ -35,6 +35,19 @@ export function formatPercent(value: number): string {
   return `${sign}${value.toFixed(2)}%`;
 }
 
+/** Fee rates arrive as fractions, e.g. 0.001. Rendered without a leading plus. */
+export function formatRate(value: number, decimals = 2): string {
+  if (!Number.isFinite(value)) return '-';
+  return `${(value * 100).toFixed(decimals)}%`;
+}
+
+/** Parses a KuCoin decimal string, returning null when absent or non-numeric. */
+export function parseNumber(value: string | null | undefined): number | null {
+  if (value === null || value === undefined || value === '') return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 /** Balances: significant digits, trailing zeros trimmed, thousands grouped. */
 export function formatAmount(value: number): string {
   if (!Number.isFinite(value) || value === 0) return '0';

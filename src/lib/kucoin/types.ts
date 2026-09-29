@@ -36,8 +36,36 @@ export type SymbolInfo = {
   quoteIncrement: string;
   baseMinSize: string;
   quoteMinSize: string;
+  baseMaxSize: string;
+  quoteMaxSize: string;
+  priceLimitRate: string;
+  minFunds: string;
   isMarginEnabled: boolean;
   enableTrading: boolean;
+};
+
+/**
+ * Per-symbol 24h market stats from `GET /api/v1/market/stats`. Public, and unlike
+ * `/market/allTickers` it is scoped to one pair and carries the fee schedule.
+ * KuCoin's public REST API exposes no market cap or circulating supply.
+ */
+export type MarketStats = {
+  time: number;
+  symbol: string;
+  buy: string;
+  sell: string;
+  changeRate: string;
+  changePrice: string;
+  high: string;
+  low: string;
+  vol: string;
+  volValue: string;
+  last: string;
+  averagePrice: string;
+  takerFeeRate: string;
+  makerFeeRate: string;
+  takerCoefficient: string;
+  makerCoefficient: string;
 };
 
 export type Ticker = {
@@ -71,7 +99,14 @@ export type Currency = {
   name: string;
   fullName: string;
   precision: number;
+  confirms: number;
+  contractAddress: string;
+  withdrawalMinSize: string;
+  withdrawalMinFee: string;
   isMarginEnabled: boolean;
+  isWithdrawEnabled: boolean;
+  isDepositEnabled: boolean;
+  isDebitEnabled: boolean;
 };
 
 export type SpotMarket = {

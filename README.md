@@ -1,7 +1,8 @@
 # kucoin
 
 A KuCoin **spot markets** app. Three tabs: a searchable, filterable list of every trading
-pair, a per-pair chart with live streaming prices, and a read-only account view with balances.
+pair, a per-pair chart with live streaming prices, pinch-to-zoom and a coin info panel, and a
+read-only account view with balances.
 
 Dark theme, no orders. Market data is public; balances use the user's own read-only API key.
 
@@ -48,11 +49,14 @@ src/components/        presentational only, no data fetching
   SearchBar  QuoteTabs  PopularSearches  RecentSearches  SpotRow  AssetRow
   CoinAvatar  RangeBar  Icons  TimeframeTabs  ChartModeToggle  PriceChart
   CoinDetail           shared chart view used by the Trade tab
+  CoinInfoSheet        slide-up market info modal opened from the chart header
+  Stat                 shared label/value tile used by CoinDetail and CoinInfoSheet
   ConnectAccountForm   API key / secret / passphrase entry
 src/hooks/
   useSpotMarkets.ts    list data — REST fetch, 10s poll, AppState, pull-to-refresh
   useRecentSearches.ts AsyncStorage-backed recent search history (max 8)
   useLiveCandles.ts    chart data — REST history + WebSocket live price
+  useCoinInfo.ts       coin info sheet data, fetched only while the sheet is open
   useAccount.ts        balances — signed REST, 30s poll, connect/disconnect
 src/state/
   activeCoin.tsx       selected market, AsyncStorage-persisted, split contexts
@@ -60,7 +64,7 @@ src/lib/kucoin/
   client.ts            fetch wrapper, HMAC signing, error type
   credentials.ts       SecureStore read/write/delete for the API key triple
   account.ts           signed account endpoint, USDT valuation, portfolio shape
-  market.ts            endpoint fns, symbol/ticker join, search ranking
+  market.ts            endpoint fns, symbol/ticker join, search ranking, session caches
   candles.ts           candle endpoint, timeframe table, helpers
   socket.ts            TickerSocket — public WS feed, ping, backoff reconnect
   types.ts             wire types + the joined SpotMarket shape
@@ -72,16 +76,21 @@ Import alias `@/*` → `./src/*`. Use it; do not write relative paths that climb
 
 ## Data flow
 
-Three **public** KuCoin endpoints, no credentials required:
+Four **public** KuCoin endpoints, no credentials required:
 
 | Call | Endpoint | Cadence |
 |---|---|---|
 | `fetchSymbols` | `GET /api/v1/symbols` | once per app session |
 | `fetchCurrencies` | `GET /api/v1/currencies` | once per app session |
 | `fetchAllTickers` | `GET /api/v1/market/allTickers` | every 10s on Home, 30s on Account |
+| `fetchMarketStats` | `GET /api/v1/market/stats?symbol=X` | once per symbol, on sheet open |
 
 The Account tab adds one **signed** call, `GET /api/v1/accounts`, described under
 "Account and credentials" below.
+
+`market.ts` memoises the first two plus per-symbol stats at module scope for the whole session,
+so the market list, the account valuation and the coin info sheet share one copy each and
+reopening a coin spends no extra rate-limit weight.
 
 `useSpotMarkets` caches the two slow reference sets in refs and only re-fetches tickers on
 the poll. It clears both refs on pull-to-refresh so symbol changes are picked up. Polling
@@ -95,6 +104,61 @@ the symbol's `priceIncrement` — that is the display precision, not a hardcoded
 `searchMarkets` (market.ts:108) ranks by tiered relevance — exact symbol > base ticker >
 full name > quote > prefix matches — and breaks ties by `quoteVolume`. Typing `btc` surfaces
 BTC-USDT above ETH-BTC instead of leaving both in volume order.
+
+## Chart gestures
+
+`PriceChart` is a hand-rolled viewport over the loaded candle array, not a scale transform.
+Two numbers describe it: `span` (how many candles are visible, `null` = fit all) and `offset`
+(candles hidden to the right, `0` = pinned to the live edge). The visible window is clamped to
+`span ∈ [20, count]` and `offset ∈ [0, count - span]`, and the derived `start` index feeds the
+geometry memo, the Y auto-fit range, the candle body width and the axis labels. The default
+state reproduces the old full-range chart exactly, so the gesture work was purely additive.
+
+| Gesture | Result |
+| --- | --- |
+| One finger drag | Crosshair inspection, unchanged |
+| Two finger pinch | `span` from the finger-distance ratio (floor of 20 candles) |
+| Two finger drag | `offset` from the midpoint, dragging right reveals older candles |
+| Double tap | Reset to the full loaded range |
+
+Both gestures read `event.nativeEvent.touches` from the same `PanResponder` that already handled
+the crosshair, so there is still **no gesture library**. `react-native-gesture-handler` and
+`react-native-reanimated` are present as expo-router dependencies, but Reanimated 4 needs a
+`react-native-worklets` babel plugin and there is no `babel.config.js` in this project — a poor
+trade for 100 data points. The pinch baseline is updated incrementally on every move so a long
+drag cannot drift away from the fingers.
+
+The viewport is **index-based, which is what makes it survive live ticks**: `useLiveCandles`
+replaces the last candle object every 200ms, so array identity changes constantly while length
+and indices stay fixed. `CoinDetail` passes `resetKey={symbol:timeframe}` so a timeframe switch
+resets to full range during render, matching the reset pattern in `useLiveCandles`.
+
+**Performance is a non-issue at this data size.** Candle mode renders 2 SVG nodes per candle and
+line mode renders a single `<Path>`, so the chart is capped at ~200 nodes. Panning holds that
+count, zooming in *reduces* it, and zoom-out is clamped at the full range — the gesture path can
+never do more work than the pre-gesture chart. Two deliberate details: the crosshair readout is
+suppressed while a second finger is down, because RN `Text` relayout is the expensive part
+relative to SVG nodes; and `onVisibleRangeChange` dedupes by value so the toolbar's visible-count
+label never re-renders `CoinDetail` on a gesture frame.
+
+## Coin info
+
+The `ⓘ` button beside the symbol opens `CoinInfoSheet`, a `transparent` slide-up `Modal` with
+tap-outside dismiss. It is built on **`GET /api/v1/market/stats?symbol=X`**, a public endpoint
+scoped to a single pair — unlike `/market/allTickers` it also carries the fee schedule. Combined
+with the `/symbols` and `/currencies` rows the app already loads, the sheet shows 24h high/low/
+volume/quote-volume/change, average price, best bid/ask with spread in bps, maker and taker fee
+rates, the trading limits (price increment, price limit rate, min funds, base and quote size
+ranges), and the base asset's precision, confirmations, contract address, withdrawal minimum and
+fee, plus deposit/withdrawal/margin/debit flags.
+
+`useCoinInfo` fetches **only while the sheet is open and never polls**, so it cannot drift the
+rate-limit budget, and `market.ts` memoises `/symbols`, `/currencies` and per-symbol stats for
+the session. That cache also removes pre-existing waste: the market list and the account
+valuation each used to re-fetch the same two large reference sets independently.
+
+**KuCoin's public REST API has no market cap, circulating supply, or coin rank**, so the sheet
+omits them rather than inventing numbers. A third-party source would be required to add those.
 
 ## Home and Trade use different transports
 
@@ -153,7 +217,9 @@ These have all cost time. Don't regress them.
 - **No official SDK is used, on purpose.** `kucoin-universal-sdk` is Node-targeted (axios,
   `process.env`, transport builders) and does not bundle into Metro. The 148-line
   `client.ts` does the same job with zero dependencies. `react-native-svg` powers the chart
-  for the same reason — no chart library, no Skia, no extra native module.
+  for the same reason — no chart library, no Skia, no extra native module. Chart zoom and pan
+  likewise use the built-in `PanResponder` rather than `react-native-gesture-handler` or
+  Reanimated, so neither needed to be added as a direct dependency.
 
 ## Conventions worth knowing
 
@@ -232,10 +298,14 @@ your IP list and they issue a `client_id`), so it is not a self-serve option.
   deposits/withdrawals.
 - No 24h portfolio change. Total value is a spot snapshot; it would need a cost-basis or
   historical equity series to show a percentage.
+- Zooming out re-spaces the ~100 candles already loaded, it does not page in older history. The
+  server caps `/market/candles` at 100 per call, so deeper history needs an `endAt` loop and its
+  own loading state. Until then the 100-candle window is the whole visible world.
+- Chart gestures are unverified on a real device: the pinch threshold, double-tap window and the
+  sheet's drag-to-dismiss all need on-hardware feel checks.
 - The Account tab polls every 30s. KuCoin has a private WebSocket `/account/balance` topic for
   real-time pushes; it needs a private token from `POST /api/v1/bullet-private`, which is
   signed. Natural next step if the polling feels stale.
-- No pin/zoom on the chart. It renders the full 100-candle window with a crosshair only.
 - The markets list is still on 10s REST polling. If you want the list live too, the topic is
   `/market/ticker:all`, but at 996 symbols that is a firehose — filter server-side or
   reconsider whether the list needs it.

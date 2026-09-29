@@ -1,19 +1,33 @@
-import { StyleSheet } from 'react-native';
-import { Tabs } from 'expo-router';
+import { StyleSheet } from "react-native";
+import { Tabs } from "expo-router";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { AccountIcon, HomeIcon, TradeIcon } from '@/components/Icons';
-import { colors } from '@/theme';
+import { AccountIcon, HomeIcon, TradeIcon } from "@/components/Icons";
+import { colors, spacing } from "@/theme";
+
+/** Icon + label only. The bottom inset is added on top of this. */
+const TAB_BAR_HEIGHT = 65;
 
 export default function TabsLayout() {
+  const insets = useSafeAreaInsets();
+
   return (
     <Tabs
       screenOptions={{
         headerShown: false,
         tabBarActiveTintColor: colors.accent,
         tabBarInactiveTintColor: colors.textFaint,
-        tabBarStyle: styles.bar,
+        // Android is edge-to-edge, so the bar has to reserve the gesture/nav area itself.
+        // Height must be explicit, otherwise the default 49/56 clips the label.
+        tabBarStyle: [
+          styles.bar,
+          {
+            height: TAB_BAR_HEIGHT + insets.bottom,
+            paddingBottom: insets.bottom,
+            paddingTop: spacing.sm,
+          },
+        ],
         tabBarLabelStyle: styles.label,
-        tabBarItemStyle: styles.item,
         tabBarHideOnKeyboard: true,
         sceneStyle: { backgroundColor: colors.bg },
       }}
@@ -21,21 +35,21 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="index"
         options={{
-          title: 'Home',
+          title: "Home",
           tabBarIcon: ({ color }) => <HomeIcon color={color} />,
         }}
       />
       <Tabs.Screen
         name="trade"
         options={{
-          title: 'Trade',
+          title: "Trade",
           tabBarIcon: ({ color }) => <TradeIcon color={color} />,
         }}
       />
       <Tabs.Screen
         name="account"
         options={{
-          title: 'Account',
+          title: "Account",
           tabBarIcon: ({ color }) => <AccountIcon color={color} />,
         }}
       />
@@ -49,11 +63,8 @@ const styles = StyleSheet.create({
     borderTopColor: colors.border,
     borderTopWidth: StyleSheet.hairlineWidth,
   },
-  item: {
-    paddingVertical: 6,
-  },
   label: {
     fontSize: 11,
-    fontWeight: '600',
+    fontWeight: "600",
   },
 });

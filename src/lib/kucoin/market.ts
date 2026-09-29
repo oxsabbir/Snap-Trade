@@ -3,6 +3,7 @@ import { decimalsFromIncrement } from '@/utils/format';
 import type {
   AllTickersResponse,
   Currency,
+  MarketStats,
   SpotMarket,
   SymbolInfo,
   Ticker,
@@ -13,16 +14,39 @@ function toNumber(value: string | undefined): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-export async function fetchSymbols(): Promise<SymbolInfo[]> {
-  return request<SymbolInfo[]>('/symbols');
+/**
+ * `/symbols` and `/currencies` are large, change rarely, and are shared by the
+ * market list, the account valuation and the coin info sheet. They are fetched
+ * once per app session and replayed from memory afterwards so reopening a coin
+ * never re-spends rate-limit weight.
+ */
+let symbolsCache: Promise<SymbolInfo[]> | null = null;
+let currenciesCache: Promise<Currency[]> | null = null;
+
+export function fetchSymbols(): Promise<SymbolInfo[]> {
+  if (!symbolsCache) symbolsCache = request<SymbolInfo[]>('/symbols');
+  return symbolsCache;
 }
 
-export async function fetchCurrencies(): Promise<Currency[]> {
-  return request<Currency[]>('/currencies');
+export function fetchCurrencies(): Promise<Currency[]> {
+  if (!currenciesCache) currenciesCache = request<Currency[]>('/currencies');
+  return currenciesCache;
 }
 
 export async function fetchAllTickers(): Promise<AllTickersResponse> {
   return request<AllTickersResponse>('/market/allTickers');
+}
+
+/** 24h stats for a single pair, cached per symbol for the session. */
+const marketStatsCache = new Map<string, Promise<MarketStats>>();
+
+export function fetchMarketStats(symbol: string): Promise<MarketStats> {
+  const cached = marketStatsCache.get(symbol);
+  if (cached) return cached;
+  const pending = request<MarketStats>('/market/stats', { query: { symbol } });
+  marketStatsCache.set(symbol, pending);
+  pending.catch(() => marketStatsCache.delete(symbol));
+  return pending;
 }
 
 /** Maps a base ticker to its human name so search can match "bitcoin" as well as "BTC". */
