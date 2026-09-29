@@ -157,8 +157,8 @@ and indices stay fixed.
 the way it looked on first open. That is done in two places, and the second is the one that matters.
 
 - `CoinDetail` resets its own state during render when `symbol` changes: timeframe back to
-  `DEFAULT_TIMEFRAME_KEY` (`1min`), visible count and info sheet cleared. `chartHeight` is left
-  alone — it is measured from the layout, not chosen by the user.
+  `DEFAULT_TIMEFRAME_KEY` (`1min`), visible count and info sheet cleared. `chartHeight` needs no
+  reset — it is derived from the window, not chosen by the user.
 - `PriceChart` gets `key={symbol}`, so a symbol change **remounts** it. The chart's own
   `resetKey={symbol:timeframe}` handles a timeframe change, but on its own it was not enough:
   observed on device, a symbol switch could render a broken chart while a timeframe switch — which
@@ -358,11 +358,15 @@ side. Also caught by simulation rather than by reading the code.
 
 ## Volume sub-panel
 
-Volume bars sit below the price series on both line and candle mode, tinted by each candle's own
-direction so they never fight the price line for attention. The plot band is split by
-`VOLUME_RATIO` (0.24) and `VOLUME_GAP` (8), which is the single place to retune if the stats
-grid below needs more room. The ceiling is quantised with the same `niceBand`, so the scale moves
-only on round numbers.
+Volume bars sit below the price series in candle mode, tinted by each candle's own direction so they
+never fight the price line for attention. The `Line` view passes `hideVolume`, so the panel and its
+axis are gone and the series takes the whole band. The split is `VOLUME_RATIO` (0.16) and
+`VOLUME_GAP` (8) — the single place to retune if the panel needs more or less room. 0.24 was too
+greedy on a short chart, leaving the price series the minority of the band; the volume panel is a
+secondary readout, since the crosshair popup already reports volume and turnover for the candle
+under the finger. Whatever the panel gives up goes to the price series, which is computed as the
+remainder. The ceiling is quantised with the same `niceBand`, so the scale moves only on round
+numbers.
 
 The crosshair's horizontal price line stops at the bottom of the price band rather than cutting
 through the bars; the vertical line spans both bands, as it does elsewhere.
@@ -450,10 +454,16 @@ The Trade screen shows the chart and its controls only — the Open/High/Low/Clo
 Volume/Turnover grid that used to sit underneath is gone, since it duplicated what the crosshair
 popup already says about the candle you are pointing at. `CoinDetail` therefore only needs the
 last candle, not a pass over all 100, which also removed an O(n) volume/turnover sum that had
-been re-running on every one of the 5 ticks per second. `PriceChart` takes its height from
-`chartWrap` via `onLayout` so it fills the freed space rather than leaving a gap; `chartWrap` is
-`flex: 1`, so its height comes from the leftover space and the measured child cannot feed back
-into it.
+been re-running on every one of the 5 ticks per second.
+
+The chart sits at a **standard height** rather than filling whatever space is left, matching the
+other trading apps and leaving the space below it for the ordering UI that is still to come.
+`standardChartHeight` in `src/theme/index.ts` takes 38% of the window height clamped to
+260–340: floored so a short device cannot squeeze the candles into a sliver, capped so a tall one
+cannot stretch them until the volume panel is out of proportion. A `belowChart` view with
+`flex: 1` claims the remainder, so the ordering UI can move into it without revisiting the
+chart's sizing. `PriceChart` measures its own width and takes its height as a prop, so nothing
+here depends on a parent layout callback.
 
 ## Navigation
 

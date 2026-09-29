@@ -28,3 +28,25 @@ export const radius = {
   lg: 16,
   pill: 999,
 } as const;
+
+/**
+ * The chart holds a standard share of the screen instead of consuming all the leftover
+ * space, which is what the other trading apps do and what leaves room for the ordering UI
+ * below it. It is derived from the window so it scales with the device, then clamped at both
+ * ends: a short device would otherwise squeeze the candles into a sliver, and a tall one
+ * would stretch them past the point where the volume panel is worth showing.
+ */
+export const CHART_HEIGHT_RATIO = 0.38;
+export const CHART_MIN_HEIGHT = 260;
+export const CHART_MAX_HEIGHT = 340;
+
+export function standardChartHeight(windowHeight: number): number {
+  // Guard the degenerate cases rather than letting them through: Math.round(NaN) is NaN, and
+  // both Math.min and Math.max propagate it, so an unusable number here would collapse the
+  // chart instead of falling back to the smallest sensible height.
+  if (!Number.isFinite(windowHeight) || windowHeight <= 0) return CHART_MIN_HEIGHT;
+  return Math.min(
+    CHART_MAX_HEIGHT,
+    Math.max(CHART_MIN_HEIGHT, Math.round(windowHeight * CHART_HEIGHT_RATIO))
+  );
+}

@@ -72,8 +72,15 @@ function plotInset(innerWidth: number, n: number): number {
   return Math.max(PLOT_PAD, exact);
 }
 
-/** Share of the plot band given to the volume sub-panel, and the gap above it. */
-const VOLUME_RATIO = 0.24;
+/**
+ * Share of the plot band given to the volume sub-panel, and the gap above it.
+ *
+ * 0.24 left the price series with too little of a short chart. The volume panel is a
+ * secondary readout — the crosshair popup already reports volume and turnover for the
+ * candle under the finger — so it is sized to stay glanceable rather than to compete.
+ * Whatever it gives up goes to the price series, which is computed as the remainder.
+ */
+const VOLUME_RATIO = 0.16;
 const VOLUME_GAP = 8;
 
 type Props = {

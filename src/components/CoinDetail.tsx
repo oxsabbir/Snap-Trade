@@ -5,7 +5,7 @@ import {
   StyleSheet,
   Text,
   View,
-  type LayoutChangeEvent,
+  useWindowDimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -17,7 +17,7 @@ import { useLifetimeSeries } from '@/hooks/useLifetimeSeries';
 import { useLiveCandles } from '@/hooks/useLiveCandles';
 import { timeframeByKey, LINE_TIMEFRAME, type TimeframeOrLine } from '@/lib/kucoin/candles';
 import { deriveQuote } from '@/lib/quote';
-import { colors, radius, spacing } from '@/theme';
+import { colors, radius, spacing, standardChartHeight } from '@/theme';
 import { formatPercent, formatPrice } from '@/utils/format';
 
 type Props = {
@@ -33,7 +33,12 @@ export function CoinDetail({ symbol, name, decimals }: Props) {
   const [timeframeKey, setTimeframeKey] = useState(DEFAULT_TIMEFRAME_KEY);
   const [infoOpen, setInfoOpen] = useState(false);
   const [visibleCount, setVisibleCount] = useState<number | null>(null);
-  const [chartHeight, setChartHeight] = useState(250);
+
+  // A fixed standard height, not the leftover space. Measuring the chart from the leftover
+  // gave it whatever the device had going, which on a tall phone left no room at all for the
+  // ordering UI below.
+  const { height: windowHeight } = useWindowDimensions();
+  const chartHeight = useMemo(() => standardChartHeight(windowHeight), [windowHeight]);
 
   // This is one component instance shared by every pair the user opens, so opening a new
   // symbol has to put it back exactly as it looked on first open. Observed on device: a
@@ -42,8 +47,7 @@ export function CoinDetail({ symbol, name, decimals }: Props) {
   // happened to survive, this restores the defaults outright and the `key` on PriceChart
   // guarantees a real remount.
   //
-  // chartHeight is deliberately left alone: it is measured from the layout, not chosen by
-  // the user, so keeping it avoids one frame at the fallback height.
+  // chartHeight needs no reset: it is derived from the window, not chosen by the user.
   const [activeSymbol, setActiveSymbol] = useState(symbol);
   if (symbol !== activeSymbol) {
     setActiveSymbol(symbol);
@@ -97,11 +101,6 @@ export function CoinDetail({ symbol, name, decimals }: Props) {
   const onOpenInfo = useCallback(() => setInfoOpen(true), []);
   const onCloseInfo = useCallback(() => setInfoOpen(false), []);
   const onVisibleRangeChange = useCallback((visible: number) => setVisibleCount(visible), []);
-  // The chart takes whatever height is left over rather than a fixed number, so it
-  // fills the screen instead of leaving a gap where the stats grid used to be.
-  const onChartLayout = useCallback((event: LayoutChangeEvent) => {
-    setChartHeight(Math.max(Math.round(event.nativeEvent.layout.height), 200));
-  }, []);
   const isZoomed = visibleCount !== null && visibleCount < candles.length;
 
   return (
@@ -168,7 +167,7 @@ export function CoinDetail({ symbol, name, decimals }: Props) {
         </Text>
       </View>
 
-      <View style={styles.chartWrap} onLayout={onChartLayout}>
+      <View style={styles.chartWrap}>
         {isLoading && candles.length === 0 ? (
           <View style={styles.loader}>
             <ActivityIndicator color={colors.accent} />
@@ -207,6 +206,10 @@ export function CoinDetail({ symbol, name, decimals }: Props) {
           />
         )}
       </View>
+
+      {/* Holds the space under the chart so the ordering UI can claim it later without
+          reworking the chart's sizing. */}
+      <View style={styles.belowChart} />
 
       <CoinInfoSheet symbol={symbol} visible={infoOpen} onClose={onCloseInfo} decimals={decimals} />
     </SafeAreaView>
@@ -301,9 +304,10 @@ const styles = StyleSheet.create({
     flexShrink: 1,
   },
   chartWrap: {
-    flex: 1,
-    minHeight: 220,
     justifyContent: 'center',
+  },
+  belowChart: {
+    flex: 1,
   },
   loader: {
     alignSelf: 'center',
