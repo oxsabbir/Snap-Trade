@@ -6,6 +6,11 @@ const THROTTLE_MS = 200;
 export type TickerUpdate = {
   symbol: string;
   price: number;
+  /**
+   * Traded base-currency volume accumulated across the whole throttle window, not
+   * just the last trade. The throttle keeps only the newest price, so summing here
+   * is the only way the live candle's volume stays honest.
+   */
   size: number;
   time: number;
   bestAsk: number;
@@ -69,6 +74,7 @@ export class TickerSocket {
   private attempt = 0;
   private stopped = true;
   private latest: TickerUpdate | null = null;
+  private pendingSize = 0;
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
@@ -154,10 +160,14 @@ export class TickerSocket {
       if (!Number.isFinite(update.price)) return;
 
       this.latest = update;
+      if (Number.isFinite(update.size) && update.size > 0) this.pendingSize += update.size;
       if (!this.flushTimer) {
         this.flushTimer = setTimeout(() => {
           this.flushTimer = null;
-          if (this.latest) this.listener.onTick(this.latest);
+          if (!this.latest) return;
+          const size = this.pendingSize;
+          this.pendingSize = 0;
+          this.listener.onTick({ ...this.latest, size });
         }, THROTTLE_MS);
       }
     };

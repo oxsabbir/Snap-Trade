@@ -39,13 +39,3 @@ export async function fetchCandles(symbol: string, type: string): Promise<Candle
   });
   return rows.map(toCandle).reverse();
 }
-
-export function priceExtremes(candles: Candle[]): { low: number; high: number } {
-  let low = Number.POSITIVE_INFINITY;
-  let high = Number.NEGATIVE_INFINITY;
-  for (const candle of candles) {
-    if (candle.low < low) low = candle.low;
-    if (candle.high > high) high = candle.high;
-  }
-  return { low, high };
-}

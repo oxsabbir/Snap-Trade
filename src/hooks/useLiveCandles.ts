@@ -63,6 +63,9 @@ export function useLiveCandles(symbol: string, timeframe: Timeframe): LiveCandle
 
       const bucket = Math.floor(update.time / periodMs);
       if (bucketRef.current !== 0 && bucket > bucketRef.current) {
+        // A new bucket: refetch instead of extending the old candle. The accumulated
+        // `size` is deliberately dropped here — the API snapshot for the new candle
+        // already includes those trades, so adding them would double count.
         fetchHistory();
         return;
       }
@@ -77,6 +80,10 @@ export function useLiveCandles(symbol: string, timeframe: Timeframe): LiveCandle
             close: update.price,
             high: Math.max(last.high, update.price),
             low: Math.min(last.low, update.price),
+            // `size` is base-currency volume and KuCoin's candle volume is base too,
+            // so turnover follows as size x price in quote currency.
+            volume: last.volume + update.size,
+            turnover: last.turnover + update.size * update.price,
           },
         ];
       });

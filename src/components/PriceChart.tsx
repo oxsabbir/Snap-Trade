@@ -11,8 +11,8 @@ import {
 import Svg, { Defs, Line, LinearGradient, Path, Rect, Stop, Text as SvgText } from 'react-native-svg';
 
 import type { Candle, ChartMode } from '@/lib/kucoin/types';
-import { colors, spacing } from '@/theme';
-import { formatPrice } from '@/utils/format';
+import { colors, radius, spacing } from '@/theme';
+import { formatAmount, formatCompact, formatPercent, formatPrice } from '@/utils/format';
 
 const PAD_TOP = 8;
 const PAD_BOTTOM = 18;
@@ -24,6 +24,42 @@ const X_LABELS = 4;
 const MIN_VISIBLE = 20;
 const DOUBLE_TAP_MS = 300;
 const DOUBLE_TAP_SLOP = 24;
+/** Horizontal travel past this turns a touch into a pan instead of a crosshair tap. */
+const PAN_SLOP = 6;
+
+/**
+ * Inset from the SVG edge so the first and last candles are not clipped in half.
+ * See `plotInset` for how the value is derived.
+ */
+const PLOT_PAD = 6;
+/**
+ * Extra inset on the right only. The newest candle is the one users are reading and it
+ * sits against the price axis, so it gets more clearance than the left edge.
+ */
+const RIGHT_EDGE_GAP = 10;
+/** Candle body and volume bar widths as fractions of one slot. */
+const CANDLE_BODY_RATIO = 0.62;
+const VOLUME_BAR_RATIO = 0.7;
+/** The pad is sized against the widest of the two, or bars still clip when zoomed in. */
+const WIDEST_BAR_RATIO = Math.max(CANDLE_BODY_RATIO, VOLUME_BAR_RATIO);
+
+/**
+ * Inset that keeps the outermost bars clear of both SVG edges for `n` candles.
+ *
+ * The last candle's centre sits at `innerWidth - pad` and its bar half-width is
+ * `(innerWidth - 2*pad) * R / (2n)`, so clearing the right edge means
+ * `pad >= (innerWidth - 2*pad) * R / (2n)`. Solving for `pad` (the width depends on the
+ * pad, so it cannot simply be added afterwards) gives `pad >= R*innerWidth / (2*(n+R))`.
+ * `PLOT_PAD` is a floor so a normal chart keeps a little breathing room at the edges.
+ */
+function plotInset(innerWidth: number, n: number): number {
+  const exact = (WIDEST_BAR_RATIO * innerWidth) / (2 * (n + WIDEST_BAR_RATIO));
+  return Math.max(PLOT_PAD, exact);
+}
+
+/** Share of the plot band given to the volume sub-panel, and the gap above it. */
+const VOLUME_RATIO = 0.24;
+const VOLUME_GAP = 8;
 
 type Props = {
   candles: Candle[];
@@ -49,8 +85,48 @@ type PinchBaseline = {
   offset: number;
 };
 
+type PanBaseline = {
+  x0: number;
+  span: number;
+  offset: number;
+  moved: boolean;
+};
+
+/** A quantised price band. `key` changes only when a refit is allowed to shrink it. */
+type Domain = { key: string; lower: number; upper: number };
+
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
+}
+
+/**
+ * Rounds a raw axis step up to the nearest 1/2/5 x 10^n, so grid labels land on round
+ * numbers instead of values like $60,123.45678.
+ */
+function niceStep(raw: number): number {
+  if (!(raw > 0)) return 1;
+  const magnitude = Math.pow(10, Math.floor(Math.log10(raw)));
+  const mantissa = raw / magnitude;
+  const factor = mantissa <= 1 ? 1 : mantissa <= 2 ? 2 : mantissa <= 5 ? 5 : 10;
+  return factor * magnitude;
+}
+
+/**
+ * A band snapped outward to a round step. The step is always derived from the data
+ * range, never from the width of an existing band: a width divided by GRID_LINES is
+ * not a 1/2/5 number, so deriving it that way shifts the rounding lattice on every
+ * pass and the axis never settles.
+ *
+ * A flat series would otherwise snap to a zero-height band and make the chart
+ * disappear, so that case is widened by one step either side.
+ */
+function niceBand(min: number, max: number): { lower: number; upper: number } {
+  const span = max > min ? max - min : Math.abs(max || 1) * 0.01;
+  const gap = niceStep(span / GRID_LINES);
+  const lower = Math.floor(min / gap) * gap;
+  const upper = Math.ceil(max / gap) * gap;
+  if (upper - lower <= 0) return { lower: lower - gap, upper: upper + gap };
+  return { lower, upper };
 }
 
 function formatAxisTime(timestamp: number, spanMs: number): string {
@@ -67,7 +143,7 @@ function touchDistance(a: NativeTouchEvent, b: NativeTouchEvent): number {
 function PriceChartComponent({
   candles,
   mode,
-  height = 240,
+  height = 250,
   decimals,
   resetKey,
   onVisibleRangeChange,
@@ -76,6 +152,7 @@ function PriceChartComponent({
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
   const [span, setSpan] = useState<number | null>(null);
   const [offset, setOffset] = useState(0);
+  const [domain, setDomain] = useState<Domain | null>(null);
 
   const onLayout = useCallback((event: LayoutChangeEvent) => {
     setWidth(event.nativeEvent.layout.width);
@@ -89,11 +166,15 @@ function PriceChartComponent({
     setSpan(null);
     setOffset(0);
     setActiveIndex(null);
+    setDomain(null);
   }
 
   const count = candles.length;
   const innerWidth = Math.max(width - AXIS_WIDTH, 0);
   const innerHeight = Math.max(height - PAD_TOP - PAD_BOTTOM, 0);
+  const volumeHeight = innerHeight * VOLUME_RATIO;
+  const priceHeight = Math.max(innerHeight - VOLUME_GAP - volumeHeight, 0);
+  const volumeTop = PAD_TOP + priceHeight + VOLUME_GAP;
 
   const { span: resolvedSpan, offset: resolvedOffset, start } = useMemo<ResolvedViewport>(() => {
     if (count === 0) return { span: 0, offset: 0, start: 0 };
@@ -102,6 +183,23 @@ function PriceChartComponent({
     const resolvedOffsetIndex = clamp(offset, 0, maxOffset);
     return { span: resolved, offset: resolvedOffsetIndex, start: count - resolvedOffsetIndex - resolved };
   }, [count, offset, span]);
+
+  /**
+   * The plot area is inset from the SVG edges. Without this the first and last candles
+   * are centred exactly on x=0 and x=innerWidth, so in candle mode half of each body is
+   * clipped — the newest candle, the one that matters most, ends up sliced against the
+   * price axis. Sized from the real span, since a symbol with only a handful of candles
+   * has much wider bars than one zoomed to the 20-candle floor.
+   *
+   * The inset is deliberately asymmetric. `plotInset` returns the minimum that keeps bars
+   * clear of the left edge; the right gets that plus `RIGHT_EDGE_GAP`, because that is the
+   * edge the newest candle sits against and the one users read. The right side is therefore
+   * always at least as safe as before, and the left side is unchanged.
+   */
+  const plotPadLeft = plotInset(innerWidth, Math.max(resolvedSpan, 1));
+  const plotPadRight = plotPadLeft + RIGHT_EDGE_GAP;
+  const plotWidth = Math.max(innerWidth - plotPadLeft - plotPadRight, 1);
+  const plotLeft = plotPadLeft;
 
   // Reported upward so the toolbar can show the visible count. Deduped by value so
   // a drag never re-renders the parent on every frame.
@@ -114,36 +212,59 @@ function PriceChartComponent({
     onVisibleRangeChange?.(resolvedSpan, count);
   }, [count, onVisibleRangeChange, resolvedSpan]);
 
-  const geometry = useMemo(() => {
+  const window = useMemo(() => {
     if (count === 0 || innerWidth <= 0) return null;
-
-    const window = candles.slice(start, start + resolvedSpan);
-    const n = window.length;
-    if (n === 0) return null;
+    const slice = candles.slice(start, start + resolvedSpan);
+    if (slice.length === 0) return null;
 
     let min = Number.POSITIVE_INFINITY;
     let max = Number.NEGATIVE_INFINITY;
-    for (const candle of window) {
+    let volumeMax = 0;
+    for (const candle of slice) {
       if (candle.low < min) min = candle.low;
       if (candle.high > max) max = candle.high;
+      if (candle.volume > volumeMax) volumeMax = candle.volume;
     }
     if (!Number.isFinite(min) || !Number.isFinite(max)) return null;
-    if (max === min) {
-      max = min + Math.abs(min || 1) * 0.001;
+
+    return { candles: slice, min, max, volumeMax };
+  }, [candles, count, innerWidth, resolvedSpan, start]);
+
+  /**
+   * Sticky price band. Ticks may only push it wider, so the chart does not rescale
+   * itself under the user during a pump. A refit — new first candle from a bucket
+   * rollover, or a new visible span from pinch/drag — is allowed to shrink it back.
+   */
+  if (window) {
+    const key = `${window.candles[0]!.time}:${resolvedSpan}`;
+    const current = domain && domain.key === key ? domain : null;
+
+    if (!current) {
+      const band = niceBand(window.min, window.max);
+      setDomain({ key, ...band });
+    } else if (window.min < current.lower || window.max > current.upper) {
+      const band = niceBand(Math.min(window.min, current.lower), Math.max(window.max, current.upper));
+      setDomain({ key, ...band });
     }
+  }
 
-    const headroom = (max - min) * 0.06;
-    const lower = min - headroom;
-    const upper = max + headroom;
-    const range = upper - lower;
+  const scales = useMemo(() => {
+    if (!window || !domain || innerWidth <= 0) return null;
+    const range = domain.upper - domain.lower;
+    if (!(range > 0)) return null;
 
-    const x = (index: number) => (n === 1 ? innerWidth / 2 : (index / (n - 1)) * innerWidth);
-    const y = (value: number) => PAD_TOP + (1 - (value - lower) / range) * innerHeight;
+    const n = window.candles.length;
+    const x = (index: number) => (n === 1 ? plotLeft + plotWidth / 2 : plotLeft + (index / (n - 1)) * plotWidth);
+    const y = (value: number) => PAD_TOP + (1 - (value - domain.lower) / range) * priceHeight;
+    // Volume ceiling is quantised too, so the scale only moves on round numbers.
+    const volumeCeiling = niceBand(0, window.volumeMax).upper;
+    const vy = (value: number) => volumeTop + volumeHeight * (1 - value / volumeCeiling);
 
-    return { min, max, x, y, window, n };
-  }, [candles, count, innerWidth, innerHeight, resolvedSpan, start]);
+    return { x, y, vy, volumeCeiling, n };
+  }, [domain, innerWidth, plotLeft, plotWidth, priceHeight, volumeHeight, volumeTop, window]);
 
   const pinchRef = useRef<PinchBaseline | null>(null);
+  const panRef = useRef<PanBaseline | null>(null);
   const multiRef = useRef(false);
   const suppressCrosshairRef = useRef(false);
   const lastTapRef = useRef<{ time: number; x: number; y: number } | null>(null);
@@ -152,15 +273,25 @@ function PriceChartComponent({
     setSpan(null);
     setOffset(0);
     setActiveIndex(null);
+    setDomain(null);
   }, []);
 
-  const updateActive = useCallback(
+  const indexAt = useCallback(
     (locationX: number) => {
-      if (count === 0 || innerWidth <= 0 || suppressCrosshairRef.current) return;
-      const ratio = clamp(locationX / innerWidth, 0, 1);
-      setActiveIndex(start + Math.round(ratio * (resolvedSpan - 1)));
+      // Measured against the plot area, not the raw width, so a touch in the inset
+      // padding still resolves to the first or last candle instead of overshooting.
+      const ratio = clamp((locationX - plotLeft) / plotWidth, 0, 1);
+      return start + Math.round(ratio * (resolvedSpan - 1));
     },
-    [count, innerWidth, resolvedSpan, start]
+    [plotLeft, plotWidth, resolvedSpan, start]
+  );
+
+  const trackCrosshair = useCallback(
+    (locationX: number) => {
+      if (count === 0 || suppressCrosshairRef.current) return;
+      setActiveIndex(indexAt(locationX));
+    },
+    [count, indexAt]
   );
 
   const handlePinch = useCallback(
@@ -189,7 +320,7 @@ function PriceChartComponent({
         count
       );
       const dx = mid - base.mid;
-      const nextOffset = base.offset + (dx / Math.max(innerWidth, 1)) * nextSpan;
+      const nextOffset = base.offset + (dx / plotWidth) * nextSpan;
 
       setSpan(nextSpan);
       setOffset(nextOffset);
@@ -198,7 +329,7 @@ function PriceChartComponent({
       // cannot accumulate drift away from the fingers.
       pinchRef.current = { distance, mid, span: nextSpan, offset: nextOffset };
     },
-    [count, innerWidth, resolvedOffset, resolvedSpan]
+    [count, plotWidth, resolvedOffset, resolvedSpan]
   );
 
   const onGrant = useCallback(
@@ -210,6 +341,7 @@ function PriceChartComponent({
         // follow-up tap could pair with and be misread as a double tap.
         lastTapRef.current = null;
         pinchRef.current = null;
+        panRef.current = null;
         setActiveIndex(null);
         return;
       }
@@ -228,9 +360,16 @@ function PriceChartComponent({
         return;
       }
       lastTapRef.current = { time: now, x: locationX, y: locationY };
-      updateActive(locationX);
+
+      panRef.current = { x0: locationX, span: resolvedSpan, offset: resolvedOffset, moved: false };
+
+      if (count === 0 || suppressCrosshairRef.current) return;
+      // Tapping the candle the crosshair is already on dismisses it, which is the
+      // only way back to a clean chart once a tap has latched it.
+      const index = indexAt(locationX);
+      setActiveIndex((previous) => (previous === index ? null : index));
     },
-    [resetViewport, updateActive]
+    [count, indexAt, resetViewport, resolvedOffset, resolvedSpan]
   );
 
   const onMove = useCallback(
@@ -247,23 +386,40 @@ function PriceChartComponent({
       }
       // Lifting one finger mid-pinch should not suddenly start inspecting.
       if (multiRef.current) return;
-      updateActive(locationX);
+
+      const pan = panRef.current;
+      if (pan) {
+        const dx = locationX - pan.x0;
+        if (!pan.moved && Math.abs(dx) > PAN_SLOP) {
+          pan.moved = true;
+          // A drag is navigation, not inspection.
+          setActiveIndex(null);
+        }
+        if (pan.moved) {
+          // Dragging right pulls older candles into view, so offset grows.
+          setOffset(pan.offset + (dx / plotWidth) * pan.span);
+          return;
+        }
+      }
+
+      trackCrosshair(locationX);
     },
-    [handlePinch, updateActive]
+    [handlePinch, plotWidth, trackCrosshair]
   );
 
   const onEnd = useCallback(() => {
     pinchRef.current = null;
+    panRef.current = null;
     multiRef.current = false;
     suppressCrosshairRef.current = false;
-    setActiveIndex(null);
+    // The crosshair deliberately survives release: a tap latches it.
   }, []);
 
   // `PanResponder.create` is called during render, but every handler it receives is
   // only ever invoked later by the gesture system, at event time. Those handlers
-  // read refs that hold gesture-local state (pinch baseline, tap timing, whether a
-  // second finger is down) which has no render-time equivalent, so the generic
-  // "no refs in render" rule does not apply here.
+  // read refs that hold gesture-local state (pinch baseline, pan baseline, tap
+  // timing, whether a second finger is down) which has no render-time equivalent,
+  // so the generic "no refs in render" rule does not apply here.
   /* eslint-disable react-hooks/refs */
   const panResponder = useMemo(
     () =>
@@ -279,28 +435,30 @@ function PriceChartComponent({
   );
   /* eslint-enable react-hooks/refs */
 
-  if (!geometry || width === 0) {
+  if (!window || !scales || width === 0) {
     return <View style={{ height }} onLayout={onLayout} />;
   }
 
-  const { x, y, window, n } = geometry;
-  const first = window[0]!;
-  const last = window[n - 1]!;
+  const { x, y, vy, volumeCeiling, n } = scales;
+  const visible = window.candles;
+  const first = visible[0]!;
+  const last = visible[n - 1]!;
   const changePct = first.open === 0 ? 0 : ((last.close - first.open) / first.open) * 100;
   const tint = changePct >= 0 ? colors.up : colors.down;
   const localIndex = activeIndex === null ? -1 : activeIndex - start;
-  const active = localIndex >= 0 && localIndex < n ? window[localIndex]! : null;
+  const active = localIndex >= 0 && localIndex < n ? visible[localIndex]! : null;
   const spanMs = last.time - first.time;
 
   let linePath = '';
   let areaPath = '';
   if (mode === 'line') {
-    const points = window.map((candle, i) => `${x(i).toFixed(2)},${y(candle.close).toFixed(2)}`);
+    const points = visible.map((candle, i) => `${x(i).toFixed(2)},${y(candle.close).toFixed(2)}`);
     linePath = `M${points.join('L')}`;
-    areaPath = `${linePath}L${x(n - 1).toFixed(2)},${(PAD_TOP + innerHeight).toFixed(2)}L${x(0).toFixed(2)},${(PAD_TOP + innerHeight).toFixed(2)}Z`;
+    areaPath = `${linePath}L${x(n - 1).toFixed(2)},${(PAD_TOP + priceHeight).toFixed(2)}L${x(0).toFixed(2)},${(PAD_TOP + priceHeight).toFixed(2)}Z`;
   }
 
-  const bodyWidth = Math.max(1, (innerWidth / n) * 0.62);
+  const bodyWidth = Math.max(1, (plotWidth / n) * CANDLE_BODY_RATIO);
+  const barWidth = Math.max(1, (plotWidth / n) * VOLUME_BAR_RATIO);
 
   return (
     <View onLayout={onLayout} style={styles.container}>
@@ -314,7 +472,7 @@ function PriceChartComponent({
           </Defs>
 
           {Array.from({ length: GRID_LINES + 1 }, (_, i) => {
-            const value = geometry.max - ((geometry.max - geometry.min) / GRID_LINES) * i;
+            const value = domain!.upper - ((domain!.upper - domain!.lower) / GRID_LINES) * i;
             const gy = y(value);
             return (
               <Line
@@ -342,7 +500,7 @@ function PriceChartComponent({
               />
             </>
           ) : (
-            window.map((candle, i) => {
+            visible.map((candle, i) => {
               const isUp = candle.close >= candle.open;
               const color = isUp ? colors.up : colors.down;
               const cx = x(i);
@@ -364,18 +522,42 @@ function PriceChartComponent({
             })
           )}
 
+          {/* Volume sub-panel, always shown regardless of line/candle mode. */}
+          {visible.map((candle, i) => {
+            const isUp = candle.close >= candle.open;
+            const cx = x(i);
+            const top = vy(candle.volume);
+            return (
+              <Rect
+                key={`vol-${candle.time}`}
+                x={cx - barWidth / 2}
+                y={top}
+                width={barWidth}
+                height={Math.max(volumeTop + volumeHeight - top, 1)}
+                fill={isUp ? colors.up : colors.down}
+                fillOpacity={isUp ? 0.3 : 0.4}
+              />
+            );
+          })}
+
           {Array.from({ length: X_LABELS }, (_, i) => {
             const index = Math.round((i / (X_LABELS - 1)) * (n - 1));
-            const candle = window[index];
+            const candle = visible[index];
             if (!candle) return null;
+            const isFirst = i === 0;
+            const isLast = i === X_LABELS - 1;
+            // The edge labels are anchored inwards, so they sit directly under their
+            // candle without needing a clamp. Only the middle ones need one, to keep a
+            // long time string from running off the plot.
+            const labelX = isFirst || isLast ? x(index) : Math.min(Math.max(x(index), 28), innerWidth - 28);
             return (
               <SvgText
                 key={`x-${i}`}
-                x={Math.min(Math.max(x(index), 0), innerWidth - 28)}
+                x={labelX}
                 y={height - 4}
                 fill={colors.textFaint}
                 fontSize={10}
-                textAnchor={i === 0 ? 'start' : i === X_LABELS - 1 ? 'end' : 'middle'}
+                textAnchor={isFirst ? 'start' : isLast ? 'end' : 'middle'}
               >
                 {formatAxisTime(candle.time, spanMs)}
               </SvgText>
@@ -388,11 +570,12 @@ function PriceChartComponent({
                 x1={x(localIndex)}
                 y1={PAD_TOP}
                 x2={x(localIndex)}
-                y2={PAD_TOP + innerHeight}
+                y2={volumeTop + volumeHeight}
                 stroke={colors.textMuted}
                 strokeWidth={1}
                 strokeDasharray="3 3"
               />
+              {/* Price line stops at the price band so it does not cut the volume bars. */}
               <Line
                 x1={0}
                 y1={y(active.close)}
@@ -407,20 +590,24 @@ function PriceChartComponent({
         </Svg>
       </View>
 
-      <View style={styles.axis} pointerEvents="none">
-        {Array.from({ length: GRID_LINES + 1 }, (_, i) => {
-          const value = geometry.max - ((geometry.max - geometry.min) / GRID_LINES) * i;
-          return (
-            <Text key={`axis-${i}`} style={styles.axisLabel}>
-              {formatPrice(value, decimals)}
-            </Text>
-          );
-        })}
+      <View style={{ width: AXIS_WIDTH, height }}>
+        <View style={{ marginTop: PAD_TOP, height: priceHeight, justifyContent: 'space-between' }}>
+          {Array.from({ length: GRID_LINES + 1 }, (_, i) => {
+            const value = domain!.upper - ((domain!.upper - domain!.lower) / GRID_LINES) * i;
+            return (
+              <Text key={`axis-${i}`} style={styles.axisLabel}>
+                {formatPrice(value, decimals)}
+              </Text>
+            );
+          })}
+        </View>
+        <View style={{ marginTop: VOLUME_GAP, height: volumeHeight, justifyContent: 'flex-start' }}>
+          <Text style={styles.axisLabel}>{formatCompact(volumeCeiling)}</Text>
+        </View>
       </View>
 
       {active ? (
         <View style={styles.readout} pointerEvents="none">
-          <Text style={styles.readoutPrice}>{formatPrice(active.close, decimals)}</Text>
           <Text style={styles.readoutTime}>
             {new Date(active.time).toLocaleString(undefined, {
               month: 'short',
@@ -429,8 +616,29 @@ function PriceChartComponent({
               minute: '2-digit',
             })}
           </Text>
+          <View style={styles.readoutGrid}>
+            <OhlcCell label="O" value={formatPrice(active.open, decimals)} />
+            <OhlcCell label="H" value={formatPrice(active.high, decimals)} />
+            <OhlcCell label="L" value={formatPrice(active.low, decimals)} />
+            <OhlcCell label="C" value={formatPrice(active.close, decimals)} />
+          </View>
+          <Text style={styles.readoutVolume}>
+            Vol {formatAmount(active.volume)}
+            {active.open !== 0
+              ? `  ${formatPercent(((active.close - active.open) / active.open) * 100)}`
+              : ''}
+          </Text>
         </View>
       ) : null}
+    </View>
+  );
+}
+
+function OhlcCell({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={styles.ohlcCell}>
+      <Text style={styles.ohlcLabel}>{label}</Text>
+      <Text style={styles.ohlcValue}>{value}</Text>
     </View>
   );
 }
@@ -441,13 +649,6 @@ const styles = StyleSheet.create({
   container: {
     flexDirection: 'row',
   },
-  axis: {
-    width: AXIS_WIDTH,
-    height: '100%',
-    justifyContent: 'space-between',
-    paddingTop: PAD_TOP - 4,
-    paddingBottom: PAD_BOTTOM,
-  },
   axisLabel: {
     color: colors.textFaint,
     fontSize: 10,
@@ -457,20 +658,42 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: spacing.xs,
     left: spacing.xs,
-    backgroundColor: colors.surfaceAlt,
-    borderRadius: 6,
+    backgroundColor: 'rgba(23,24,26,0.94)',
+    borderRadius: radius.sm,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
     paddingHorizontal: spacing.sm,
-    paddingVertical: 4,
-    gap: 1,
+    paddingVertical: 6,
+    gap: 3,
   },
-  readoutPrice: {
+  readoutTime: {
+    color: colors.textMuted,
+    fontSize: 10,
+    fontWeight: '600',
+  },
+  readoutGrid: {
+    flexDirection: 'row',
+    gap: spacing.md,
+  },
+  ohlcCell: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+  },
+  ohlcLabel: {
+    color: colors.textFaint,
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  ohlcValue: {
     color: colors.text,
-    fontSize: 12,
+    fontSize: 10,
     fontWeight: '600',
     fontVariant: ['tabular-nums'],
   },
-  readoutTime: {
-    color: colors.textFaint,
+  readoutVolume: {
+    color: colors.textMuted,
     fontSize: 10,
+    fontVariant: ['tabular-nums'],
   },
 });

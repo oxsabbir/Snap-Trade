@@ -48,10 +48,10 @@ src/app/               ROUTES — every file here is a screen
 src/components/        presentational only, no data fetching
   SearchBar  QuoteTabs  PopularSearches  RecentSearches  SpotRow  AssetRow  CoinAvatar  RangeBar
   Icons  TimeframeTabs  ChartModeToggle
-  PriceChart             interactive chart: pinch/zoom, pan, crosshair, double-tap reset
+  PriceChart             interactive chart: drag to pan, pinch to zoom, latching crosshair, volume panel
   CoinDetail           shared chart view used by the Trade tab
   CoinInfoSheet        slide-up market info modal opened from the chart header
-  Stat                 shared label/value tile used by CoinDetail and CoinInfoSheet
+  Stat                 shared label/value tile, used by CoinInfoSheet
   ProfileCard          account header: avatar, display name, VIP level, wallet split, hide toggle
   AssetList            one row per currency, with All/Funding/Trading filter and dust toggle
   ConnectAccountForm   API key / secret / passphrase entry
@@ -122,30 +122,123 @@ state reproduces the old full-range chart exactly, so the gesture work was purel
 
 | Gesture | Result |
 | --- | --- |
-| One finger drag | Crosshair inspection, unchanged |
+| One finger tap | Latch the crosshair with the OHLC/volume popup on that candle |
+| One finger drag | Pan horizontally; dragging right reveals older candles |
 | Two finger pinch | `span` from the finger-distance ratio (floor of 20 candles) |
 | Two finger drag | `offset` from the midpoint, dragging right reveals older candles |
-| Double tap | Reset to the full loaded range |
+| Double tap | Reset to the full loaded range, right edge on the live candle |
+
+**The crosshair latches.** A tap sets it and it survives release, so the popup stays readable
+without holding a finger down. Tapping the *same* candle again dismisses it, which is the only
+way back to a clean chart once one is latched — otherwise there is no way out. A drag past
+`PAN_SLOP` (6px) is reclassified as navigation: the crosshair is dropped, because a drag means
+"move the chart", not "inspect this".
+
+`offset` starts at `0` and `0` means the newest candle sits on the right edge, so the chart always
+opens and stays anchored to the live edge unless the user explicitly pans. A bucket rollover
+refetches history at the same length, so indices do not shift under a panned viewport.
 
 Both gestures read `event.nativeEvent.touches` from the same `PanResponder` that already handled
 the crosshair, so there is still **no gesture library**. `react-native-gesture-handler` and
 `react-native-reanimated` are present as expo-router dependencies, but Reanimated 4 needs a
 `react-native-worklets` babel plugin and there is no `babel.config.js` in this project — a poor
 trade for 100 data points. The pinch baseline is updated incrementally on every move so a long
-drag cannot drift away from the fingers.
+drag cannot drift away from the fingers, and the one-finger pan baseline is captured on grant for
+the same reason.
 
 The viewport is **index-based, which is what makes it survive live ticks**: `useLiveCandles`
 replaces the last candle object every 200ms, so array identity changes constantly while length
 and indices stay fixed. `CoinDetail` passes `resetKey={symbol:timeframe}` so a timeframe switch
 resets to full range during render, matching the reset pattern in `useLiveCandles`.
 
-**Performance is a non-issue at this data size.** Candle mode renders 2 SVG nodes per candle and
-line mode renders a single `<Path>`, so the chart is capped at ~200 nodes. Panning holds that
-count, zooming in *reduces* it, and zoom-out is clamped at the full range — the gesture path can
-never do more work than the pre-gesture chart. Two deliberate details: the crosshair readout is
-suppressed while a second finger is down, because RN `Text` relayout is the expensive part
-relative to SVG nodes; and `onVisibleRangeChange` dedupes by value so the toolbar's visible-count
-label never re-renders `CoinDetail` on a gesture frame.
+### Plot inset
+
+The plot area is inset from the SVG edges by `plotInset`. Without it the first and last candles are
+centred exactly on `x=0` and `x=innerWidth`, so in candle mode **half of the newest candle's body is
+clipped** — the one candle that matters most sits sliced against the right-hand price axis. `innerWidth`
+is already `width - AXIS_WIDTH`, so there was no room to spare at the right edge.
+
+The inset cannot just be a constant, or be added after the width is known. Bars are centred on
+their slot, so the last one needs `pad >= (innerWidth - 2*pad) * R / (2n)`, where `R` is the widest
+bar ratio and `n` the visible span. Solving that — rather than substituting a width into a pad that
+has already been applied — gives `pad >= R*innerWidth / (2*(n+R))`, which is what `plotInset`
+returns, floored at 6px for breathing room. `R` is `max(CANDLE_BODY_RATIO, VOLUME_BAR_RATIO)`,
+since sizing off the narrower candle body let the wider volume bar overflow.
+
+It depends on `n` because a symbol with only a handful of candles has far wider bars than one
+zoomed to the `MIN_VISIBLE` floor, so sizing for 20 alone is not enough. For a normal 100-candle
+phone chart the inset stays under 12px and the plot keeps >95% of its width.
+
+The inset is **asymmetric**: `plotInset` gives the minimum that clears the left edge, and the right
+gets that plus `RIGHT_EDGE_GAP = 10`. The newest candle is the one being read and it sits against
+the price axis, so it gets more clearance than the left edge. Because the right pad is strictly
+larger than the symmetric solution, both edge invariants still hold; the plot just shifts left of
+centre by half the gap.
+
+Two other places had to follow the inset, or they would now be off by it: crosshair hit-testing
+(`indexAt`) and pinch/pan offsets measure against `plotWidth` rather than `innerWidth`, so a touch
+in the padding clamps to the first or last candle instead of overshooting. The x-axis edge labels
+no longer get clamped, because they are anchored inwards (`start`/`end`) and can sit directly under
+their candle; only the middle labels are clamped, to keep a long time string inside the plot.
+
+### Sticky Y axis
+
+The price band is **quantised and sticky**, because a naive auto-fit re-derives `min`/`max` from
+the live candle on every tick, so the whole chart rescales five times a second and visibly
+"breathes" during a pump.
+
+- `niceBand` snaps the range outward to the nearest 1/2/5 × 10ⁿ gap, so axis labels are round
+  numbers instead of values like `$60,123.45678`.
+- Ticks may only **widen** the band, never narrow it. The chart holds still until the price
+  genuinely exits the band.
+- A **refit** — a new first candle (bucket rollover) or a new visible `span` (pinch/drag) — is
+  allowed to shrink it back, keyed on `` `${firstCandleTime}:${resolvedSpan}` ``.
+- `setDomain` is called during render, the same derive-state-during-render pattern as `activeKey`
+  and `resetKey` above. It converges in one extra pass and cannot loop, because after the write
+  the candidate band always contains the data.
+
+**The step must be derived from the data range, never from the width of the existing band.**
+`(upper - lower) / GRID_LINES` is not itself a 1/2/5 number (300/4 = 75), so deriving the step
+that way shifts the rounding lattice on every pass and the axis never settles. That was a real bug
+during development, caught by simulation.
+
+A flat series — every candle at the same price, which happens on thin or freshly-listed pairs —
+lands exactly on the lattice and would snap to a zero-height band, at which point the scales memo
+returns null and **the chart renders nothing**. `niceBand` widens that case by one gap either
+side. Also caught by simulation rather than by reading the code.
+
+## Volume sub-panel
+
+Volume bars sit below the price series on both line and candle mode, tinted by each candle's own
+direction so they never fight the price line for attention. The plot band is split by
+`VOLUME_RATIO` (0.24) and `VOLUME_GAP` (8), which is the single place to retune if the stats
+grid below needs more room. The ceiling is quantised with the same `niceBand`, so the scale moves
+only on round numbers.
+
+The crosshair's horizontal price line stops at the bottom of the price band rather than cutting
+through the bars; the vertical line spans both bands, as it does elsewhere.
+
+## Live volume accuracy
+
+The socket throttle keeps only the **newest** price in a 200ms window, so the individual trade
+sizes in that window used to be dropped and adding the last one would have understated volume.
+`TickerSocket` now accumulates `pendingSize` across the window and flushes the total, so
+`TickerUpdate.size` means "base volume since last flush" rather than "last trade size". The live
+candle adds `volume += size` and `turnover += size * price`; volume is base currency and KuCoin's
+candle volume is base too, so turnover follows in quote currency.
+
+On a bucket rollover the accumulated size is deliberately **dropped**: the rollover branch returns
+before touching the candle array, and the API snapshot for the new candle already contains those
+trades, so adding them would double count. `TickerUpdate` is internal and `useLiveCandles` is its
+only consumer, so redefining `size` is contained.
+
+**Candle mode is now ~400 SVG nodes rebuilt 5×/sec** (3 per candle for the body, plus 1 volume bar
+per candle). That is unmeasured — no device profiling was done, so treat the frame rate as
+unknown rather than assumed fine. Line mode is unaffected, being a single `<Path>` plus bars.
+`react-native-svg` diffs by key so the nodes are reconciled rather than recreated, but the volume
+panel did raise the ceiling and this is the obvious thing to profile next.
+
+## Performance notes
 
 ## Coin info
 
@@ -181,9 +274,10 @@ subscribes to `/market/ticker:{symbol}`, and pings on the server's `pingInterval
 on BTC-USDT: ~9.5 messages/sec, ~105ms average interval, connection held over a 60s soak
 with zero disconnects.
 
-Ticks update the last candle's `close`/`high`/`low` in place, so the chart and the header
-price move together. When a tick lands in a new period bucket, the hook refetches history to
-pick up the new candle. The socket is torn down on background and restarted on foreground.
+Ticks update the last candle's `close`/`high`/`low` and accumulated `volume`/`turnover` in place,
+so the chart, the volume bars and the header price all move together. When a tick
+lands in a new period bucket, the hook refetches history to pick up the new candle. The socket is
+torn down on background and restarted on foreground.
 
 Two details that matter: ticks are **throttled to 200ms** in the socket before hitting
 React state (BTC ticks ~10x/sec and re-rendering a 100-candle SVG chart that often is wasted
@@ -191,6 +285,26 @@ work), and the socket effect is keyed on `symbol` **only** — history fetching 
 effect keyed on the timeframe, so switching 1m→1D refetches candles without tearing down and
 re-authenticating the connection. `tickRef` keeps the socket's `onTick` stable across that
 refetch.
+
+## Change % window
+
+The header price pill is the change over the **currently forming candle's open**, i.e. the period
+the selected timeframe label actually refers to. It used to be measured against `candles[0].open`,
+the oldest of the 100 loaded bars, which meant a 1H tab displayed roughly four days of change
+next to a live 1-hour price.
+
+The trade-off: the pill now **resets to 0.00% at every bucket rollover** and climbs from there, so
+on 1H it visibly restarts each hour. That is correct period behaviour, but it is jumpy in a way a
+24h change is not. If it feels wrong in the hand, a 24h ticker field is the fix.
+
+The Trade screen shows the chart and its controls only — the Open/High/Low/Close and
+Volume/Turnover grid that used to sit underneath is gone, since it duplicated what the crosshair
+popup already says about the candle you are pointing at. `CoinDetail` therefore only needs the
+last candle, not a pass over all 100, which also removed an O(n) volume/turnover sum that had
+been re-running on every one of the 5 ticks per second. `PriceChart` takes its height from
+`chartWrap` via `onLayout` so it fills the freed space rather than leaving a gap; `chartWrap` is
+`flex: 1`, so its height comes from the leftover space and the measured child cannot feed back
+into it.
 
 ## Navigation
 

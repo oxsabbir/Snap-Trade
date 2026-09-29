@@ -1,18 +1,24 @@
 import { useCallback, useMemo, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+  type LayoutChangeEvent,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ChartModeToggle } from '@/components/ChartModeToggle';
 import { CoinInfoSheet } from '@/components/CoinInfoSheet';
 import { InfoIcon } from '@/components/Icons';
 import { PriceChart } from '@/components/PriceChart';
-import { Stat } from '@/components/Stat';
 import { TimeframeTabs } from '@/components/TimeframeTabs';
 import { useLiveCandles } from '@/hooks/useLiveCandles';
-import { priceExtremes, timeframeByKey, type Timeframe } from '@/lib/kucoin/candles';
+import { timeframeByKey, type Timeframe } from '@/lib/kucoin/candles';
 import type { ChartMode } from '@/lib/kucoin/types';
 import { colors, radius, spacing } from '@/theme';
-import { formatCompact, formatPercent, formatPrice } from '@/utils/format';
+import { formatPercent, formatPrice } from '@/utils/format';
 
 type Props = {
   symbol: string;
@@ -25,33 +31,35 @@ export function CoinDetail({ symbol, name, decimals }: Props) {
   const [mode, setMode] = useState<ChartMode>('line');
   const [infoOpen, setInfoOpen] = useState(false);
   const [visibleCount, setVisibleCount] = useState<number | null>(null);
+  const [chartHeight, setChartHeight] = useState(250);
 
   const timeframe = useMemo(() => timeframeByKey(timeframeKey), [timeframeKey]);
   const { candles, ticker, status, isLoading, error, refresh } = useLiveCandles(symbol, timeframe);
 
-  const stats = useMemo(() => {
-    if (candles.length === 0) return null;
-    const first = candles[0]!;
-    const last = candles[candles.length - 1]!;
-    const { low, high } = priceExtremes(candles);
-    let volume = 0;
-    let turnover = 0;
-    for (const candle of candles) {
-      volume += candle.volume;
-      turnover += candle.turnover;
-    }
-    return { open: first.open, high, low, close: last.close, volume, turnover };
-  }, [candles]);
+  // Only the currently forming candle is needed for the header, so nothing here walks
+  // the array. A range summary used to be computed over all 100 candles on every tick.
+  const current = candles.length > 0 ? candles[candles.length - 1]! : null;
 
-  const livePrice = ticker?.price ?? stats?.close;
-  const change = stats && stats.open !== 0 ? (((livePrice ?? stats.close) - stats.open) / stats.open) * 100 : 0;
+  const livePrice = ticker?.price ?? current?.close;
+  // Measured against the current candle's open, so the pill matches the selected
+  // timeframe. Using the oldest of the 100 loaded candles would report, say, four
+  // days of change next to a live 1H price.
+  const change =
+    current && current.open !== 0 && livePrice !== undefined
+      ? ((livePrice - current.open) / current.open) * 100
+      : 0;
   const isUp = change >= 0;
-  const [base, quote] = symbol.split('-');
+  const base = symbol.split('-')[0] ?? '';
 
   const onSelectTimeframe = useCallback((next: Timeframe) => setTimeframeKey(next.key), []);
   const onOpenInfo = useCallback(() => setInfoOpen(true), []);
   const onCloseInfo = useCallback(() => setInfoOpen(false), []);
   const onVisibleRangeChange = useCallback((visible: number) => setVisibleCount(visible), []);
+  // The chart takes whatever height is left over rather than a fixed number, so it
+  // fills the screen instead of leaving a gap where the stats grid used to be.
+  const onChartLayout = useCallback((event: LayoutChangeEvent) => {
+    setChartHeight(Math.max(Math.round(event.nativeEvent.layout.height), 200));
+  }, []);
   const isZoomed = visibleCount !== null && visibleCount < candles.length;
 
   return (
@@ -72,7 +80,7 @@ export function CoinDetail({ symbol, name, decimals }: Props) {
         </Pressable>
       </View>
 
-      {stats ? (
+      {current ? (
         <View style={styles.priceBlock}>
           <Text style={styles.price}>{formatPrice(livePrice ?? 0, decimals)}</Text>
           <View
@@ -106,13 +114,13 @@ export function CoinDetail({ symbol, name, decimals }: Props) {
       <View style={styles.toolbar}>
         <Text style={styles.periodLabel} numberOfLines={1}>
           {isZoomed
-            ? `${visibleCount} of ${candles.length} × ${timeframe.label} · 2-finger pan, double tap to reset`
-            : `${candles.length} × ${timeframe.label} · pinch to zoom`}
+            ? `${visibleCount} of ${candles.length} × ${timeframe.label} · double tap to reset`
+            : `${candles.length} × ${timeframe.label} · drag to pan, pinch to zoom`}
         </Text>
         <ChartModeToggle value={mode} onChange={setMode} />
       </View>
 
-      <View style={styles.chartWrap}>
+      <View style={styles.chartWrap} onLayout={onChartLayout}>
         {isLoading && candles.length === 0 ? (
           <ActivityIndicator style={styles.loader} color={colors.accent} />
         ) : error && candles.length === 0 ? (
@@ -125,23 +133,13 @@ export function CoinDetail({ symbol, name, decimals }: Props) {
           <PriceChart
             candles={candles}
             mode={mode}
+            height={chartHeight}
             decimals={decimals}
             resetKey={`${symbol}:${timeframe.key}`}
             onVisibleRangeChange={onVisibleRangeChange}
           />
         )}
       </View>
-
-      {stats ? (
-        <View style={styles.statsGrid}>
-          <Stat label="Open" value={formatPrice(stats.open, decimals)} />
-          <Stat label="High" value={formatPrice(stats.high, decimals)} />
-          <Stat label="Low" value={formatPrice(stats.low, decimals)} />
-          <Stat label="Close" value={formatPrice(stats.close, decimals)} />
-          <Stat label={`Volume (${base})`} value={formatCompact(stats.volume)} />
-          <Stat label={`Turnover (${quote})`} value={formatCompact(stats.turnover)} />
-        </View>
-      ) : null}
 
       <CoinInfoSheet symbol={symbol} visible={infoOpen} onClose={onCloseInfo} decimals={decimals} />
     </SafeAreaView>
@@ -236,7 +234,8 @@ const styles = StyleSheet.create({
     flexShrink: 1,
   },
   chartWrap: {
-    minHeight: 240,
+    flex: 1,
+    minHeight: 220,
     justifyContent: 'center',
   },
   loader: {
@@ -261,13 +260,6 @@ const styles = StyleSheet.create({
   errorHint: {
     color: colors.textFaint,
     fontSize: 12,
-  },
-  statsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    marginTop: spacing.lg,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.border,
   },
   infoButton: {
     padding: spacing.xs,
