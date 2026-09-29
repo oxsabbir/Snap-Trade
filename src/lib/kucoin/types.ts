@@ -14,14 +14,55 @@ export type KuCoinAccount = {
   holds: string;
 };
 
+/** Which of the two spot wallets an asset sits in. */
+export type WalletKind = 'funding' | 'trading';
+
 /** An account row joined with its USDT valuation from the ticker feed. */
 export type PortfolioAsset = {
+  wallet: WalletKind;
   currency: string;
   balance: number;
   available: number;
   holds: number;
   price: number;
   value: number;
+};
+
+/** One wallet's portion of a single currency. */
+export type WalletSlice = {
+  balance: number;
+  available: number;
+  holds: number;
+  value: number;
+};
+
+/**
+ * One currency across every wallet, so a coin held in both appears as a single
+ * row with a split instead of two near-identical rows.
+ */
+export type Holding = {
+  currency: string;
+  balance: number;
+  available: number;
+  holds: number;
+  price: number;
+  value: number;
+  /** `null` when the currency is not held in that wallet. */
+  funding: WalletSlice | null;
+  trading: WalletSlice | null;
+};
+
+/**
+ * `GET /api/v2/user-info`. KuCoin exposes no username, nickname or UID on any
+ * endpoint, so this is the only real identity signal available: VIP level and
+ * sub-account usage. Requires the General permission we already ask for.
+ */
+export type AccountInfo = {
+  level: number;
+  subQuantity: number;
+  spotSubQuantity: number;
+  marginSubQuantity: number;
+  futuresSubQuantity: number;
 };
 
 export type SymbolInfo = {

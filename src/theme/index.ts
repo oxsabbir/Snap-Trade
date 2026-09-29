@@ -7,6 +7,8 @@ export const colors = {
   textMuted: '#8A8D91',
   textFaint: '#5C6066',
   accent: '#23AF89',
+  /** Same hue, de-emphasised. Second segment of the wallet split bar. */
+  accentSoft: 'rgba(35,175,137,0.42)',
   up: '#23AF89',
   down: '#F6465D',
   warning: '#F0B90B',

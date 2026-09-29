@@ -138,3 +138,38 @@ export function InfoIcon({ size = 16, color = colors.textMuted }: IconProps) {
     </Svg>
   );
 }
+
+export function EyeIcon({ size = 18, color = colors.textMuted }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M2.5 12S6 5.8 12 5.8 21.5 12 21.5 12 18 18.2 12 18.2 2.5 12 2.5 12z"
+        stroke={color}
+        strokeWidth={1.7}
+        strokeLinejoin="round"
+      />
+      <Circle cx={12} cy={12} r={2.8} stroke={color} strokeWidth={1.7} />
+    </Svg>
+  );
+}
+
+export function EyeOffIcon({ size = 18, color = colors.textMuted }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M2.5 12S6 5.8 12 5.8c1.3 0 2.4.3 3.4.7"
+        stroke={color}
+        strokeWidth={1.7}
+        strokeLinecap="round"
+      />
+      <Path
+        d="M21.5 12S18 18.2 12 18.2c-1.3 0-2.4-.3-3.4-.7"
+        stroke={color}
+        strokeWidth={1.7}
+        strokeLinecap="round"
+      />
+      <Circle cx={12} cy={12} r={2.8} stroke={color} strokeWidth={1.7} />
+      <Path d="M4 4l16 16" stroke={color} strokeWidth={1.7} strokeLinecap="round" />
+    </Svg>
+  );
+}

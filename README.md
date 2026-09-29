@@ -46,24 +46,30 @@ src/app/               ROUTES — every file here is a screen
   (tabs)/trade.tsx     Trade: chart for the currently selected coin
   (tabs)/account.tsx   Account: connect form, total value, asset list
 src/components/        presentational only, no data fetching
-  SearchBar  QuoteTabs  PopularSearches  RecentSearches  SpotRow  AssetRow
-  CoinAvatar  RangeBar  Icons  TimeframeTabs  ChartModeToggle  PriceChart
+  SearchBar  QuoteTabs  PopularSearches  RecentSearches  SpotRow  AssetRow  CoinAvatar  RangeBar
+  Icons  TimeframeTabs  ChartModeToggle
+  PriceChart             interactive chart: pinch/zoom, pan, crosshair, double-tap reset
   CoinDetail           shared chart view used by the Trade tab
   CoinInfoSheet        slide-up market info modal opened from the chart header
   Stat                 shared label/value tile used by CoinDetail and CoinInfoSheet
+  ProfileCard          account header: avatar, display name, VIP level, wallet split, hide toggle
+  AssetList            one row per currency, with All/Funding/Trading filter and dust toggle
   ConnectAccountForm   API key / secret / passphrase entry
 src/hooks/
   useSpotMarkets.ts    list data — REST fetch, 10s poll, AppState, pull-to-refresh
   useRecentSearches.ts AsyncStorage-backed recent search history (max 8)
   useLiveCandles.ts    chart data — REST history + WebSocket live price
   useCoinInfo.ts       coin info sheet data, fetched only while the sheet is open
+  useProfile.ts        local display name, AsyncStorage-backed, never transmitted
   useAccount.ts        balances — signed REST, 30s poll, connect/disconnect
 src/state/
   activeCoin.tsx       selected market, AsyncStorage-persisted, split contexts
 src/lib/kucoin/
   client.ts            fetch wrapper, HMAC signing, error type
   credentials.ts       SecureStore read/write/delete for the API key triple
-  account.ts           signed account endpoint, USDT valuation, portfolio shape
+  account.ts           signed account endpoint; re-exports the portfolio shape
+  portfolio.ts         pure wallet grouping + valuation + currency roll-up, no client import
+  profile.ts           /api/v2/user-info (VIP level), session-cached
   market.ts            endpoint fns, symbol/ticker join, search ranking, session caches
   candles.ts           candle endpoint, timeframe table, helpers
   socket.ts            TickerSocket — public WS feed, ping, backoff reconnect
@@ -85,8 +91,8 @@ Four **public** KuCoin endpoints, no credentials required:
 | `fetchAllTickers` | `GET /api/v1/market/allTickers` | every 10s on Home, 30s on Account |
 | `fetchMarketStats` | `GET /api/v1/market/stats?symbol=X` | once per symbol, on sheet open |
 
-The Account tab adds one **signed** call, `GET /api/v1/accounts`, described under
-"Account and credentials" below.
+The Account tab adds one **signed** call, `GET /api/v1/accounts`, plus a session-cached
+`GET /api/v2/user-info` for the VIP badge, both described under "Account and credentials" below.
 
 `market.ts` memoises the first two plus per-symbol stats at module scope for the whole session,
 so the market list, the account valuation and the coin info sheet share one copy each and
@@ -243,6 +249,37 @@ Favorites live in `useState` in `(tabs)/index.tsx` and are **lost on reload**. R
 the active-coin selection and API credentials *do* persist — the first two in AsyncStorage, the
 credentials in SecureStore. Persisting favorites the same way is the obvious next step.
 
+## Account profile card
+
+The Account tab opens on `ProfileCard`: a flat card — `colors.surface`, hairline border and a
+short accent bar across the top edge — carrying an initials avatar, the display name, a VIP
+pill, the portfolio total, a Funding/Trading split and a sync footer.
+
+**There is no gradient here, deliberately.** An earlier revision drew the background with
+`react-native-svg` using `StyleSheet.absoluteFill` plus percentage `width`/`height`, which is
+unreliable on both platforms, and it faded to `colors.surface` at one end so the card read as
+flat even when it rendered. The whole app uses flat surfaces with hairline borders, so a flat
+card matches it and drops the failure mode. `adjustsFontSizeToFit` on the total and the wallet
+amounts keeps long figures from clipping without a second layout pass.
+
+**KuCoin has no username.** There is no nickname, UID or profile endpoint anywhere in its
+public or private REST API — `/api/v1/profile`, `/user`, `/account`, `/nickname` are all 404.
+The real identity signal available is `GET /api/v2/user-info`, which returns VIP `level` and
+sub-account counts. That badge is genuine server data; the *name* is not, so it is a local
+device-only label in `useProfile` (AsyncStorage, never transmitted) with `My KuCoin` as its
+fallback. Tap the name to rename it inline. Do not present the local name as if KuCoin
+returned it.
+
+`user-info` is called **once per session and cached** in `profile.ts`: it costs weight 20 in the
+Management pool, far too much to spend on the 30s balance poll, and VIP level only moves when
+the user changes it. It is also **not awaited** by the balance fetch and fails soft — a key
+without access to it still reads balances, so it must never block or clear a working
+connection. The badge simply disappears.
+
+Note the `/api/v2` path: `client.ts` only prefixes `/api/v1` when the path is relative
+(`client.ts:68`), so absolute paths pass through and get signed correctly. `API_VERSION` is
+only ever the `KC-API-KEY-VERSION` *header* value and never affects the URL.
+
 ## Account and credentials
 
 Balances live behind KuCoin's **private** API, which requires HMAC-SHA256 signed requests.
@@ -265,14 +302,42 @@ Signing details that are easy to get wrong:
 - **`KC-API-PASSPHRASE` is not the raw passphrase.** It is `base64(HMAC-SHA256(secret, passphrase))`.
   Sending the plaintext is a common bug.
 - **Balance rows are per account type, not per currency.** `GET /api/v1/accounts` returns a row
-  per `(currency, type)` pair, so a coin can appear two or three times. `buildPortfolio` merges
-  them and filters to `main` / `trade` / `trade_hf`. Margin is excluded on purpose — those
-  balances can be borrowed funds, so counting them would overstate net worth.
+  per `(currency, type)` pair, so a coin can appear two or three times. `buildPortfolio` groups
+  them into the **Funding** (`main`) and **Trading** (`trade` + `trade_hf`) wallets and keys the
+  map on wallet *and* currency, so the per-wallet totals can never be conflated. Margin is
+  excluded on purpose — those balances can be borrowed funds, so counting them would overstate
+  net worth. `trade_hf` is the HF cross-margin *trading* wallet and is your own collateral, so it
+  is kept under Trading.
+- **The UI lists `holdings`, not `assets`.** Rendering `assets` directly put a near-identical row
+  on screen for every wallet a coin sat in, which read as duplicated balances. `buildHoldings`
+  rolls the per-wallet rows into one entry per currency and keeps each wallet's portion in a
+  `funding` / `trading` slice, so the split is still visible on the row without duplicating it.
+  Both shapes are kept: `assets` for wallet maths, `holdings` for display.
 - **Most rows have zero balance.** KuCoin returns an account for every currency it knows, which
   is hundreds of rows of `"0"`. They are dropped in `buildPortfolio`.
 - **Valuation is best-effort.** Direct `XXX-USDT` pair first, then `XXX-BTC × BTC-USDT` for the
   long tail, then 0. USDT itself has no pair, so it is pinned to 1. A `price` of 0 renders as
-  `—`, meaning "unpriceable", not "worth nothing".
+  `—`, meaning "unpriceable", not "worth nothing". `unpricedCount` is counted per *currency*, not
+  per asset row — a coin unpriceable in both wallets is one thing the user needs to know about,
+  not two. Unpriceable holdings are always shown, and survive the dust filter, because a zero
+  value there means "unknown", not "worthless".
+
+### Asset list controls
+
+`AssetList` owns two pieces of view state, both local and reset on remount:
+
+- **All / Funding / Trading.** The default *All* view shows one row per currency at its combined
+  balance, with a two-tone bar and an inline `1.0 funding · 0.5 trading` breakdown when a coin
+  sits in both wallets. Picking a wallet narrows the list to just that currency's slice *and*
+  shows that slice's balance and value — the totals never silently stay combined while the list
+  is filtered, which would misrepresent the position.
+- **Hide < $1.** A toggle for leftover dust. It filters on the *currently scoped* value, so a
+  coin with a large funding balance and a $0.30 trading remainder stays visible in *All* and is
+  correctly hidden in *Trading*. The header count switches to `N of M` so it is never unclear
+  why rows are missing.
+
+Totals deliberately do not repeat below the card: the profile card already carries the grand
+total and both wallet subtotals, so the list header shows only a holding count.
 
 `connect()` verifies before committing: it saves, tries one fetch, and on failure clears the
 key and rethrows so the form shows the error inline rather than dropping you on the error card.
@@ -296,6 +361,7 @@ your IP list and they issue a `client_id`), so it is not a self-serve option.
 - No tests, no test runner, no CI.
 - The Account tab is read-only and single-key. No multi-account, no order entry, no
   deposits/withdrawals.
+- The account display name is a local label, not a KuCoin identity — the API exposes no username.
 - No 24h portfolio change. Total value is a spot snapshot; it would need a cost-basis or
   historical equity series to show a percentage.
 - Zooming out re-spaces the ~100 candles already loaded, it does not page in older history. The

@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
 
-import { buildPortfolio, fetchAccounts, totalValue } from '@/lib/kucoin/account';
+import { buildPortfolio, fetchAccounts, type Portfolio } from '@/lib/kucoin/account';
 import { clearCredentials, loadCredentials, saveCredentials } from '@/lib/kucoin/credentials';
 import { fetchAllTickers } from '@/lib/kucoin/market';
+import { clearAccountInfoCache, fetchAccountInfo } from '@/lib/kucoin/profile';
 import { KuCoinApiError } from '@/lib/kucoin/client';
-import type { KuCoinCredentials, PortfolioAsset } from '@/lib/kucoin/types';
+import type { AccountInfo, KuCoinCredentials, PortfolioAsset } from '@/lib/kucoin/types';
 
 const POLL_INTERVAL_MS = 30_000;
 
@@ -13,13 +14,25 @@ export type AccountStatus = 'loading' | 'disconnected' | 'ready' | 'error';
 
 export type AccountState = {
   status: AccountStatus;
+  portfolio: Portfolio;
   assets: PortfolioAsset[];
   total: number;
+  accountInfo: AccountInfo | null;
   error: string | null;
   lastUpdated: number | null;
   connect: (credentials: KuCoinCredentials) => Promise<void>;
   disconnect: () => Promise<void>;
   refresh: () => void;
+};
+
+const EMPTY_PORTFOLIO: Portfolio = {
+  assets: [],
+  holdings: [],
+  funding: { kind: 'funding', label: 'Funding', hint: 'Your main wallet', assets: [], total: 0, onHold: 0 },
+  trading: { kind: 'trading', label: 'Trading', hint: 'Funds available to trade', assets: [], total: 0, onHold: 0 },
+  total: 0,
+  onHold: 0,
+  unpricedCount: 0,
 };
 
 function describe(error: unknown): string {
@@ -38,39 +51,52 @@ export function useAccount(): AccountState {
   const mountedRef = useRef(true);
 
   const [status, setStatus] = useState<AccountStatus>('loading');
-  const [assets, setAssets] = useState<PortfolioAsset[]>([]);
-  const [total, setTotal] = useState(0);
+  const [portfolio, setPortfolio] = useState<Portfolio>(EMPTY_PORTFOLIO);
+  const [accountInfo, setAccountInfo] = useState<AccountInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<number | null>(null);
 
   const fetchPortfolio = useCallback(async () => {
     const [accounts, { ticker }] = await Promise.all([fetchAccounts(), fetchAllTickers()]);
-    const portfolio = buildPortfolio(accounts, ticker);
+    const next = buildPortfolio(accounts, ticker);
     if (!mountedRef.current) return;
-    setAssets(portfolio);
-    setTotal(totalValue(portfolio));
+    setPortfolio(next);
     setLastUpdated(Date.now());
     setError(null);
     setStatus('ready');
+  }, []);
+
+  /**
+   * Best effort and deliberately not awaited alongside the balances: this is
+   * Management-pool weight 20, it is cached, and a failure here must not block
+   * or clear a working connection.
+   */
+  const loadAccountInfo = useCallback(() => {
+    void fetchAccountInfo().then(
+      (info) => {
+        if (mountedRef.current) setAccountInfo(info);
+      },
+      () => undefined
+    );
   }, []);
 
   const load = useCallback(async () => {
     const credentials = await loadCredentials();
     if (!mountedRef.current) return;
     if (!credentials) {
-      setAssets([]);
-      setTotal(0);
+      setPortfolio(EMPTY_PORTFOLIO);
       setStatus('disconnected');
       return;
     }
     try {
       await fetchPortfolio();
+      loadAccountInfo();
     } catch (caught) {
       if (!mountedRef.current) return;
       setError(describe(caught));
       setStatus('error');
     }
-  }, [fetchPortfolio]);
+  }, [fetchPortfolio, loadAccountInfo]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -101,26 +127,28 @@ export function useAccount(): AccountState {
   const connect = useCallback(
     async (credentials: KuCoinCredentials) => {
       await saveCredentials(credentials);
+      clearAccountInfoCache();
       try {
         await fetchPortfolio();
+        loadAccountInfo();
       } catch (caught) {
         await clearCredentials();
         if (mountedRef.current) {
-          setAssets([]);
-          setTotal(0);
+          setPortfolio(EMPTY_PORTFOLIO);
           setStatus('disconnected');
         }
         throw new Error(describe(caught));
       }
     },
-    [fetchPortfolio]
+    [fetchPortfolio, loadAccountInfo]
   );
 
   const disconnect = useCallback(async () => {
     await clearCredentials();
+    clearAccountInfoCache();
     if (!mountedRef.current) return;
-    setAssets([]);
-    setTotal(0);
+    setPortfolio(EMPTY_PORTFOLIO);
+    setAccountInfo(null);
     setError(null);
     setLastUpdated(null);
     setStatus('disconnected');
@@ -131,5 +159,16 @@ export function useAccount(): AccountState {
     void load();
   }, [load]);
 
-  return { status, assets, total, error, lastUpdated, connect, disconnect, refresh };
+  return {
+    status,
+    portfolio,
+    assets: portfolio.assets,
+    total: portfolio.total,
+    accountInfo,
+    error,
+    lastUpdated,
+    connect,
+    disconnect,
+    refresh,
+  };
 }
