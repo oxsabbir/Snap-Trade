@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -12,8 +12,10 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { FAVORITES_TAB, QuoteTabs, type TabValue } from '@/components/QuoteTabs';
 import { PopularSearches } from '@/components/PopularSearches';
+import { RecentSearches } from '@/components/RecentSearches';
 import { SearchBar } from '@/components/SearchBar';
 import { SpotRow } from '@/components/SpotRow';
+import { useRecentSearches } from '@/hooks/useRecentSearches';
 import { useSpotMarkets } from '@/hooks/useSpotMarkets';
 import { searchMarkets, type QuoteFilter } from '@/lib/kucoin/market';
 import { colors, spacing } from '@/theme';
@@ -23,9 +25,12 @@ const POPULAR_COUNT = 10;
 
 export default function MarketsScreen() {
   const { markets, isLoading, isRefreshing, error, lastUpdated, refresh } = useSpotMarkets();
+  const { recents, add: addRecent, remove: removeRecent, clear: clearRecents } = useRecentSearches();
   const [search, setSearch] = useState('');
   const [tab, setTab] = useState<TabValue>('All');
   const [favorites, setFavorites] = useState<Set<string>>(() => new Set());
+  const [isSearchFocused, setIsSearchFocused] = useState(false);
+  const interactingRef = useRef(false);
 
   const toggleFavorite = useCallback((symbol: string) => {
     setFavorites((previous) => {
@@ -66,6 +71,33 @@ export default function MarketsScreen() {
 
   const dismissKeyboard = useCallback(() => Keyboard.dismiss(), []);
 
+  const handleSearchFocus = useCallback(() => {
+    interactingRef.current = false;
+    setIsSearchFocused(true);
+  }, []);
+
+  const handleSearchBlur = useCallback(() => {
+    if (interactingRef.current) return;
+    setIsSearchFocused(false);
+  }, []);
+
+  const commitSearch = useCallback(
+    (query: string) => {
+      addRecent(query);
+      setSearch(query);
+      setIsSearchFocused(false);
+      interactingRef.current = false;
+      Keyboard.dismiss();
+    },
+    [addRecent]
+  );
+
+  const handleSubmit = useCallback(() => {
+    commitSearch(search);
+  }, [commitSearch, search]);
+
+  const showSuggestions = isSearchFocused && activeQuery.length === 0;
+
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
       <View style={styles.header}>
@@ -76,54 +108,78 @@ export default function MarketsScreen() {
             {lastUpdated ? ` · ${formatTime(lastUpdated)}` : ''}
           </Text>
         </View>
-        <SearchBar value={search} onChangeText={setSearch} placeholder="Search coin, e.g. BTC" />
+        <SearchBar
+          value={search}
+          onChangeText={setSearch}
+          onFocus={handleSearchFocus}
+          onBlur={handleSearchBlur}
+          onSubmit={handleSubmit}
+          placeholder="Search coin, e.g. BTC"
+        />
       </View>
 
-      <View style={styles.tabs}>
-        <QuoteTabs value={tab} onChange={setTab} favoritesCount={favorites.size} />
-      </View>
-
-      {activeQuery.length === 0 && !isLoading ? (
-        <PopularSearches symbols={popularSymbols} onSelect={setSearch} />
-      ) : null}
-
-      <FlatList
-        data={visibleMarkets}
-        keyExtractor={(market) => market.symbol}
-        renderItem={({ item }) => (
-          <SpotRow
-            market={item}
-            isFavorite={favorites.has(item.symbol)}
-            onToggleFavorite={toggleFavorite}
+      {showSuggestions ? (
+        <>
+          <RecentSearches
+            recents={recents}
+            onSelect={commitSearch}
+            onRemove={removeRecent}
+            onClear={clearRecents}
+            onInteract={() => {
+              interactingRef.current = true;
+            }}
           />
-        )}
-        ItemSeparatorComponent={Separator}
-        contentContainerStyle={styles.listContent}
-        keyboardShouldPersistTaps="handled"
-        keyboardDismissMode="on-drag"
-        onScrollBeginDrag={dismissKeyboard}
-        refreshControl={
-          <RefreshControl
-            refreshing={isRefreshing}
-            onRefresh={refresh}
-            tintColor={colors.accent}
-            colors={[colors.accent]}
-            progressBackgroundColor={colors.surfaceAlt}
+          <PopularSearches symbols={popularSymbols} onSelect={commitSearch} />
+        </>
+      ) : (
+        <>
+          <View style={styles.tabs}>
+            <QuoteTabs value={tab} onChange={setTab} favoritesCount={favorites.size} />
+          </View>
+
+          {activeQuery.length === 0 && !isLoading ? (
+            <PopularSearches symbols={popularSymbols} onSelect={setSearch} />
+          ) : null}
+
+          <FlatList
+            data={visibleMarkets}
+            keyExtractor={(market) => market.symbol}
+            renderItem={({ item }) => (
+              <SpotRow
+                market={item}
+                isFavorite={favorites.has(item.symbol)}
+                onToggleFavorite={toggleFavorite}
+              />
+            )}
+            ItemSeparatorComponent={Separator}
+            contentContainerStyle={styles.listContent}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
+            onScrollBeginDrag={dismissKeyboard}
+            refreshControl={
+              <RefreshControl
+                refreshing={isRefreshing}
+                onRefresh={refresh}
+                tintColor={colors.accent}
+                colors={[colors.accent]}
+                progressBackgroundColor={colors.surfaceAlt}
+              />
+            }
+            ListEmptyComponent={
+              isLoading ? (
+                <ActivityIndicator style={styles.empty} color={colors.accent} />
+              ) : (
+                <EmptyState tab={tab} hasSearch={search.trim().length > 0} error={error} />
+              )
+            }
+            ListFooterComponent={<View style={styles.footer} />}
+            initialNumToRender={14}
+            maxToRenderPerBatch={16}
+            windowSize={9}
+            removeClippedSubviews
           />
-        }
-        ListEmptyComponent={
-          isLoading ? (
-            <ActivityIndicator style={styles.empty} color={colors.accent} />
-          ) : (
-            <EmptyState tab={tab} hasSearch={search.trim().length > 0} error={error} />
-          )
-        }
-        ListFooterComponent={<View style={styles.footer} />}
-        initialNumToRender={14}
-        maxToRenderPerBatch={16}
-        windowSize={9}
-        removeClippedSubviews
-      />
+        </>
+      )}
     </SafeAreaView>
   );
 }

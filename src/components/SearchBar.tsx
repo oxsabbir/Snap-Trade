@@ -6,10 +6,20 @@ import { colors, radius, spacing } from '@/theme';
 type Props = {
   value: string;
   onChangeText: (value: string) => void;
+  onFocus?: () => void;
+  onBlur?: () => void;
+  onSubmit?: () => void;
   placeholder?: string;
 };
 
-export function SearchBar({ value, onChangeText, placeholder = 'Search coin' }: Props) {
+export function SearchBar({
+  value,
+  onChangeText,
+  onFocus,
+  onBlur,
+  onSubmit,
+  placeholder = 'Search coin',
+}: Props) {
   return (
     <View style={styles.container}>
       <View style={styles.leadingIcon}>
@@ -18,6 +28,9 @@ export function SearchBar({ value, onChangeText, placeholder = 'Search coin' }: 
       <TextInput
         value={value}
         onChangeText={onChangeText}
+        onFocus={onFocus}
+        onBlur={onBlur}
+        onSubmitEditing={onSubmit}
         placeholder={placeholder}
         placeholderTextColor={colors.textFaint}
         style={styles.input}

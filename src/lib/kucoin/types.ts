@@ -79,3 +79,18 @@ export type KuCoinError = {
   /** Parsed HTTP status, absent for transport failures. */
   status?: number;
 };
+
+/** Raw candle tuple: [time, open, close, high, low, volume, turnover]. */
+export type CandleTuple = [number, string, string, string, string, string, string];
+
+export type Candle = {
+  time: number;
+  open: number;
+  close: number;
+  high: number;
+  low: number;
+  volume: number;
+  turnover: number;
+};
+
+export type ChartMode = 'line' | 'candle';

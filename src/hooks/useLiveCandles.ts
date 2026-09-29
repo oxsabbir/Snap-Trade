@@ -1,0 +1,125 @@
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { AppState, type AppStateStatus } from 'react-native';
+
+import { fetchCandles, type Timeframe } from '@/lib/kucoin/candles';
+import { TickerSocket, type SocketStatus, type TickerUpdate } from '@/lib/kucoin/socket';
+import type { Candle } from '@/lib/kucoin/types';
+
+export type LiveCandlesState = {
+  candles: Candle[];
+  ticker: TickerUpdate | null;
+  status: SocketStatus;
+  isLoading: boolean;
+  error: string | null;
+  refresh: () => void;
+};
+
+export function useLiveCandles(symbol: string, timeframe: Timeframe): LiveCandlesState {
+  const [candles, setCandles] = useState<Candle[]>([]);
+  const [ticker, setTicker] = useState<TickerUpdate | null>(null);
+  const [status, setStatus] = useState<SocketStatus>('connecting');
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [activeKey, setActiveKey] = useState(`${symbol}:${timeframe.key}`);
+  const mountedRef = useRef(true);
+  const bucketRef = useRef(0);
+
+  // Reset during render so a timeframe switch never flashes the previous chart.
+  // bucketRef is left to fetchHistory, which owns it outside render.
+  const key = `${symbol}:${timeframe.key}`;
+  if (key !== activeKey) {
+    setActiveKey(key);
+    setCandles([]);
+    setTicker(null);
+    setError(null);
+    setIsLoading(true);
+  }
+
+  const periodMs = timeframe.seconds * 1000;
+
+  const fetchHistory = useCallback(() => {
+    fetchCandles(symbol, timeframe.key).then(
+      (next) => {
+        if (!mountedRef.current) return;
+        setCandles(next);
+        setError(null);
+        setIsLoading(false);
+        const last = next[next.length - 1];
+        bucketRef.current = last ? Math.floor(last.time / periodMs) : 0;
+        if (last) setTicker({ symbol, price: last.close, size: 0, time: last.time, bestAsk: 0, bestBid: 0 });
+      },
+      (caught: unknown) => {
+        if (!mountedRef.current) return;
+        setError(caught instanceof Error ? caught.message : 'Failed to load candles');
+        setIsLoading(false);
+      }
+    );
+  }, [periodMs, symbol, timeframe.key]);
+
+  const handleTick = useCallback(
+    (update: TickerUpdate) => {
+      if (!mountedRef.current) return;
+      setTicker(update);
+
+      const bucket = Math.floor(update.time / periodMs);
+      if (bucketRef.current !== 0 && bucket > bucketRef.current) {
+        fetchHistory();
+        return;
+      }
+
+      setCandles((previous) => {
+        const last = previous[previous.length - 1];
+        if (!last) return previous;
+        return [
+          ...previous.slice(0, -1),
+          {
+            ...last,
+            close: update.price,
+            high: Math.max(last.high, update.price),
+            low: Math.min(last.low, update.price),
+          },
+        ];
+      });
+    },
+    [fetchHistory, periodMs]
+  );
+
+  const tickRef = useRef(handleTick);
+  useEffect(() => {
+    tickRef.current = handleTick;
+  }, [handleTick]);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    fetchHistory();
+    return () => {
+      mountedRef.current = false;
+    };
+  }, [fetchHistory]);
+
+  // Socket lifecycle is keyed on `symbol` only, so switching timeframes refetches
+  // history without tearing down and re-authenticating the connection.
+  useEffect(() => {
+    const socket = new TickerSocket(symbol, {
+      onTick: (update) => tickRef.current(update),
+      onStatus: setStatus,
+    });
+    socket.start();
+
+    const subscription = AppState.addEventListener('change', (state: AppStateStatus) => {
+      if (state === 'active') socket.start();
+      else socket.stop();
+    });
+
+    return () => {
+      socket.stop();
+      subscription.remove();
+    };
+  }, [symbol]);
+
+  const refresh = useCallback(() => {
+    fetchHistory();
+  }, [fetchHistory]);
+
+  return { candles, ticker, status, isLoading, error, refresh };
+}
