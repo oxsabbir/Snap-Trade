@@ -9,14 +9,13 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { ChartModeToggle } from '@/components/ChartModeToggle';
 import { CoinInfoSheet } from '@/components/CoinInfoSheet';
 import { InfoIcon } from '@/components/Icons';
 import { PriceChart } from '@/components/PriceChart';
 import { TimeframeTabs } from '@/components/TimeframeTabs';
+import { useLifetimeSeries } from '@/hooks/useLifetimeSeries';
 import { useLiveCandles } from '@/hooks/useLiveCandles';
-import { timeframeByKey, type Timeframe } from '@/lib/kucoin/candles';
-import type { ChartMode } from '@/lib/kucoin/types';
+import { timeframeByKey, LINE_TIMEFRAME, type TimeframeOrLine } from '@/lib/kucoin/candles';
 import { colors, radius, spacing } from '@/theme';
 import { formatPercent, formatPrice } from '@/utils/format';
 
@@ -28,22 +27,37 @@ type Props = {
 
 export function CoinDetail({ symbol, name, decimals }: Props) {
   const [timeframeKey, setTimeframeKey] = useState('1hour');
-  const [mode, setMode] = useState<ChartMode>('line');
   const [infoOpen, setInfoOpen] = useState(false);
   const [visibleCount, setVisibleCount] = useState<number | null>(null);
   const [chartHeight, setChartHeight] = useState(250);
 
   const timeframe = useMemo(() => timeframeByKey(timeframeKey), [timeframeKey]);
-  const { candles, ticker, status, isLoading, error, refresh } = useLiveCandles(symbol, timeframe);
+  // The Line tab is a separate series, not a mode: it pages `endAt` backwards for the
+  // whole history and renders as a line, which the candle timeframes no longer do.
+  const isLine = timeframeKey === LINE_TIMEFRAME.key;
+  const mode = isLine ? 'line' : 'candle';
+
+  // `enabled` skips only the candle history fetch. The socket stays mounted either way,
+  // because the header price, the change pill and the Live badge all read from it — and
+  // the lifetime view reuses that same ticker for its last point.
+  const live = useLiveCandles(symbol, timeframe, !isLine);
+  const lifetime = useLifetimeSeries(symbol, isLine, live.ticker);
+
+  const candles = isLine ? lifetime.candles : live.candles;
+  const isLoading = isLine ? lifetime.isLoading : live.isLoading;
+  const error = isLine ? lifetime.error : live.error;
+  const refresh = isLine ? lifetime.refresh : live.refresh;
+  const { ticker, status } = live;
 
   // Only the currently forming candle is needed for the header, so nothing here walks
   // the array. A range summary used to be computed over all 100 candles on every tick.
   const current = candles.length > 0 ? candles[candles.length - 1]! : null;
 
   const livePrice = ticker?.price ?? current?.close;
-  // Measured against the current candle's open, so the pill matches the selected
-  // timeframe. Using the oldest of the 100 loaded candles would report, say, four
-  // days of change next to a live 1H price.
+  // Measured against the current bucket's open, so the pill matches what is on screen.
+  // Using the oldest of the 100 loaded candles would report, say, four days of change
+  // next to a live 1H price. On the Line tab the bucket is a week, so this reads as
+  // change-this-week rather than change-since-listing.
   const change =
     current && current.open !== 0 && livePrice !== undefined
       ? ((livePrice - current.open) / current.open) * 100
@@ -51,7 +65,18 @@ export function CoinDetail({ symbol, name, decimals }: Props) {
   const isUp = change >= 0;
   const base = symbol.split('-')[0] ?? '';
 
-  const onSelectTimeframe = useCallback((next: Timeframe) => setTimeframeKey(next.key), []);
+  const onSelectTimeframe = useCallback((next: TimeframeOrLine) => setTimeframeKey(next.key), []);
+
+  // "466 weeks · since 2017-10-19" reads as a lifetime at a glance. Absolute dates, not
+  // "8 years ago", per the no-relative-date convention.
+  const lineSummary = useMemo(() => {
+    const first = candles[0];
+    if (!first) return 'Line · loading history';
+    const weeks = candles.length;
+    const since = new Date(first.time);
+    const pad = (value: number) => value.toString().padStart(2, '0');
+    return `Line · ${weeks} weeks · since ${since.getFullYear()}-${pad(since.getMonth() + 1)}-${pad(since.getDate())}`;
+  }, [candles]);
   const onOpenInfo = useCallback(() => setInfoOpen(true), []);
   const onCloseInfo = useCallback(() => setInfoOpen(false), []);
   const onVisibleRangeChange = useCallback((visible: number) => setVisibleCount(visible), []);
@@ -113,28 +138,46 @@ export function CoinDetail({ symbol, name, decimals }: Props) {
 
       <View style={styles.toolbar}>
         <Text style={styles.periodLabel} numberOfLines={1}>
-          {isZoomed
-            ? `${visibleCount} of ${candles.length} × ${timeframe.label} · double tap to reset`
-            : `${candles.length} × ${timeframe.label} · drag to pan, pinch to zoom`}
+          {/* This row is only ~40 characters wide before it truncates, so the Line tab
+              drops the "drag to pan" nudge and the candle tabs drop the timeframe
+              label — the selected tab sits directly above and already shows it. */}
+          {isLine
+            ? lineSummary
+            : isZoomed
+              ? `${visibleCount} of ${candles.length} · pan, pinch, double tap to reset`
+              : `${candles.length} × ${timeframe.label} · drag to pan, pinch to zoom`}
         </Text>
-        <ChartModeToggle value={mode} onChange={setMode} />
       </View>
 
       <View style={styles.chartWrap} onLayout={onChartLayout}>
         {isLoading && candles.length === 0 ? (
-          <ActivityIndicator style={styles.loader} color={colors.accent} />
+          <View style={styles.loader}>
+            <ActivityIndicator color={colors.accent} />
+            {isLine && lifetime.pages > 0 ? (
+              <Text style={styles.loaderCaption}>
+                Loading full history · page {lifetime.pages}
+              </Text>
+            ) : null}
+          </View>
         ) : error && candles.length === 0 ? (
           <Pressable style={styles.errorBox} onPress={refresh}>
-            <Text style={styles.errorTitle}>Could not load candles</Text>
+            <Text style={styles.errorTitle}>{isLine ? 'Could not load history' : 'Could not load candles'}</Text>
             <Text style={styles.errorBody}>{error}</Text>
             <Text style={styles.errorHint}>Tap to retry.</Text>
           </Pressable>
+        ) : isLine && candles.length === 0 ? (
+          <View style={styles.errorBox}>
+            <Text style={styles.errorTitle}>No price history yet</Text>
+            <Text style={styles.errorBody}>This pair is too new to chart.</Text>
+          </View>
         ) : (
           <PriceChart
             candles={candles}
             mode={mode}
             height={chartHeight}
             decimals={decimals}
+            defaultSpan={isLine ? candles.length : undefined}
+            hideVolume={isLine}
             resetKey={`${symbol}:${timeframe.key}`}
             onVisibleRangeChange={onVisibleRangeChange}
           />
@@ -240,6 +283,14 @@ const styles = StyleSheet.create({
   },
   loader: {
     alignSelf: 'center',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  loaderCaption: {
+    color: colors.textFaint,
+    fontSize: 11,
+    fontWeight: '600',
+    letterSpacing: 0.4,
   },
   errorBox: {
     alignItems: 'center',

@@ -1,5 +1,5 @@
 import type { ColorValue } from 'react-native';
-import Svg, { Circle, Line, Path, Rect } from 'react-native-svg';
+import Svg, { Circle, Line, Path } from 'react-native-svg';
 
 import { colors } from '@/theme';
 
@@ -85,31 +85,6 @@ export function BackIcon({ size = 20, color = colors.text }: IconProps) {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Path d="M15 5L8 12L15 19" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
-    </Svg>
-  );
-}
-
-export function LineChartIcon({ size = 16, color = colors.textMuted }: IconProps) {
-  return (
-    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-      <Path
-        d="M3 16L9 10L13 14L21 6"
-        stroke={color}
-        strokeWidth={2}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </Svg>
-  );
-}
-
-export function CandleChartIcon({ size = 16, color = colors.textMuted }: IconProps) {
-  return (
-    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-      <Path d="M7 4V20" stroke={color} strokeWidth={1.6} strokeLinecap="round" />
-      <Rect x={4} y={8} width={6} height={8} rx={1} fill={color} />
-      <Path d="M17 7V20" stroke={color} strokeWidth={1.6} strokeLinecap="round" />
-      <Rect x={14} y={10} width={6} height={7} rx={1} fill={color} />
     </Svg>
   );
 }

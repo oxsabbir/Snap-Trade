@@ -8,7 +8,16 @@ import {
   type LayoutChangeEvent,
   type NativeTouchEvent,
 } from 'react-native';
-import Svg, { Defs, Line, LinearGradient, Path, Rect, Stop, Text as SvgText } from 'react-native-svg';
+import Svg, {
+  Circle,
+  Defs,
+  Line,
+  LinearGradient,
+  Path,
+  Rect,
+  Stop,
+  Text as SvgText,
+} from 'react-native-svg';
 
 import type { Candle, ChartMode } from '@/lib/kucoin/types';
 import { colors, radius, spacing } from '@/theme';
@@ -22,6 +31,12 @@ const X_LABELS = 4;
 
 /** Zooming in past this leaves too few candles to read, so it acts as the floor. */
 const MIN_VISIBLE = 20;
+/**
+ * Candles shown on load. Zooming out still reaches the full `count` via pinch, so this
+ * is a starting view rather than a cap. Clamped down by callers for thinly traded
+ * symbols that have fewer candles than this.
+ */
+const DEFAULT_SPAN = 35;
 const DOUBLE_TAP_MS = 300;
 const DOUBLE_TAP_SLOP = 24;
 /** Horizontal travel past this turns a touch into a pan instead of a crosshair tap. */
@@ -38,7 +53,7 @@ const PLOT_PAD = 6;
  */
 const RIGHT_EDGE_GAP = 10;
 /** Candle body and volume bar widths as fractions of one slot. */
-const CANDLE_BODY_RATIO = 0.62;
+const CANDLE_BODY_RATIO = 0.72;
 const VOLUME_BAR_RATIO = 0.7;
 /** The pad is sized against the widest of the two, or bars still clip when zoomed in. */
 const WIDEST_BAR_RATIO = Math.max(CANDLE_BODY_RATIO, VOLUME_BAR_RATIO);
@@ -66,6 +81,17 @@ type Props = {
   mode: ChartMode;
   height?: number;
   decimals?: number;
+  /**
+   * Candles shown on load, overriding `DEFAULT_SPAN`. The lifetime view passes its whole
+   * series: showing 35 of 466 weekly points would cover about eight months, which is the
+   * opposite of a lifetime chart.
+   */
+  defaultSpan?: number;
+  /**
+   * Drops the volume sub-panel and gives its share of the height to the price series.
+   * Used by the lifetime view, where weekly volume across years is noise.
+   */
+  hideVolume?: boolean;
   /** Change this to force the viewport back to the full range, e.g. on timeframe switch. */
   resetKey?: string;
   onVisibleRangeChange?: (visible: number, total: number) => void;
@@ -129,10 +155,16 @@ function niceBand(min: number, max: number): { lower: number; upper: number } {
   return { lower, upper };
 }
 
+/** Span past which a bare MM/DD label would be ambiguous, so the year is shown instead. */
+const YEAR_MS = 31_536_000_000;
+
 function formatAxisTime(timestamp: number, spanMs: number): string {
   const date = new Date(timestamp);
   const pad = (n: number) => n.toString().padStart(2, '0');
   if (spanMs <= 86_400_000) return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  // The lifetime view spans years, where 03/04 could be 2017 or 2026. Four labels across
+  // a nine-year span are ~2 years apart, so the bare year reads better than a full date.
+  if (spanMs > YEAR_MS * 2) return date.getFullYear().toString();
   return `${pad(date.getMonth() + 1)}/${pad(date.getDate())}`;
 }
 
@@ -145,6 +177,8 @@ function PriceChartComponent({
   mode,
   height = 250,
   decimals,
+  defaultSpan,
+  hideVolume = false,
   resetKey,
   onVisibleRangeChange,
 }: Props) {
@@ -172,17 +206,20 @@ function PriceChartComponent({
   const count = candles.length;
   const innerWidth = Math.max(width - AXIS_WIDTH, 0);
   const innerHeight = Math.max(height - PAD_TOP - PAD_BOTTOM, 0);
-  const volumeHeight = innerHeight * VOLUME_RATIO;
-  const priceHeight = Math.max(innerHeight - VOLUME_GAP - volumeHeight, 0);
-  const volumeTop = PAD_TOP + priceHeight + VOLUME_GAP;
+  const volumeHeight = hideVolume ? 0 : innerHeight * VOLUME_RATIO;
+  const priceHeight = Math.max(innerHeight - (hideVolume ? 0 : VOLUME_GAP) - volumeHeight, 0);
+  const volumeTop = PAD_TOP + priceHeight + (hideVolume ? 0 : VOLUME_GAP);
 
   const { span: resolvedSpan, offset: resolvedOffset, start } = useMemo<ResolvedViewport>(() => {
     if (count === 0) return { span: 0, offset: 0, start: 0 };
-    const resolved = clamp(span ?? count, Math.min(MIN_VISIBLE, count), count);
+    // The `count` upper bound already handles thinly traded symbols: asking for 35
+    // when only 5 exist clamps down to 5, so no extra min() is needed here.
+    const fallback = defaultSpan ?? DEFAULT_SPAN;
+    const resolved = clamp(span ?? fallback, Math.min(MIN_VISIBLE, count), count);
     const maxOffset = Math.max(count - resolved, 0);
     const resolvedOffsetIndex = clamp(offset, 0, maxOffset);
     return { span: resolved, offset: resolvedOffsetIndex, start: count - resolvedOffsetIndex - resolved };
-  }, [count, offset, span]);
+  }, [count, defaultSpan, offset, span]);
 
   /**
    * The plot area is inset from the SVG edges. Without this the first and last candles
@@ -489,15 +526,24 @@ function PriceChartComponent({
 
           {mode === 'line' ? (
             <>
-              <Path d={areaPath} fill="url(#chartFill)" />
-              <Path
-                d={linePath}
-                stroke={tint}
-                strokeWidth={1.6}
-                fill="none"
-                strokeLinejoin="round"
-                strokeLinecap="round"
-              />
+              {n === 1 ? (
+                // A path of a single `M` command paints nothing, so a symbol with only
+                // one lifetime point would render as a blank chart. A dot is the honest
+                // representation of "one observation".
+                <Circle cx={x(0)} cy={y(last.close)} r={3} fill={tint} />
+              ) : (
+                <>
+                  <Path d={areaPath} fill="url(#chartFill)" />
+                  <Path
+                    d={linePath}
+                    stroke={tint}
+                    strokeWidth={1.6}
+                    fill="none"
+                    strokeLinejoin="round"
+                    strokeLinecap="round"
+                  />
+                </>
+              )}
             </>
           ) : (
             visible.map((candle, i) => {
@@ -522,23 +568,25 @@ function PriceChartComponent({
             })
           )}
 
-          {/* Volume sub-panel, always shown regardless of line/candle mode. */}
-          {visible.map((candle, i) => {
-            const isUp = candle.close >= candle.open;
-            const cx = x(i);
-            const top = vy(candle.volume);
-            return (
-              <Rect
-                key={`vol-${candle.time}`}
-                x={cx - barWidth / 2}
-                y={top}
-                width={barWidth}
-                height={Math.max(volumeTop + volumeHeight - top, 1)}
-                fill={isUp ? colors.up : colors.down}
-                fillOpacity={isUp ? 0.3 : 0.4}
-              />
-            );
-          })}
+          {/* Volume sub-panel, shown for both line and candle mode unless hidden. */}
+          {hideVolume
+            ? null
+            : visible.map((candle, i) => {
+                const isUp = candle.close >= candle.open;
+                const cx = x(i);
+                const top = vy(candle.volume);
+                return (
+                  <Rect
+                    key={`vol-${candle.time}`}
+                    x={cx - barWidth / 2}
+                    y={top}
+                    width={barWidth}
+                    height={Math.max(volumeTop + volumeHeight - top, 1)}
+                    fill={isUp ? colors.up : colors.down}
+                    fillOpacity={isUp ? 0.3 : 0.4}
+                  />
+                );
+              })}
 
           {Array.from({ length: X_LABELS }, (_, i) => {
             const index = Math.round((i / (X_LABELS - 1)) * (n - 1));
@@ -601,9 +649,11 @@ function PriceChartComponent({
             );
           })}
         </View>
-        <View style={{ marginTop: VOLUME_GAP, height: volumeHeight, justifyContent: 'flex-start' }}>
-          <Text style={styles.axisLabel}>{formatCompact(volumeCeiling)}</Text>
-        </View>
+        {!hideVolume ? (
+          <View style={{ marginTop: VOLUME_GAP, height: volumeHeight, justifyContent: 'flex-start' }}>
+            <Text style={styles.axisLabel}>{formatCompact(volumeCeiling)}</Text>
+          </View>
+        ) : null}
       </View>
 
       {active ? (

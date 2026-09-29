@@ -47,7 +47,7 @@ src/app/               ROUTES — every file here is a screen
   (tabs)/account.tsx   Account: connect form, total value, asset list
 src/components/        presentational only, no data fetching
   SearchBar  QuoteTabs  PopularSearches  RecentSearches  SpotRow  AssetRow  CoinAvatar  RangeBar
-  Icons  TimeframeTabs  ChartModeToggle
+  Icons  TimeframeTabs
   PriceChart             interactive chart: drag to pan, pinch to zoom, latching crosshair, volume panel
   CoinDetail           shared chart view used by the Trade tab
   CoinInfoSheet        slide-up market info modal opened from the chart header
@@ -59,6 +59,7 @@ src/hooks/
   useSpotMarkets.ts    list data — REST fetch, 10s poll, AppState, pull-to-refresh
   useRecentSearches.ts AsyncStorage-backed recent search history (max 8)
   useLiveCandles.ts    chart data — REST history + WebSocket live price
+  useLifetimeSeries.ts lifetime line series — paged 1week walk, symbol cache, live endpoint
   useCoinInfo.ts       coin info sheet data, fetched only while the sheet is open
   useProfile.ts        local display name, AsyncStorage-backed, never transmitted
   useAccount.ts        balances — signed REST, 30s poll, connect/disconnect
@@ -71,7 +72,7 @@ src/lib/kucoin/
   portfolio.ts         pure wallet grouping + valuation + currency roll-up, no client import
   profile.ts           /api/v2/user-info (VIP level), session-cached
   market.ts            endpoint fns, symbol/ticker join, search ranking, session caches
-  candles.ts           candle endpoint, timeframe table, helpers
+  candles.ts           candle endpoint, timeframe table, helpers, paged lifetime walk
   socket.ts            TickerSocket — public WS feed, ping, backoff reconnect
   types.ts             wire types + the joined SpotMarket shape
 src/theme/index.ts     colors / spacing / radius, all `as const`
@@ -149,7 +150,84 @@ the same reason.
 The viewport is **index-based, which is what makes it survive live ticks**: `useLiveCandles`
 replaces the last candle object every 200ms, so array identity changes constantly while length
 and indices stay fixed. `CoinDetail` passes `resetKey={symbol:timeframe}` so a timeframe switch
-resets to full range during render, matching the reset pattern in `useLiveCandles`.
+resets to the default window during render, matching the reset pattern in `useLiveCandles`.
+
+### Default view
+
+`DEFAULT_SPAN = 35` is the window shown on load, out of the 100 candles fetched for an ordinary
+timeframe. It is a starting view, not a cap — `MIN_VISIBLE = 20` still bounds pinch-in and `count`
+still bounds pinch-out, so the full 100 is always one gesture away. Double-tap reset and the
+`resetKey` effect both call `setSpan(null)`, which is what returns the view to the default; the reset
+deliberately does *not* go back to full range.
+
+The `Line` tab opts out: it passes the whole series and `defaultSpan = null`, so it opens on the
+entire history rather than a 35-point window of it.
+
+Candle width is a **fraction of the slot**, not a pixel value, so the default window is what
+actually makes candles readable: 100 → 35 widens bodies 2.86× (1.9px → 5.6px on a 390pt phone).
+`CANDLE_BODY_RATIO` is 0.72, giving 6.5px bodies with 2.5px gaps at the default, and 2.3px at
+full zoom-out. Because the ratio feeds `WIDEST_BAR_RATIO`, raising it also nudges `plotInset`
+outward, so the edge clearance stays correct automatically.
+
+Thinly traded symbols can have fewer than 35 candles. The `count` upper bound on the clamp is
+what handles this — `clamp(35, min(20, count), count)` resolves to 5 when only 5 exist — so no
+extra `min()` is needed around the default.
+
+There is no candle/line mode switch. Every ordinary timeframe is a candle chart, and the line
+renderer is reachable only through the `Line` tab, which shows the whole history. `ChartModeToggle`
+was removed rather than hidden, so the line path has exactly one caller.
+
+### The `Line` tab
+
+The first tab is `Line`, not another interval. It is the **only** place a line chart renders, and it
+plots the entire available history rather than a window. KuCoin has no sub-minute candles, so a
+"time before 1m" tab cannot exist; the label is `Line` and the bucket is `1week`.
+
+`fetchLineSeries` walks the endpoint backwards from now. Each page is the newest 100 candles before
+an `endAt`, and the next `endAt` is the oldest row already seen, so the walk is sequential — each
+page depends on the previous one. Measured against the live endpoint:
+
+| Symbol | Pages | Points | Span |
+| --- | --- | --- | --- |
+| `BTC-USDT` | 5 | 466 | 8.93y (2017-10-19) |
+| `DOGE-USDT` | 3 | 295 | 5.63y |
+| `SOL-USDT` | 3 | 270 | 5.16y |
+| `TSLAX-USDT` | 1 | 7 | 0.11y (new listing) |
+
+So it is 1–5 requests, 140ms–1s, capped at `MAX_LINE_PAGES = 12` (1200 buckets, ~23y) which nothing
+has reached. Two costs worth knowing: the walk is sequential, and a history that is an exact
+multiple of 100 needs one extra request, because a full page is not short and so cannot signal the
+end — BTC at 1000 buckets costs 11 requests, not 10.
+
+The endpoint's paging is exactly contiguous, so the walk itself adds no holes or overlaps. The
+**source data** is not perfectly regular though: `BTC-USDT` has no weekly candle at all for the week
+of 2017-11-02, even though 1-day candles prove trading happened that week. The chart is index-spaced,
+so that missing week renders as a normal step rather than a visible gap — one week in 466 points, it
+is not perceptible. Time-based spacing would misreport every irregular symbol and would break the
+index-based pan/pinch model the rest of the chart is built on, so it is not worth it here.
+
+Because the walk is expensive relative to a single page, `useLifetimeSeries` caches by symbol in a
+module-level map: flicking between tabs does not refetch, and a second visit to `Line` renders
+instantly. `refresh` deletes the entry so it genuinely refetches. The cache-hit case is subtle — the
+fetch effect returns early for a cached symbol *and* a render-phase reset empties the loaded series,
+so the array has to be re-read from the map in derived state or the second visit shows an empty
+chart forever (`resolveBaseSeries`, pinned by tests).
+
+The hook owns **no socket**. `useLiveCandles` already holds one per symbol, so the ticker is passed
+in and only the final point is patched — two connections to the same symbol would be the alternative.
+Volume is deliberately left alone there: the ticker reports a per-trade size, so adding those to a
+weekly total would be a different quantity from the REST volume and the bar would quietly disagree
+with every other timeframe.
+
+Two consequences of the tab being a lifetime view rather than an interval:
+
+- The header change means change from the **current weekly bucket's open**, not lifetime return. On a
+  multi-year chart a lifetime percentage would be a strange thing to show next to the last price.
+- `PriceChart` labels years instead of clock times when the span is long, and falls back to a single
+  dot when there is only one point, since a line through one point is invisible.
+
+The `Line` view passes `hideVolume`, so the volume panel and its axis are gone; `PriceChart` keeps
+the rest of its viewport behaviour, including the crosshair.
 
 ### Plot inset
 

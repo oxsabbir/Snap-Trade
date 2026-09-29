@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
 
-import { fetchCandles, type Timeframe } from '@/lib/kucoin/candles';
+import { fetchCandles, type TimeframeOrLine } from '@/lib/kucoin/candles';
 import { TickerSocket, type SocketStatus, type TickerUpdate } from '@/lib/kucoin/socket';
 import type { Candle } from '@/lib/kucoin/types';
 
@@ -14,7 +14,11 @@ export type LiveCandlesState = {
   refresh: () => void;
 };
 
-export function useLiveCandles(symbol: string, timeframe: Timeframe): LiveCandlesState {
+export function useLiveCandles(
+  symbol: string,
+  timeframe: TimeframeOrLine,
+  enabled = true
+): LiveCandlesState {
   const [candles, setCandles] = useState<Candle[]>([]);
   const [ticker, setTicker] = useState<TickerUpdate | null>(null);
   const [status, setStatus] = useState<SocketStatus>('connecting');
@@ -32,12 +36,15 @@ export function useLiveCandles(symbol: string, timeframe: Timeframe): LiveCandle
     setCandles([]);
     setTicker(null);
     setError(null);
-    setIsLoading(true);
+    setIsLoading(enabled);
   }
 
-  const periodMs = timeframe.seconds * 1000;
+  // Only the ordinary timeframes have a bucket width. Under `enabled: false` — the
+  // lifetime view — nothing below reads it, and handleTick returns before the rollover.
+  const periodMs = 'seconds' in timeframe ? timeframe.seconds * 1000 : 0;
 
   const fetchHistory = useCallback(() => {
+    if (!enabled) return;
     fetchCandles(symbol, timeframe.key).then(
       (next) => {
         if (!mountedRef.current) return;
@@ -54,12 +61,16 @@ export function useLiveCandles(symbol: string, timeframe: Timeframe): LiveCandle
         setIsLoading(false);
       }
     );
-  }, [periodMs, symbol, timeframe.key]);
+  }, [enabled, periodMs, symbol, timeframe.key]);
 
   const handleTick = useCallback(
     (update: TickerUpdate) => {
       if (!mountedRef.current) return;
       setTicker(update);
+      // The lifetime view owns its own series, so the ticker is only needed for the
+      // header price and Live badge. Stopping here also keeps the zero periodMs above
+      // away from the bucket math below.
+      if (!enabled) return;
 
       const bucket = Math.floor(update.time / periodMs);
       if (bucketRef.current !== 0 && bucket > bucketRef.current) {
@@ -88,7 +99,7 @@ export function useLiveCandles(symbol: string, timeframe: Timeframe): LiveCandle
         ];
       });
     },
-    [fetchHistory, periodMs]
+    [enabled, fetchHistory, periodMs]
   );
 
   const tickRef = useRef(handleTick);

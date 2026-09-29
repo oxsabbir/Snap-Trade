@@ -1,21 +1,25 @@
 import { Pressable, ScrollView, StyleSheet, Text } from 'react-native';
 
-import { TIMEFRAMES, type Timeframe } from '@/lib/kucoin/candles';
+import { LINE_TIMEFRAME, TIMEFRAMES, type TimeframeOrLine } from '@/lib/kucoin/candles';
 import { colors, radius, spacing } from '@/theme';
 
 type Props = {
   value: string;
-  onChange: (timeframe: Timeframe) => void;
+  onChange: (timeframe: TimeframeOrLine) => void;
 };
 
 export function TimeframeTabs({ value, onChange }: Props) {
+  // Line first: it is the widest possible range, so it reads as the leftmost option.
+  // The row is a horizontal ScrollView, so the extra chip costs nothing at narrow widths.
+  const options: TimeframeOrLine[] = [LINE_TIMEFRAME, ...TIMEFRAMES];
+
   return (
     <ScrollView
       horizontal
       showsHorizontalScrollIndicator={false}
       contentContainerStyle={styles.content}
     >
-      {TIMEFRAMES.map((timeframe) => {
+      {options.map((timeframe) => {
         const isActive = timeframe.key === value;
         return (
           <Pressable
