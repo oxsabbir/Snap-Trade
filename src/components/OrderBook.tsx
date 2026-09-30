@@ -133,9 +133,9 @@ function OrderBookBase({ symbol, onPriceSelect }: Props) {
 
       {viewMode !== "bids" ? (
         <View style={styles.asks}>
-          {depth.asks.map((row, index) => (
+          {[...depth.asks].reverse().map((row, index) => (
             <DepthRowView
-              key={`ask:${index}`}
+              key={`ask:${depth.asks.length - 1 - index}`}
               row={row}
               side="ask"
               priceDecimals={priceDecimals}

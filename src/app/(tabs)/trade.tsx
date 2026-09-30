@@ -3,12 +3,15 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { CoinDetail } from "@/components/CoinDetail";
+import { OrderManagement } from "@/components/OrderManagement";
 import { TradeScreen } from "@/components/TradeScreen";
+import { useAccountBalance } from "@/hooks/useAccountBalance";
 import { useActiveCoin } from "@/state/activeCoin";
 import { colors, radius, spacing } from "@/theme";
 
 export default function TradeScreenRoute() {
   const coin = useActiveCoin();
+  const { available, refresh } = useAccountBalance();
 
   if (!coin) {
     return (
@@ -49,7 +52,18 @@ export default function TradeScreenRoute() {
           name={coin.name}
           decimals={coin.decimals}
         />
-        <TradeScreen symbol={coin.symbol} />
+        <TradeScreen
+          symbol={coin.symbol}
+          available={available}
+          refresh={refresh}
+          onOrderFill={refresh}
+        />
+        <OrderManagement
+          symbol={coin.symbol}
+          onDeposit={() => {}}
+          onTutorial={() => {}}
+          available={available}
+        />
       </ScrollView>
     </SafeAreaView>
   );

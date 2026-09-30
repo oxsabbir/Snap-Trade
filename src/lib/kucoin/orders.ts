@@ -87,3 +87,19 @@ export async function placeLimitOrder(
     body: buildLimitOrderBody(params),
   });
 }
+
+export type CancelOrderOptions = {
+  /** Which spot wallet the order was placed from. Defaults to the classic `trade` book. */
+  wallet?: SpotOrderWallet;
+};
+
+export async function cancelOrder(
+  orderId: string,
+  { wallet = 'trade' }: CancelOrderOptions = {}
+): Promise<void> {
+  const base = wallet === 'trade_hf' ? '/api/v1/hf/orders' : '/api/v1/orders';
+  await request<void>(`${base}/${orderId}`, {
+    method: 'DELETE',
+    signed: true,
+  });
+}

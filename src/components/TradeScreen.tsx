@@ -7,6 +7,9 @@ import { colors, spacing } from "@/theme";
 
 type Props = {
   symbol: string;
+  available: Record<string, string>;
+  refresh: () => void;
+  onOrderFill?: () => void;
 };
 
 /**
@@ -24,7 +27,12 @@ type Props = {
  * column scrolls: the screen owns the single scroll view, so a scrollable child here would be a
  * list nested inside a list, competing for the same gesture.
  */
-export const TradeScreen = memo(function TradeScreen({ symbol }: Props) {
+export const TradeScreen = memo(function TradeScreen({
+  symbol,
+  available,
+  refresh,
+  onOrderFill,
+}: Props) {
   const [selection, setSelection] = useState<ExternalPriceSelection | null>(null);
 
   const handlePriceSelect = useCallback((value: string) => {
@@ -43,7 +51,13 @@ export const TradeScreen = memo(function TradeScreen({ symbol }: Props) {
           />
         </View>
         <View style={styles.panel}>
-          <TradePanel symbol={symbol} priceSelection={selection} />
+          <TradePanel
+            symbol={symbol}
+            priceSelection={selection}
+            available={available}
+            refresh={refresh}
+            onOrderFill={onOrderFill}
+          />
         </View>
       </View>
     </View>

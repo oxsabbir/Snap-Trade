@@ -198,3 +198,83 @@ export function useSeedPrice(symbol: string): number | null {
   if (seed.symbol !== symbol) return getTicker(symbol).update?.price ?? null;
   return seed.price;
 }
+
+/**
+ * Side-aware best price seed for the order form.
+ *
+ * Buy  → best ask (lowest ask = cheapest to lift)
+ * Sell → best bid (highest bid = best to hit)
+ *
+ * Same one-shot semantics as `useSeedPrice`: subscribes until a value exists,
+ * resolves, unsubscribes — then silence. Falls back to last-trade price if the
+ * bid/ask fields are missing or non-finite.
+ */
+export function useBestPrice(symbol: string, side: 'buy' | 'sell'): number | null {
+  const [seed, setSeed] = useState(() => {
+    const snap = getTicker(symbol).update;
+    const fb = snap?.price;
+    if (!snap) return { symbol, price: fb ?? null };
+    const best = side === 'buy' ? snap.bestAsk : snap.bestBid;
+    const price = Number.isFinite(best) && best !== null && best !== undefined ? best : fb;
+    return { symbol, side, price: price ?? null };
+  });
+
+  // Reset on symbol or side change — a flip from buy→sell should reseed to the bid.
+  if (seed.symbol !== symbol || seed.side !== side) {
+    const snap = getTicker(symbol).update;
+    const fb = snap?.price;
+    let price: number | null = null;
+    if (snap) {
+      const best = side === 'buy' ? snap.bestAsk : snap.bestBid;
+      price = Number.isFinite(best) && best !== null && best !== undefined ? best : fb ?? null;
+    }
+    setSeed({ symbol, side, price });
+  }
+
+  useEffect(() => {
+    if (seed.price !== null) return;
+
+    let unsubscribe: (() => void) | null = null;
+    let settled = false;
+
+    const resolve = (price: number) => {
+      if (settled) return;
+      settled = true;
+      unsubscribe?.();
+      setSeed((current) => (current.price === null ? { symbol, side, price } : current));
+    };
+
+    unsubscribe = subscribeTicker(symbol, () => {
+      const snap = getTicker(symbol).update;
+      if (!snap) return;
+      const best = side === 'buy' ? snap.bestAsk : snap.bestBid;
+      const price = Number.isFinite(best) && best !== null && best !== undefined ? best : snap.price;
+      if (price !== undefined && price !== null) resolve(price);
+    });
+
+    queueMicrotask(() => {
+      const snap = getTicker(symbol).update;
+      if (!snap) return;
+      const best = side === 'buy' ? snap.bestAsk : snap.bestBid;
+      const price = Number.isFinite(best) && best !== null && best !== undefined ? best : snap.price;
+      if (price !== undefined && price !== null) resolve(price);
+    });
+
+    return () => {
+      settled = true;
+      unsubscribe?.();
+    };
+  }, [seed.price, symbol, side]);
+
+  if (seed.symbol !== symbol || seed.side !== side) {
+    const snap = getTicker(symbol).update;
+    const fb = snap?.price;
+    let price: number | null = null;
+    if (snap) {
+      const best = side === 'buy' ? snap.bestAsk : snap.bestBid;
+      price = Number.isFinite(best) && best !== null && best !== undefined ? best : fb ?? null;
+    }
+    return price;
+  }
+  return seed.price;
+}
