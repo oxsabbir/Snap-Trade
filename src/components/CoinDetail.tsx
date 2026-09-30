@@ -1,17 +1,27 @@
-import { memo, useCallback, useMemo, useState, type ReactNode } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { memo, useCallback, useMemo, useState, type ReactNode } from "react";
+import {
+  ActivityIndicator,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
 
-import { CoinInfoSheet } from '@/components/CoinInfoSheet';
-import { InfoIcon } from '@/components/Icons';
-import { LiveBadge } from '@/components/LiveBadge';
-import { LivePrice } from '@/components/LivePrice';
-import { PriceChart } from '@/components/PriceChart';
-import { TimeframeTabs } from '@/components/TimeframeTabs';
-import { useLifetimeSeries } from '@/hooks/useLifetimeSeries';
-import { useLiveCandles } from '@/hooks/useLiveCandles';
-import { useStableChartHeight } from '@/hooks/useStableChartHeight';
-import { timeframeByKey, LINE_TIMEFRAME, type TimeframeOrLine } from '@/lib/kucoin/candles';
-import { colors, radius, spacing } from '@/theme';
+import { CoinInfoSheet } from "@/components/CoinInfoSheet";
+import { InfoIcon } from "@/components/Icons";
+import { LiveBadge } from "@/components/LiveBadge";
+import { LivePrice } from "@/components/LivePrice";
+import { PriceChart } from "@/components/PriceChart";
+import { TimeframeTabs } from "@/components/TimeframeTabs";
+import { useLifetimeSeries } from "@/hooks/useLifetimeSeries";
+import { useLiveCandles } from "@/hooks/useLiveCandles";
+import { useStableChartHeight } from "@/hooks/useStableChartHeight";
+import {
+  timeframeByKey,
+  LINE_TIMEFRAME,
+  type TimeframeOrLine,
+} from "@/lib/kucoin/candles";
+import { colors, radius, spacing } from "@/theme";
 
 type Props = {
   symbol: string;
@@ -27,11 +37,11 @@ type Props = {
    * order form. Neither reads the quote now — the price is subscribed to directly where it is
    * displayed — so there is nothing left to pass down.
    */
-  children?: ReactNode;
+  // children?: ReactNode;
 };
 
 /** Timeframe a freshly opened pair starts on. */
-const DEFAULT_TIMEFRAME_KEY = '1min';
+const DEFAULT_TIMEFRAME_KEY = "1min";
 
 type ChromeProps = {
   symbol: string;
@@ -72,14 +82,16 @@ const ChartChrome = memo(function ChartChrome({
   onOpenInfo,
   periodLabel,
 }: ChromeProps) {
-  const base = symbol.split('-')[0] ?? '';
+  const base = symbol.split("-")[0] ?? "";
 
   return (
     <>
       <View style={styles.header}>
         <View style={styles.headerText}>
-          <Text style={styles.symbol}>{symbol || '—'}</Text>
-          {name && name !== base ? <Text style={styles.name}>{name}</Text> : null}
+          <Text style={styles.symbol}>{symbol || "—"}</Text>
+          {name && name !== base ? (
+            <Text style={styles.name}>{name}</Text>
+          ) : null}
         </View>
         <Pressable
           onPress={onOpenInfo}
@@ -115,7 +127,7 @@ const ChartChrome = memo(function ChartChrome({
   );
 });
 
-export function CoinDetail({ symbol, name, decimals, children }: Props) {
+export function CoinDetail({ symbol, name, decimals }: Props) {
   const [timeframeKey, setTimeframeKey] = useState(DEFAULT_TIMEFRAME_KEY);
   const [infoOpen, setInfoOpen] = useState(false);
   const [visibleCount, setVisibleCount] = useState<number | null>(null);
@@ -146,7 +158,7 @@ export function CoinDetail({ symbol, name, decimals, children }: Props) {
   // The Line tab is a separate series, not a mode: it pages `endAt` backwards for the
   // whole history and renders as a line, which the candle timeframes no longer do.
   const isLine = timeframeKey === LINE_TIMEFRAME.key;
-  const mode = isLine ? 'line' : 'candle';
+  const mode = isLine ? "line" : "candle";
 
   const live = useLiveCandles(symbol, timeframe, !isLine);
   const lifetime = useLifetimeSeries(symbol, isLine);
@@ -164,10 +176,16 @@ export function CoinDetail({ symbol, name, decimals, children }: Props) {
   // The header can show a price before the socket's first tick. Both series hooks seed one
   // from their own history, and both freeze it, so this value only moves when the series does.
   const seedPrice = isLine ? lifetime.seedPrice : live.seedPrice;
-  const onSelectTimeframe = useCallback((next: TimeframeOrLine) => setTimeframeKey(next.key), []);
+  const onSelectTimeframe = useCallback(
+    (next: TimeframeOrLine) => setTimeframeKey(next.key),
+    [],
+  );
   const onOpenInfo = useCallback(() => setInfoOpen(true), []);
   const onCloseInfo = useCallback(() => setInfoOpen(false), []);
-  const onVisibleRangeChange = useCallback((visible: number) => setVisibleCount(visible), []);
+  const onVisibleRangeChange = useCallback(
+    (visible: number) => setVisibleCount(visible),
+    [],
+  );
   const isZoomed = visibleCount !== null && visibleCount < candles.length;
 
   // "466 weeks · since 2017-10-19" reads as a lifetime at a glance. Absolute dates, not
@@ -176,8 +194,8 @@ export function CoinDetail({ symbol, name, decimals, children }: Props) {
   const firstCandle = candles[0];
   const periodLabel = useMemo(() => {
     if (isLine) {
-      if (!firstCandle) return 'Line · loading history';
-      const pad = (value: number) => value.toString().padStart(2, '0');
+      if (!firstCandle) return "Line · loading history";
+      const pad = (value: number) => value.toString().padStart(2, "0");
       const since = new Date(firstCandle.time);
       return `Line · ${candles.length} weeks · since ${since.getFullYear()}-${pad(since.getMonth() + 1)}-${pad(since.getDate())}`;
     }
@@ -185,7 +203,14 @@ export function CoinDetail({ symbol, name, decimals, children }: Props) {
       return `${visibleCount} of ${candles.length} · pan, pinch, double tap to reset`;
     }
     return `${candles.length} × ${timeframe.label} · drag to pan, pinch to zoom`;
-  }, [candles.length, firstCandle, isLine, isZoomed, timeframe.label, visibleCount]);
+  }, [
+    candles.length,
+    firstCandle,
+    isLine,
+    isZoomed,
+    timeframe.label,
+    visibleCount,
+  ]);
 
   return (
     <View style={styles.section}>
@@ -213,7 +238,9 @@ export function CoinDetail({ symbol, name, decimals, children }: Props) {
           </View>
         ) : error && candles.length === 0 ? (
           <Pressable style={styles.errorBox} onPress={refresh}>
-            <Text style={styles.errorTitle}>{isLine ? 'Could not load history' : 'Could not load candles'}</Text>
+            <Text style={styles.errorTitle}>
+              {isLine ? "Could not load history" : "Could not load candles"}
+            </Text>
             <Text style={styles.errorBody}>{error}</Text>
             <Text style={styles.errorHint}>Tap to retry.</Text>
           </Pressable>
@@ -240,9 +267,14 @@ export function CoinDetail({ symbol, name, decimals, children }: Props) {
         )}
       </View>
 
-      {children}
+      {/* {children} */}
 
-      <CoinInfoSheet symbol={symbol} visible={infoOpen} onClose={onCloseInfo} decimals={decimals} />
+      <CoinInfoSheet
+        symbol={symbol}
+        visible={infoOpen}
+        onClose={onCloseInfo}
+        decimals={decimals}
+      />
     </View>
   );
 }
@@ -252,8 +284,8 @@ const styles = StyleSheet.create({
     // Content-sized: this is one section of the screen's scroll view, not the screen itself.
   },
   header: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: spacing.md,
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.sm,
@@ -266,15 +298,15 @@ const styles = StyleSheet.create({
   symbol: {
     color: colors.text,
     fontSize: 17,
-    fontWeight: '700',
+    fontWeight: "700",
   },
   name: {
     color: colors.textFaint,
     fontSize: 11,
   },
   priceBlock: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: spacing.md,
     paddingHorizontal: spacing.lg,
     paddingBottom: spacing.lg,
@@ -283,9 +315,9 @@ const styles = StyleSheet.create({
     flexGrow: 0,
   },
   toolbar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.lg,
     paddingBottom: spacing.sm,
@@ -293,38 +325,38 @@ const styles = StyleSheet.create({
   periodLabel: {
     color: colors.textFaint,
     fontSize: 11,
-    fontWeight: '600',
+    fontWeight: "600",
     letterSpacing: 0.4,
     flexShrink: 1,
   },
   chartWrap: {
-    justifyContent: 'center',
+    justifyContent: "center",
   },
   loader: {
-    alignSelf: 'center',
-    alignItems: 'center',
+    alignSelf: "center",
+    alignItems: "center",
     gap: spacing.sm,
   },
   loaderCaption: {
     color: colors.textFaint,
     fontSize: 11,
-    fontWeight: '600',
+    fontWeight: "600",
     letterSpacing: 0.4,
   },
   errorBox: {
-    alignItems: 'center',
+    alignItems: "center",
     gap: spacing.sm,
     paddingVertical: spacing.xl,
   },
   errorTitle: {
     color: colors.text,
     fontSize: 15,
-    fontWeight: '600',
+    fontWeight: "600",
   },
   errorBody: {
     color: colors.textMuted,
     fontSize: 13,
-    textAlign: 'center',
+    textAlign: "center",
     paddingHorizontal: spacing.xl,
   },
   errorHint: {

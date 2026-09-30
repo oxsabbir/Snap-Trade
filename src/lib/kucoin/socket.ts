@@ -44,22 +44,50 @@ type Listener = {
   onStatus: (status: SocketStatus) => void;
 };
 
-export async function fetchBullet(): Promise<BulletResponse['instanceServers'][number] & { token: string }> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-  try {
-    const response = await fetch(`${BASE_URL}/api/v1/bullet-public`, {
-      method: 'POST',
-      signal: controller.signal,
-    });
-    const payload = (await response.json()) as { code?: string; data?: BulletResponse };
-    if (!payload.data?.instanceServers?.length) {
-      throw new Error(`Token request failed: ${payload.code ?? response.status}`);
-    }
-    return { token: payload.data.token, ...payload.data.instanceServers[0] };
-  } finally {
-    clearTimeout(timer);
+type BulletServer = BulletResponse['instanceServers'][number] & { token: string };
+
+type CachedBullet = BulletServer & { expiresAt: number };
+let cachedBullet: CachedBullet | null = null;
+let bulletPromise: Promise<BulletServer> | null = null;
+const BULLET_TTL_MS = 60 * 60 * 1000; // 1 hour (KuCoin tokens last 24h)
+
+export async function fetchBullet(): Promise<BulletServer> {
+  const now = Date.now();
+  if (cachedBullet && cachedBullet.expiresAt > now) {
+    return cachedBullet;
   }
+  if (bulletPromise) return bulletPromise;
+
+  bulletPromise = (async () => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    try {
+      const response = await fetch(`${BASE_URL}/api/v1/bullet-public`, {
+        method: 'POST',
+        signal: controller.signal,
+      });
+      const payload = (await response.json()) as { code?: string; data?: BulletResponse };
+      if (!payload.data?.instanceServers?.length) {
+        throw new Error(`Token request failed: ${payload.code ?? response.status}`);
+      }
+      const data: CachedBullet = {
+        token: payload.data.token,
+        ...payload.data.instanceServers[0]!,
+        expiresAt: now + BULLET_TTL_MS,
+      };
+      cachedBullet = data;
+      return data;
+    } finally {
+      clearTimeout(timer);
+      bulletPromise = null;
+    }
+  })();
+
+  return bulletPromise;
+}
+
+export function invalidateBullet(): void {
+  cachedBullet = null;
 }
 
 /**
@@ -76,6 +104,7 @@ export class TickerSocket {
   private latest: TickerUpdate | null = null;
   private pendingSize = 0;
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
+  private lastEmit = 0;
 
   constructor(
     private readonly symbol: string,
@@ -96,6 +125,7 @@ export class TickerSocket {
     // which would land in whatever series the view has moved on to.
     this.latest = null;
     this.pendingSize = 0;
+    this.lastEmit = 0;
     this.socket?.close();
     this.socket = null;
   }
@@ -172,14 +202,32 @@ export class TickerSocket {
 
       this.latest = update;
       if (Number.isFinite(update.size) && update.size > 0) this.pendingSize += update.size;
+
+      const now = Date.now();
+      // Leading edge: deliver immediately if outside the throttle window (e.g. first tick)
+      if (!this.lastEmit || now - this.lastEmit >= THROTTLE_MS) {
+        if (this.flushTimer) {
+          clearTimeout(this.flushTimer);
+          this.flushTimer = null;
+        }
+        this.lastEmit = now;
+        const size = this.pendingSize;
+        this.pendingSize = 0;
+        this.listener.onTick({ ...this.latest, size });
+        return;
+      }
+
+      // Trailing edge: batch high-frequency updates into the 200ms window
       if (!this.flushTimer) {
+        const remaining = THROTTLE_MS - (now - this.lastEmit);
         this.flushTimer = setTimeout(() => {
           this.flushTimer = null;
           if (this.stopped || !this.latest) return;
+          this.lastEmit = Date.now();
           const size = this.pendingSize;
           this.pendingSize = 0;
           this.listener.onTick({ ...this.latest, size });
-        }, THROTTLE_MS);
+        }, Math.max(0, remaining));
       }
     };
 
@@ -188,10 +236,13 @@ export class TickerSocket {
       this.listener.onStatus('offline');
     };
 
-    socket.onclose = () => {
+    socket.onclose = (event: WebSocketCloseEvent) => {
       if (this.pingTimer) clearInterval(this.pingTimer);
       this.pingTimer = null;
       if (this.socket === socket) this.socket = null;
+      if (event?.code === 4001 || event?.code === 4002) {
+        invalidateBullet();
+      }
       if (!this.stopped) this.scheduleReconnect();
     };
   }

@@ -100,8 +100,8 @@ export function parseLevel2(raw: unknown): Level2Snapshot | null {
   return { symbol, asks, bids };
 }
 
-const byPriceAsc = (a: PriceLevel, b: PriceLevel): number => compareDecimal(a.price, b.price) ?? 0;
-const byPriceDesc = (a: PriceLevel, b: PriceLevel): number => compareDecimal(b.price, a.price) ?? 0;
+const byPriceAsc = (a: PriceLevel, b: PriceLevel): number => Number(a.price) - Number(b.price);
+const byPriceDesc = (a: PriceLevel, b: PriceLevel): number => Number(b.price) - Number(a.price);
 
 /**
  * Groups levels into price buckets of `step` and re-sums the size in each, so a coarse view
@@ -109,8 +109,8 @@ const byPriceDesc = (a: PriceLevel, b: PriceLevel): number => compareDecimal(b.p
  * step, matching how the tick itself is drawn.
  */
 export function aggregateLevels(levels: PriceLevel[], step?: string | null): PriceLevel[] {
-  const live = levels.filter((level) => compareDecimal(level.size, '0') === 1);
-  if (!step || compareDecimal(step, '0') !== 1) return live;
+  const live = levels.filter((level) => Number(level.size) > 0);
+  if (!step || Number(step) <= 0) return live;
 
   const buckets = new Map<string, string>();
   for (const level of live) {

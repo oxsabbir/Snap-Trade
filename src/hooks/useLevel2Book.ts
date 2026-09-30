@@ -25,6 +25,7 @@ export function useLevel2Book(symbol: string): Level2BookState {
   if (symbol !== activeSymbol) {
     setActiveSymbol(symbol);
     setSnapshot(null);
+    setStatus('connecting');
   }
 
   useEffect(() => {

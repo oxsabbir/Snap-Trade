@@ -8,7 +8,7 @@
  * keeps the UI at a sane frame rate.
  */
 import { request } from './client';
-import { fetchBullet } from './socket';
+import { fetchBullet, invalidateBullet } from './socket';
 import { parseLevels, type Level2Snapshot, type PriceLevel } from './orderbook';
 import { compareDecimal } from '@/utils/decimal';
 
@@ -96,26 +96,26 @@ export class Level2Socket {
     if (this.stopped) return;
     this.listener.onStatus('connecting');
 
-    let server: Awaited<ReturnType<typeof fetchBullet>>;
-    try {
-      server = await fetchBullet();
-    } catch {
+    // Fetch bullet token and initial order book REST snapshot concurrently
+    const [serverResult, snapshotResult] = await Promise.allSettled([
+      fetchBullet(),
+      fetchOrderBookSnapshot(this.symbol),
+    ]);
+    if (this.stopped) return;
+
+    if (serverResult.status === 'rejected') {
       this.scheduleReconnect();
       return;
     }
-    if (this.stopped) return;
+    const server = serverResult.value;
 
-    // Snapshot first, subscribe second, so the first diffs land on a full book. A failed
-    // snapshot is not fatal: the feed still converges, just from an empty book.
-    try {
-      const snapshot = await fetchOrderBookSnapshot(this.symbol);
+    if (snapshotResult.status === 'fulfilled' && snapshotResult.value) {
+      const snapshot = snapshotResult.value;
       if (this.stopped) return;
       this.replace(snapshot.asks, snapshot.bids);
-      this.dirty = true;
-    } catch {
-      // Keep going with the live diffs alone.
+      // Immediately deliver initial snapshot so the UI renders the orderbook with zero delay!
+      this.listener.onSnapshot(this.snapshot());
     }
-    if (this.stopped) return;
 
     const url = `${server.endpoint}?token=${encodeURIComponent(server.token)}&pingInterval=${server.pingInterval}`;
     const socket = new WebSocket(url);
@@ -140,7 +140,7 @@ export class Level2Socket {
         }
       }, Math.max(server.pingInterval / 2, 5_000));
       this.listener.onStatus('live');
-      this.markDirty();
+      if (this.dirty) this.markDirty();
     };
 
     socket.onmessage = (event: WebSocketMessageEvent) => {
@@ -159,10 +159,13 @@ export class Level2Socket {
       if (!this.stopped) this.listener.onStatus('offline');
     };
 
-    socket.onclose = () => {
+    socket.onclose = (event: WebSocketCloseEvent) => {
       if (this.pingTimer) clearInterval(this.pingTimer);
       this.pingTimer = null;
       if (this.socket === socket) this.socket = null;
+      if (event?.code === 4001 || event?.code === 4002) {
+        invalidateBullet();
+      }
       if (!this.stopped) this.scheduleReconnect();
     };
   }

@@ -1,11 +1,11 @@
-import { router } from 'expo-router';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { router } from "expo-router";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 
-import { CoinDetail } from '@/components/CoinDetail';
-import { TradeScreen } from '@/components/TradeScreen';
-import { useActiveCoin } from '@/state/activeCoin';
-import { colors, radius, spacing } from '@/theme';
+import { CoinDetail } from "@/components/CoinDetail";
+import { TradeScreen } from "@/components/TradeScreen";
+import { useActiveCoin } from "@/state/activeCoin";
+import { colors, radius, spacing } from "@/theme";
 
 export default function TradeScreenRoute() {
   const coin = useActiveCoin();
@@ -14,9 +14,11 @@ export default function TradeScreenRoute() {
     return (
       <View style={styles.empty}>
         <Text style={styles.emptyTitle}>No coin selected</Text>
-        <Text style={styles.emptyBody}>Pick a pair from Markets to load its chart here.</Text>
+        <Text style={styles.emptyBody}>
+          Pick a pair from Markets to load its chart here.
+        </Text>
         <Pressable
-          onPress={() => router.navigate('/(tabs)')}
+          onPress={() => router.navigate("/(tabs)")}
           style={styles.cta}
           accessibilityRole="button"
           accessibilityLabel="Browse markets"
@@ -28,7 +30,7 @@ export default function TradeScreenRoute() {
   }
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={['top']}>
+    <SafeAreaView style={styles.safeArea} edges={["top"]}>
       {/* One scroll view for the whole screen, so the sections below the chart are added as
           siblings here rather than each bringing its own scrolling. Nothing below may nest a
           scroll view of its own; a section that outgrows the screen grows this one instead. */}
@@ -42,9 +44,12 @@ export default function TradeScreenRoute() {
         maximumZoomScale={1}
         showsVerticalScrollIndicator={false}
       >
-        <CoinDetail symbol={coin.symbol} name={coin.name} decimals={coin.decimals}>
-          <TradeScreen symbol={coin.symbol} />
-        </CoinDetail>
+        <CoinDetail
+          symbol={coin.symbol}
+          name={coin.name}
+          decimals={coin.decimals}
+        />
+        <TradeScreen symbol={coin.symbol} />
       </ScrollView>
     </SafeAreaView>
   );
@@ -66,8 +71,8 @@ const styles = StyleSheet.create({
   },
   empty: {
     flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
     backgroundColor: colors.bg,
     paddingHorizontal: spacing.xl,
     gap: spacing.sm,
@@ -75,24 +80,24 @@ const styles = StyleSheet.create({
   emptyTitle: {
     color: colors.text,
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: "600",
   },
   emptyBody: {
     color: colors.textMuted,
     fontSize: 13,
-    textAlign: 'center',
+    textAlign: "center",
   },
   cta: {
     marginTop: spacing.md,
     paddingHorizontal: spacing.lg,
     height: 38,
-    justifyContent: 'center',
+    justifyContent: "center",
     borderRadius: radius.pill,
     backgroundColor: colors.accent,
   },
   ctaText: {
-    color: '#06231C',
+    color: "#06231C",
     fontSize: 13,
-    fontWeight: '700',
+    fontWeight: "700",
   },
 });
