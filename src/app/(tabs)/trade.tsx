@@ -11,7 +11,9 @@ import { colors, radius, spacing } from "@/theme";
 
 export default function TradeScreenRoute() {
   const coin = useActiveCoin();
-  const { available, refresh } = useAccountBalance();
+  // The order form reads this from the shared store too, so this is one `/accounts` request
+  // shared by both consumers rather than one each.
+  const { available } = useAccountBalance();
 
   if (!coin) {
     return (
@@ -52,12 +54,7 @@ export default function TradeScreenRoute() {
           name={coin.name}
           decimals={coin.decimals}
         />
-        <TradeScreen
-          symbol={coin.symbol}
-          available={available}
-          refresh={refresh}
-          onOrderFill={refresh}
-        />
+        <TradeScreen symbol={coin.symbol} />
         <OrderManagement
           symbol={coin.symbol}
           onDeposit={() => {}}

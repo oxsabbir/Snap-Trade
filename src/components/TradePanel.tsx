@@ -28,6 +28,7 @@ import {
   type FillPercent,
 } from '@/lib/trade';
 import { colors, radius, spacing } from '@/theme';
+import { trackPlacedOrder } from '@/state/openOrders';
 import { useSeedPrice } from '@/state/ticker';
 import { formatAmount } from '@/utils/format';
 
@@ -58,7 +59,9 @@ function TradePanelBase({ symbol, testMode = TEST_MODE, priceSelection }: Props)
   const [baseCurrency = '', quoteCurrency = ''] = symbol.split('-');
 
   const { rules, isLoading: rulesLoading, error: rulesError } = useSymbolRules(symbol);
-  const { available, refresh: refreshBalance } = useAccountBalance();
+  // Read from the shared balance store, so a cancel driven from the order list below updates the
+  // number here instead of leaving a second, independently fetched copy behind.
+  const { available } = useAccountBalance();
 
   // The form needs a price once per pair and then not again — it is a seed, not a live value.
   // Read through the store rather than passed in as a prop: a `lastPrice` prop changed several
@@ -225,9 +228,10 @@ function TradePanelBase({ symbol, testMode = TEST_MODE, priceSelection }: Props)
 
     setIsSubmitting(true);
     try {
+      const clientOid = createClientOid();
       const placed = await placeLimitOrder(
         {
-          clientOid: createClientOid(),
+          clientOid,
           side,
           symbol,
           price: check.normalized.price,
@@ -235,6 +239,17 @@ function TradePanelBase({ symbol, testMode = TEST_MODE, priceSelection }: Props)
         },
         { test: testMode }
       );
+      // Show it in the open-orders list on this tap rather than after its next poll. A dry run
+      // returns an id the exchange never created, so there is nothing real to list.
+      //
+      // This also refreshes the balance, since placing freezes the funds immediately. A dry run
+      // moves no funds, so it needs no refresh either.
+      if (!testMode) {
+        trackPlacedOrder(
+          { orderId: placed.orderId, clientOid },
+          { symbol, side, price: check.normalized.price, size: check.normalized.size }
+        );
+      }
       const verb = side === 'buy' ? 'Buy' : 'Sell';
       setToast({
         tone: 'success',
@@ -243,7 +258,6 @@ function TradePanelBase({ symbol, testMode = TEST_MODE, priceSelection }: Props)
       setSize('');
       setTotal('');
       setPercent(null);
-      refreshBalance();
     } catch (caught) {
       setToast({ tone: 'error', message: describeError(caught, 'Order failed.') });
     } finally {

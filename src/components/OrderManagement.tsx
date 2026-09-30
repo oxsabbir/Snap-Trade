@@ -1,11 +1,5 @@
-import { memo, useCallback, useState } from 'react';
-import {
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { memo, useCallback, useMemo, useState } from 'react';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { TrayIcon } from '@/components/Icons';
 import { useOpenOrders, type OpenOrder } from '@/hooks/useOpenOrders';
@@ -16,7 +10,6 @@ type Props = {
   symbol: string;
   onDeposit?: () => void;
   onTutorial?: () => void;
-  onOrderUpdate?: (message: unknown) => void;
   /** Trade-wallet available balances, passed from parent to avoid duplicate fetches. */
   available?: Record<string, string>;
 };
@@ -26,24 +19,32 @@ const SUB_TABS = ['Open Orders', 'Advanced Orders'] as const;
 
 const EMPTY_TRAY_SIZE = 64;
 
-function formatFilledDisplay(order: OpenOrder): string {
-  const filled = Number(order.filledSize);
+/** Filled size against the ordered size, as a 0..1 fraction for the row's progress bar. */
+function filledFraction(order: OpenOrder): number {
   const total = Number(order.size);
-  if (total === 0) return '0 / 0 (0%)';
-  const pct = Math.min(100, Math.max(0, (filled / total) * 100));
-  return `${formatAmount(filled)} / ${formatAmount(total)} (${pct.toFixed(0)}%)`;
+  if (!Number.isFinite(total) || total <= 0) return 0;
+  const filled = Number(order.filledSize);
+  if (!Number.isFinite(filled) || filled <= 0) return 0;
+  return Math.min(1, filled / total);
+}
+
+function formatFilledDisplay(order: OpenOrder): string {
+  const total = Number(order.size);
+  if (!Number.isFinite(total) || total <= 0) {
+    return `${formatAmount(Number(order.filledSize) || 0)} / —`;
+  }
+  const pct = Math.round(filledFraction(order) * 100);
+  return `${formatAmount(Number(order.filledSize) || 0)} / ${formatAmount(total)} · ${pct}%`;
 }
 
 function OrderRow({
   order,
   onCancel,
   isCancelling,
-  flash,
 }: {
   order: OpenOrder;
   onCancel: () => void;
   isCancelling: boolean;
-  flash?: boolean;
 }) {
   const isBuy = order.side === 'buy';
   const sideColor = isBuy ? colors.up : colors.down;
@@ -56,33 +57,49 @@ function OrderRow({
       ? colors.warning
       : colors.textMuted;
 
+  const progress = filledFraction(order);
+  const hasProgress = progress > 0;
+  const isDone = order.status === 'filled' || order.status === 'cancelled';
+
   return (
     <View
       style={[
         styles.row,
-        flash && styles.rowFlash,
+        isDone && styles.rowDone,
+        isCancelling && styles.rowCancelling,
       ]}
     >
-      <View style={styles.sideIndicator} />
+      <View style={[styles.sideIndicator, { backgroundColor: sideColor }]} />
       <View style={styles.rowLeft}>
         <View style={styles.rowTop}>
-          <Text style={[styles.symbol, { color: sideColor }]}>{order.symbol.replace('-', '/')}</Text>
+          <Text style={[styles.symbol, { color: sideColor }]}>
+            {order.symbol.replace('-', '/')}
+          </Text>
           <Text style={styles.type}>{order.type === 'limit' ? 'Limit' : 'Market'}</Text>
         </View>
         <View style={styles.rowBottom}>
           <Text style={styles.price}>Price: {formatAmount(Number(order.price))}</Text>
           <Text style={styles.filled}>{formatFilledDisplay(order)}</Text>
         </View>
+        {hasProgress ? (
+          <View style={styles.progressTrack}>
+            <View
+              style={[
+                styles.progressFill,
+                { width: `${Math.round(progress * 100)}%`, backgroundColor: sideColor },
+              ]}
+            />
+          </View>
+        ) : null}
       </View>
       <View style={styles.rowRight}>
-        <Text style={[styles.status, { color: statusColor }]}>{order.status}</Text>
+        <Text style={[styles.status, { color: statusColor }]}>
+          {order.status.replace('_', ' ')}
+        </Text>
         <Pressable
           onPress={onCancel}
-          disabled={isCancelling}
-          style={[
-            styles.cancelBtn,
-            isCancelling && styles.cancelBtnDisabled,
-          ]}
+          disabled={isCancelling || isDone}
+          style={[styles.cancelBtn, (isCancelling || isDone) && styles.cancelBtnDisabled]}
           accessibilityRole="button"
           accessibilityLabel={`Cancel order ${order.orderId.slice(0, 8)}`}
           hitSlop={8}
@@ -135,46 +152,27 @@ export const OrderManagement = memo(function OrderManagement({
   symbol,
   onDeposit,
   onTutorial,
-  onOrderUpdate,
   available = {},
 }: Props) {
   const [activeTab, setActiveTab] = useState(0);
   const [activeSubTab, setActiveSubTab] = useState(0);
   const [hideOtherPairs, setHideOtherPairs] = useState(false);
-  const [flashOrderId, setFlashOrderId] = useState<string | null>(null);
+
+  const { orders, openCount, isLoading, error, cancelling, cancelOrder } = useOpenOrders();
 
   const usdtBalance = available['USDT'] ?? '0';
 
-  const {
-    orders,
-    openCount,
-    isLoading,
-    error,
-    applyOrderUpdate,
-    cancelOrder: cancelOrderFn,
-  } = useOpenOrders(symbol, hideOtherPairs);
-
-  const handleOrderUpdate = useCallback(
-    (message: unknown) => {
-      if (onOrderUpdate) onOrderUpdate(message);
-      applyOrderUpdate(message);
-      const msg = message as Record<string, unknown> | null;
-      if (!msg) return;
-      const orderId = String(msg.orderId ?? '');
-      const status = String(msg.status ?? '').toLowerCase();
-      if (orderId && (status === 'filled' || status === 'cancelled' || status === 'done' || status === 'canceled')) {
-        setFlashOrderId(orderId);
-        setTimeout(() => setFlashOrderId(null), 1500);
-      }
-    },
-    [applyOrderUpdate, onOrderUpdate]
+  // Filtering is presentational only, so toggling it never re-requests the list.
+  const visibleOrders = useMemo(
+    () => (hideOtherPairs ? orders.filter((order) => order.symbol === symbol) : orders),
+    [orders, hideOtherPairs, symbol]
   );
 
   const handleCancel = useCallback(
     (orderId: string) => {
-      cancelOrderFn(orderId);
+      void cancelOrder(orderId);
     },
-    [cancelOrderFn]
+    [cancelOrder]
   );
 
   if (activeTab !== 0) {
@@ -194,7 +192,10 @@ export const OrderManagement = memo(function OrderManagement({
     );
   }
 
-  const visibleOrders = orders;
+  // Only a genuinely empty list is a loading state. A refresh runs in the background after every
+  // cancel, and replacing live rows with a spinner then would throw away what the user just did.
+  const showLoading = isLoading && orders.length === 0;
+  const showEmpty = !showLoading && visibleOrders.length === 0;
 
   return (
     <View style={styles.container}>
@@ -211,39 +212,48 @@ export const OrderManagement = memo(function OrderManagement({
         onPress={setActiveSubTab}
       />
 
-      <FilterRow
-        hideOtherPairs={hideOtherPairs}
-        onToggle={setHideOtherPairs}
-      />
+      {activeSubTab === 0 ? (
+        <>
+          <FilterRow
+            hideOtherPairs={hideOtherPairs}
+            onToggle={setHideOtherPairs}
+          />
 
-      {error && <View style={styles.errorBanner}>{error}</View>}
+          {error ? (
+            <View style={styles.errorBanner}>
+              <Text style={styles.errorText}>{error}</Text>
+            </View>
+          ) : null}
 
-      {isLoading ? (
-        <View style={styles.loadingContainer}>
-          <Text style={styles.loadingText}>Loading orders…</Text>
-        </View>
-      ) : visibleOrders.length === 0 ? (
-        <EmptyState
-          balance={formatAmount(Number(usdtBalance))}
-          onDeposit={onDeposit}
-          onTutorial={onTutorial}
-        />
-      ) : (
-        <ScrollView
-          style={styles.listContainer}
-          contentContainerStyle={styles.listContent}
-          showsVerticalScrollIndicator={false}
-        >
-          {visibleOrders.map((order) => (
-            <OrderRow
-              key={order.orderId}
-              order={order}
-              onCancel={() => handleCancel(order.orderId)}
-              isCancelling={false}
-              flash={flashOrderId === order.orderId}
+          {showLoading ? (
+            <View style={styles.loadingContainer}>
+              <Text style={styles.loadingText}>Loading orders…</Text>
+            </View>
+          ) : showEmpty ? (
+            <EmptyState
+              balance={formatAmount(Number(usdtBalance))}
+              onDeposit={onDeposit}
+              onTutorial={onTutorial}
             />
-          ))}
-        </ScrollView>
+          ) : (
+            // A plain column, not a scroll view: the route already owns one for the whole screen
+            // and a list nested inside it fights the user for the same gesture.
+            <View style={styles.list}>
+              {visibleOrders.map((order) => (
+                <OrderRow
+                  key={order.orderId}
+                  order={order}
+                  onCancel={() => handleCancel(order.orderId)}
+                  isCancelling={cancelling.has(order.orderId)}
+                />
+              ))}
+            </View>
+          )}
+        </>
+      ) : (
+        <View style={styles.inactiveContent}>
+          <Text style={styles.inactiveText}>Advanced orders — coming soon</Text>
+        </View>
       )}
     </View>
   );
@@ -465,6 +475,11 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(246,70,93,0.16)',
     borderRadius: radius.sm,
   },
+  errorText: {
+    color: colors.down,
+    fontSize: 12,
+    fontWeight: '600',
+  },
   loadingContainer: {
     alignItems: 'center',
     paddingVertical: spacing.xl,
@@ -498,12 +513,8 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
   },
-  listContainer: {
-    maxHeight: 400,
-  },
-  listContent: {
+  list: {
     gap: spacing.xs,
-    paddingBottom: spacing.sm,
   },
   row: {
     flexDirection: 'row',
@@ -515,15 +526,21 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     borderRadius: radius.md,
   },
-  rowFlash: {
-    backgroundColor: 'rgba(35,175,137,0.12)',
-    borderColor: colors.accent,
+  // A finished order stays on screen just long enough to read, so it is dimmed rather than
+  // dropped while it lingers.
+  rowDone: {
+    opacity: 0.55,
+  },
+  // The row holds its place while the cancel is in flight so the spinner has something to show
+  // on, and so a refused cancel leaves the order visible instead of silently swallowing it.
+  rowCancelling: {
+    opacity: 0.6,
   },
   sideIndicator: {
     width: 3,
-    height: '100%',
+    alignSelf: 'stretch',
     borderRadius: 1.5,
-    minHeight: 48,
+    minHeight: 44,
   },
   rowLeft: {
     flex: 1,
@@ -563,6 +580,16 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontVariant: ['tabular-nums'],
   },
+  progressTrack: {
+    height: 3,
+    borderRadius: 1.5,
+    backgroundColor: colors.surfaceAlt,
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: 3,
+    borderRadius: 1.5,
+  },
   rowRight: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -571,7 +598,6 @@ const styles = StyleSheet.create({
   status: {
     fontSize: 11,
     fontWeight: '600',
-    textTransform: 'capitalize',
   },
   cancelBtn: {
     paddingHorizontal: spacing.sm,
@@ -595,7 +621,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   inactiveContent: {
-    flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: spacing.xl,
