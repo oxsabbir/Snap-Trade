@@ -39,6 +39,11 @@ export type RequestOptions = {
   body?: Record<string, unknown>;
   /** Attach KC-API-* headers. Requires credentials. */
   signed?: boolean;
+  /**
+   * Overrides the default timeout. The reference payloads are the largest responses the app asks
+   * for and need noticeably longer than a ticker or an order book.
+   */
+  timeoutMs?: number;
 };
 
 function buildQuery(query: RequestOptions['query']): string {
@@ -91,8 +96,13 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
     headers['KC-API-KEY-VERSION'] = API_VERSION;
   }
 
+  const timeoutMs = options.timeoutMs ?? REQUEST_TIMEOUT_MS;
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
 
   let response: Response;
   try {
@@ -103,6 +113,14 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
       signal: controller.signal,
     });
   } catch (error) {
+    // An aborted fetch surfaces as "Fetch request has been canceled", which says nothing useful
+    // about what happened, so report the timeout in those terms instead.
+    if (timedOut) {
+      throw new KuCoinApiError(
+        'TIMEOUT',
+        `KuCoin did not respond within ${Math.round(timeoutMs / 1000)}s.`
+      );
+    }
     const message = error instanceof Error ? error.message : 'Network request failed';
     throw new KuCoinApiError('NETWORK_ERROR', message);
   } finally {

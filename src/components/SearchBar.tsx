@@ -34,8 +34,9 @@ export function SearchBar({
         placeholder={placeholder}
         placeholderTextColor={colors.textFaint}
         style={styles.input}
-        autoCapitalize="characters"
+        autoCapitalize="none"
         autoCorrect={false}
+        spellCheck={false}
         returnKeyType="search"
         clearButtonMode="never"
       />

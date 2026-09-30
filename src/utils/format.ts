@@ -9,6 +9,17 @@ export function decimalsFromIncrement(increment: string): number {
   return Math.min(increment.length - dot - 1, MAX_TICK_DECIMALS);
 }
 
+/**
+ * Fallback precision for a price that arrived before its increment is known: the decimal count the
+ * exchange itself printed the price with. Display only, and replaced once `/symbols` lands.
+ */
+export function decimalsFromPrice(price: string | undefined): number {
+  if (!price) return 0;
+  const dot = price.indexOf('.');
+  if (dot === -1) return 0;
+  return Math.min(price.length - dot - 1, MAX_TICK_DECIMALS);
+}
+
 /** KuCoin-style adaptive precision so cheap coins keep their small digits visible. */
 export function formatPrice(value: number, decimals?: number): string {
   if (!Number.isFinite(value)) return '-';

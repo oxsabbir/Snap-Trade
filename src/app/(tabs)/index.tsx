@@ -4,10 +4,12 @@ import {
   FlatList,
   Keyboard,
   RefreshControl,
+  type ListRenderItem,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
+import { useIsFocused } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { FAVORITES_TAB, QuoteTabs, type TabValue } from '@/components/QuoteTabs';
@@ -18,13 +20,18 @@ import { SpotRow } from '@/components/SpotRow';
 import { useRecentSearches } from '@/hooks/useRecentSearches';
 import { useSpotMarkets } from '@/hooks/useSpotMarkets';
 import { searchMarkets, type QuoteFilter } from '@/lib/kucoin/market';
+import type { SpotMarket } from '@/lib/kucoin/types';
 import { colors, spacing } from '@/theme';
 import { formatTime } from '@/utils/format';
 
 const POPULAR_COUNT = 10;
+/** Module level so the list always sees the same extractor and never rebuilds its key map. */
+const keyExtractor = (market: SpotMarket) => market.symbol;
 
 export default function MarketsScreen() {
-  const { markets, isLoading, isRefreshing, error, lastUpdated, refresh } = useSpotMarkets();
+  const { markets, isLoading, isRefreshing, error, lastUpdated, refresh } = useSpotMarkets(
+    useIsFocused()
+  );
   const { recents, add: addRecent, remove: removeRecent, clear: clearRecents } = useRecentSearches();
   const [search, setSearch] = useState('');
   const [tab, setTab] = useState<TabValue>('All');
@@ -54,8 +61,8 @@ export default function MarketsScreen() {
       tab === FAVORITES_TAB
         ? sortedMarkets.filter((market) => favorites.has(market.symbol))
         : sortedMarkets;
-    return searchMarkets(source, quoteFilter, search);
-  }, [favorites, quoteFilter, search, sortedMarkets, tab]);
+    return searchMarkets(source, quoteFilter, activeQuery);
+  }, [favorites, quoteFilter, activeQuery, sortedMarkets, tab]);
 
   const popularSymbols = useMemo(() => {
     const seen = new Set<string>();
@@ -68,6 +75,19 @@ export default function MarketsScreen() {
     }
     return picked;
   }, [sortedMarkets]);
+
+  // A new `renderItem` on every render hands the list a fresh prop and forces every visible cell to
+  // re-render, which would undo the row memo even when the market objects themselves are unchanged.
+  const renderRow = useCallback<ListRenderItem<SpotMarket>>(
+    ({ item }) => (
+      <SpotRow
+        market={item}
+        isFavorite={favorites.has(item.symbol)}
+        onToggleFavorite={toggleFavorite}
+      />
+    ),
+    [favorites, toggleFavorite]
+  );
 
   const dismissKeyboard = useCallback(() => Keyboard.dismiss(), []);
 
@@ -143,14 +163,8 @@ export default function MarketsScreen() {
 
           <FlatList
             data={visibleMarkets}
-            keyExtractor={(market) => market.symbol}
-            renderItem={({ item }) => (
-              <SpotRow
-                market={item}
-                isFavorite={favorites.has(item.symbol)}
-                onToggleFavorite={toggleFavorite}
-              />
-            )}
+            keyExtractor={keyExtractor}
+            renderItem={renderRow}
             ItemSeparatorComponent={Separator}
             contentContainerStyle={styles.listContent}
             keyboardShouldPersistTaps="handled"
@@ -169,14 +183,13 @@ export default function MarketsScreen() {
               isLoading ? (
                 <ActivityIndicator style={styles.empty} color={colors.accent} />
               ) : (
-                <EmptyState tab={tab} hasSearch={search.trim().length > 0} error={error} />
+                <EmptyState tab={tab} hasSearch={activeQuery.length > 0} error={error} />
               )
             }
             ListFooterComponent={<View style={styles.footer} />}
-            initialNumToRender={14}
+            initialNumToRender={20}
             maxToRenderPerBatch={16}
             windowSize={9}
-            removeClippedSubviews
           />
         </>
       )}
