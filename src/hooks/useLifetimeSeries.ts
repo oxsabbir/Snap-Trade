@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { fetchLineSeries } from '@/lib/kucoin/candles';
-import type { TickerUpdate } from '@/lib/kucoin/socket';
 import type { Candle } from '@/lib/kucoin/types';
+import { getTicker, subscribeTicker } from '@/state/ticker';
 
 /**
  * Lifetime series are expensive relative to a single candle page — 1 to 5 requests,
@@ -37,6 +37,12 @@ export function resolveBaseSeries(
 }
 export type LineSeriesState = {
   candles: Candle[];
+  /**
+   * The last candle's close as of the moment history arrived, frozen thereafter. The chart
+   * header shows this until the socket's first tick. The Line tab skips the candle fetch
+   * entirely, so without this the header would have nothing at all to show on mount.
+   */
+  seedPrice: number | null;
   isLoading: boolean;
   error: string | null;
   /** Requests made so far, for the loading copy. Zero once loaded or served from cache. */
@@ -47,32 +53,37 @@ export type LineSeriesState = {
 /**
  * The whole available price history as a single line series.
  *
- * Deliberately owns no socket. `useLiveCandles` already holds one per symbol, so the
- * ticker is passed in and only the final point is patched — otherwise opening both
- * would mean two authenticated socket connections for the same symbol.
+ * Opens no connection of its own: `@/state/ticker` already holds one per symbol and hands it
+ * out to subscribers, so asking it for the last price here is a subscription on an existing
+ * socket rather than a second authenticated connection. Only the newest bucket is tracked from
+ * it — the rest of the series is history.
  *
  * `enabled` gates the fetch so the walk does not run for the seven ordinary timeframes.
  */
-export function useLifetimeSeries(
-  symbol: string,
-  enabled: boolean,
-  ticker: TickerUpdate | null
-): LineSeriesState {
+export function useLifetimeSeries(symbol: string, enabled: boolean): LineSeriesState {
   const [series, setSeries] = useState<Candle[]>([]);
+  const [seedPrice, setSeedPrice] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pages, setPages] = useState(0);
   const [nonce, setNonce] = useState(0);
+  const [livePrice, setLivePrice] = useState<number | null>(null);
   const [activeKey, setActiveKey] = useState('');
 
   // Reset during render so switching symbol or tab never flashes the previous series,
   // matching the pattern already used in useLiveCandles and PriceChart.
   const key = `${symbol}:${enabled}:${nonce}`;
   if (key !== activeKey) {
+    const cached = cache.get(symbol);
     setActiveKey(key);
     setSeries([]);
+    // A cached symbol has no fetch to seed from — its effect returns early — so it is seeded
+    // here from the cached walk instead, which keeps the header populated on a repeat visit.
+    const cachedLast = cached?.[cached.length - 1];
+    setSeedPrice(cached ? (cachedLast?.close ?? null) : null);
     setError(null);
     setPages(0);
+    setLivePrice(null);
     // A cached symbol is ready immediately, so do not flash a spinner for it.
     setIsLoading(enabled && !cache.has(symbol));
   }
@@ -93,6 +104,10 @@ export function useLifetimeSeries(
         if (cancelled) return;
         cache.set(symbol, next);
         setSeries(next);
+        // The header needs a price before the socket's first tick, and this tab never loads
+        // candle history. Frozen once seeded; see LiveCandlesState.seedPrice.
+        const last = next[next.length - 1];
+        if (last) setSeedPrice(last.close);
         setIsLoading(false);
         setPages(0);
       },
@@ -109,39 +124,46 @@ export function useLifetimeSeries(
     };
   }, [enabled, nonce, symbol]);
 
+  // The newest bucket is still forming, so track the live price. Held as its own piece of state
+  // and folded in below rather than patching the array in the subscription, so the effect body
+  // stays free of array work and a price that has not moved costs nothing.
+  useEffect(() => {
+    if (!symbol) return;
+    return subscribeTicker(symbol, () => {
+      const update = getTicker(symbol).update;
+      if (!update || !Number.isFinite(update.price) || update.price <= 0) return;
+      setLivePrice(update.price);
+    });
+  }, [symbol]);
+
   // A cache hit is served straight from the map; see resolveBaseSeries.
   const base = useMemo(
     () => resolveBaseSeries(enabled, series, cache.get(symbol)),
     [enabled, series, symbol]
   );
 
-  // The newest bucket is still forming, so track the live price. Done as derived state
-  // rather than an effect that patches the array: it keeps the effect body free of
-  // setState, avoids a cascading render per tick, and skips the array copy entirely when
-  // the price has not moved.
-  //
   // Volume is deliberately left alone. The ticker reports a per-trade size, and adding
   // those to a weekly total would be a different quantity from the REST volume, so the
   // bar would quietly disagree with every other timeframe.
   const candles = useMemo(() => {
-    if (!ticker || !Number.isFinite(ticker.price) || ticker.price <= 0) return base;
+    if (livePrice === null) return base;
     const last = base[base.length - 1];
-    if (!last || last.close === ticker.price) return base;
+    if (!last || last.close === livePrice) return base;
     return [
       ...base.slice(0, -1),
       {
         ...last,
-        close: ticker.price,
-        high: Math.max(last.high, ticker.price),
-        low: Math.min(last.low, ticker.price),
+        close: livePrice,
+        high: Math.max(last.high, livePrice),
+        low: Math.min(last.low, livePrice),
       },
     ];
-  }, [base, ticker]);
+  }, [base, livePrice]);
 
   const refresh = useCallback(() => {
     cache.delete(symbol);
     setNonce((value) => value + 1);
   }, [symbol]);
 
-  return { candles, isLoading, error, pages, refresh };
+  return { candles, seedPrice, isLoading, error, pages, refresh };
 }

@@ -1,4 +1,4 @@
-import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import {
   PanResponder,
   StyleSheet,
@@ -161,7 +161,7 @@ function touchDistance(a: NativeTouchEvent, b: NativeTouchEvent): number {
 }
 
 function PriceChartComponent({
-  candles,
+  candles: liveCandles,
   mode,
   height = 250,
   decimals,
@@ -175,12 +175,53 @@ function PriceChartComponent({
   const [offset, setOffset] = useState(0);
   const [domain, setDomain] = useState<Domain | null>(null);
 
+  // Touch moves arrive faster than the screen refreshes, and each one rebuilds the window,
+  // the scales and the SVG paths. Committing every move queues renders faster than they drain,
+  // so a drag trails the finger by however far it got behind. Collecting the moves and writing
+  // once per frame bounds that to a single rebuild per frame and drops the surplus.
+  const frameRef = useRef<number | null>(null);
+  const pendingViewportRef = useRef<{ span: number; offset: number } | null>(null);
+
+  const commitViewport = useCallback(() => {
+    frameRef.current = null;
+    const pending = pendingViewportRef.current;
+    pendingViewportRef.current = null;
+    if (!pending) return;
+    setSpan(pending.span);
+    setOffset(pending.offset);
+  }, []);
+
+  const scheduleViewport = useCallback(
+    (nextSpan: number, nextOffset: number) => {
+      pendingViewportRef.current = { span: nextSpan, offset: nextOffset };
+      if (frameRef.current === null) frameRef.current = requestAnimationFrame(commitViewport);
+    },
+    [commitViewport]
+  );
+
+  const cancelPendingViewport = useCallback(() => {
+    pendingViewportRef.current = null;
+    if (frameRef.current === null) return;
+    cancelAnimationFrame(frameRef.current);
+    frameRef.current = null;
+  }, []);
+
+  // Rendering the series, rather than the incoming one, is what keeps a price tick off the
+  // critical path of a drag. Every new tick hands over a fresh array, which invalidates the
+  // window slice, the scales and the SVG path strings below — a few hundred elements rebuilt
+  // five times a second. While a finger is down that work lands between touch moves and the
+  // drag visibly stutters. React paints the gesture from the previous series immediately and
+  // rebuilds in the background, so a tick that arrives mid-drag can no longer delay it, and a
+  // burst of them collapses into a single rebuild instead of one per tick.
+  const candles = useDeferredValue(liveCandles);
+
   const onLayout = useCallback((event: LayoutChangeEvent) => {
     setWidth(event.nativeEvent.layout.width);
   }, []);
 
-  // Reset during render when the caller signals a new series, matching the pattern
-  // in useLiveCandles so a timeframe switch never renders the old window.
+  // Reset to defaults when the caller signals a new series, so a timeframe or pair switch never
+  // shows the old window. Done during render, matching the pattern in useLiveCandles, so the new
+  // series is never drawn with the old window's zoom and pan.
   const [activeKey, setActiveKey] = useState(resetKey);
   if (resetKey !== activeKey) {
     setActiveKey(resetKey);
@@ -189,6 +230,13 @@ function PriceChartComponent({
     setActiveIndex(null);
     setDomain(null);
   }
+
+  // Cancelling a queued frame is a side effect on the scheduler, so it cannot happen during
+  // render, and it is the one part of the reset above that has to wait. Without it a frame
+  // queued by a gesture in flight would land after the reset and put the old zoom and pan back.
+  useEffect(() => {
+    cancelPendingViewport();
+  }, [cancelPendingViewport, resetKey]);
 
   const count = candles.length;
   const innerWidth = Math.max(width - AXIS_WIDTH, 0);
@@ -286,11 +334,12 @@ function PriceChartComponent({
   const lastTapRef = useRef<{ time: number; x: number; y: number } | null>(null);
 
   const resetViewport = useCallback(() => {
+    cancelPendingViewport();
     setSpan(null);
     setOffset(0);
     setActiveIndex(null);
     setDomain(null);
-  }, []);
+  }, [cancelPendingViewport]);
 
   const indexAt = useCallback(
     (locationX: number) => {
@@ -338,14 +387,13 @@ function PriceChartComponent({
       const dx = mid - base.mid;
       const nextOffset = base.offset + (dx / plotWidth) * nextSpan;
 
-      setSpan(nextSpan);
-      setOffset(nextOffset);
+      scheduleViewport(nextSpan, nextOffset);
 
       // Incremental baseline: each move measures from the last, so a long drag
       // cannot accumulate drift away from the fingers.
       pinchRef.current = { distance, mid, span: nextSpan, offset: nextOffset };
     },
-    [count, plotWidth, resolvedOffset, resolvedSpan]
+    [count, plotWidth, resolvedOffset, resolvedSpan, scheduleViewport]
   );
 
   const onGrant = useCallback(
@@ -413,23 +461,29 @@ function PriceChartComponent({
         }
         if (pan.moved) {
           // Dragging right pulls older candles into view, so offset grows.
-          setOffset(pan.offset + (dx / plotWidth) * pan.span);
+          scheduleViewport(pan.span, pan.offset + (dx / plotWidth) * pan.span);
           return;
         }
       }
 
       trackCrosshair(locationX);
     },
-    [handlePinch, plotWidth, trackCrosshair]
+    [handlePinch, plotWidth, scheduleViewport, trackCrosshair]
   );
 
   const onEnd = useCallback(() => {
+    // Applied without waiting for a frame: the last position before release is the one the
+    // chart should settle on, and the finger is already off the glass. Committing rather than
+    // cancelling — cancelling would discard the queued position and snap the chart back to
+    // wherever it sat when the drag started. Any frame still queued finds nothing pending and
+    // returns.
+    commitViewport();
     pinchRef.current = null;
     panRef.current = null;
     multiRef.current = false;
     suppressCrosshairRef.current = false;
     // The crosshair deliberately survives release: a tap latches it.
-  }, []);
+  }, [commitViewport]);
 
   // `PanResponder.create` is called during render, but every handler it receives is
   // only ever invoked later by the gesture system, at event time. Those handlers

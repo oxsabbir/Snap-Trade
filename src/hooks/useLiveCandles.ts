@@ -1,61 +1,67 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AppState, type AppStateStatus } from 'react-native';
 
 import { fetchCandles, type TimeframeOrLine } from '@/lib/kucoin/candles';
-import { TickerSocket, type SocketStatus, type TickerUpdate } from '@/lib/kucoin/socket';
 import { createGenerationGuard } from '@/lib/generation';
+import type { TickerUpdate } from '@/lib/kucoin/socket';
 import type { Candle } from '@/lib/kucoin/types';
+import { getTicker, subscribeTicker } from '@/state/ticker';
 
 export type LiveCandlesState = {
   candles: Candle[];
-  ticker: TickerUpdate | null;
-  status: SocketStatus;
+  /**
+   * The last candle's close as of the moment history arrived, frozen thereafter. The header
+   * shows this until the socket's first tick. It is deliberately not the current close: a
+   * seed that tracked the forming candle would change on every tick, which is what the chart
+   * header's memoisation exists to avoid.
+   */
+  seedPrice: number | null;
   isLoading: boolean;
   error: string | null;
   refresh: () => void;
 };
 
+/**
+ * The candle series for one pair, and nothing else.
+ *
+ * This hook used to own the `TickerSocket` and a `ticker` piece of state as well, which put
+ * the live price in React state above the chart and made every tick re-render the header, the
+ * order book and the order form. The socket now belongs to `@/state/ticker`; this subscribes
+ * to it for the one thing it genuinely needs — the forming candle's close, high, low and
+ * volume — and exposes no display state of its own.
+ *
+ * The subscription is deliberately not `useTicker`. Reading the snapshot here would re-render
+ * this hook on every tick *as well as* re-rendering it from `setCandles`, so the chart would
+ * commit twice per tick.
+ */
 export function useLiveCandles(
   symbol: string,
   timeframe: TimeframeOrLine,
   enabled = true
 ): LiveCandlesState {
   const [candles, setCandles] = useState<Candle[]>([]);
-  const [ticker, setTicker] = useState<TickerUpdate | null>(null);
-  const [status, setStatus] = useState<SocketStatus>('connecting');
+  const [seedPrice, setSeedPrice] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeKey, setActiveKey] = useState(`${symbol}:${timeframe.key}`);
-  const [activeSymbol, setActiveSymbol] = useState(symbol);
   const mountedRef = useRef(true);
   const bucketRef = useRef(0);
   const [guard] = useState(createGenerationGuard);
-  const activeSocketRef = useRef<TickerSocket | null>(null);
 
   // Reset during render so a timeframe switch never flashes the previous chart.
   // bucketRef is left to the fetch effect, which owns it outside render.
   //
-  // `status` is deliberately NOT reset here. It describes the socket, whose lifecycle is
-  // keyed on `symbol` alone, so it must survive a timeframe change. A timeframe switch also
-  // cannot restore it: the socket is not recreated, and start() is a no-op on a live socket,
-  // so nothing would ever move the badge back off "connecting". The socket effect below sets
-  // it for a symbol switch, where a new connection genuinely is being made.
-  //
-  // A new timeframe and a new symbol are not the same kind of event. A timeframe is a
-  // different view of the *same* pair, so the socket stays connected and the live price stays
-  // valid — the header must not blank out while the chart refetches. A new symbol is a
-  // different pair, so nothing from the previous one may survive: not the candles, and not
-  // the ticker, which would otherwise price the new coin in the old coin's currency.
+  // Nothing else needs resetting. A timeframe is a different view of the *same* pair, so the
+  // price stays valid and the header must not blank out while the chart refetches; the store
+  // is keyed on the pair alone and outlives this hook's series. A new symbol is different, but
+  // it is handled there too — a subscriber asking for the incoming pair gets that pair's
+  // entry, which starts empty, rather than the outgoing pair's last price.
   const key = `${symbol}:${timeframe.key}`;
   if (key !== activeKey) {
     setActiveKey(key);
     setCandles([]);
+    setSeedPrice(null);
     setError(null);
     setIsLoading(enabled);
-    if (symbol !== activeSymbol) {
-      setActiveSymbol(symbol);
-      setTicker(null);
-    }
   }
 
   // Only the ordinary timeframes have a bucket width. Under `enabled: false` — the
@@ -73,7 +79,9 @@ export function useLiveCandles(
         setIsLoading(false);
         const last = next[next.length - 1];
         bucketRef.current = last ? Math.floor(last.time / periodMs) : 0;
-        if (last) setTicker({ symbol, price: last.close, size: 0, time: last.time, bestAsk: 0, bestBid: 0 });
+        // Seeded once per series. A bucket rollover refetches through here too, and the
+        // guard leaves the existing seed alone so the header does not churn once a minute.
+        if (last) setSeedPrice((current) => current ?? last.close);
       },
       (caught: unknown) => {
         if (!mountedRef.current || !guard.isCurrent(token)) return;
@@ -83,17 +91,15 @@ export function useLiveCandles(
     );
   }, [enabled, guard, periodMs, symbol, timeframe.key]);
 
-  // Deliberately no `update.symbol` check here. `tickRef` is refreshed in an effect, so
-  // just after a symbol switch it still holds the previous symbol's closure and a stale
-  // tick would sail through such a check. The socket effect below owns the symbol
-  // invariant instead, by only ever forwarding ticks from the currently active socket.
+  // Deliberately no `update.symbol` check here. `tickRef` is refreshed in an effect, so just
+  // after a symbol switch it still holds the previous symbol's closure and a stale tick would
+  // sail through such a check. The subscription effect below owns the symbol invariant
+  // instead, by tearing the old listener down in the same commit as the new one.
   const handleTick = useCallback(
     (update: TickerUpdate) => {
       if (!mountedRef.current) return;
-      setTicker(update);
-      // The lifetime view owns its own series, so the ticker is only needed for the
-      // header price and Live badge. Stopping here also keeps the zero periodMs above
-      // away from the bucket math below.
+      // The lifetime view owns its own series, so the price is only needed for the header.
+      // Stopping here also keeps the zero periodMs above away from the bucket math below.
       if (!enabled) return;
 
       const bucket = Math.floor(update.time / periodMs);
@@ -108,17 +114,23 @@ export function useLiveCandles(
       setCandles((previous) => {
         const last = previous[previous.length - 1];
         if (!last) return previous;
+        const close = update.price;
+        const high = Math.max(last.high, close);
+        const low = Math.min(last.low, close);
+        // A tick that moves nothing returns the same array, so a quiet market does not commit
+        // five times a second to redraw an identical chart.
+        if (last.close === close && last.high === high && last.low === low) return previous;
         return [
           ...previous.slice(0, -1),
           {
             ...last,
-            close: update.price,
-            high: Math.max(last.high, update.price),
-            low: Math.min(last.low, update.price),
+            close,
+            high,
+            low,
             // `size` is base-currency volume and KuCoin's candle volume is base too,
             // so turnover follows as size x price in quote currency.
             volume: last.volume + update.size,
-            turnover: last.turnover + update.size * update.price,
+            turnover: last.turnover + update.size * close,
           },
         ];
       });
@@ -147,41 +159,20 @@ export function useLiveCandles(
     };
   }, [fetchHistory, guard]);
 
-  // Socket lifecycle is keyed on `symbol` only, so switching timeframes refetches
-  // history without tearing down and re-authenticating the connection.
+  // Keyed on the pair alone, so switching timeframes refetches history without tearing the
+  // subscription down and re-authenticating the connection. The store notifies without a
+  // payload — that is what `useSyncExternalStore` requires — so the tick is read back here.
   useEffect(() => {
-    const socket = new TickerSocket(symbol, {
-      // Identity, not the payload, decides whether a tick still belongs to the view.
-      // Cleanup and setup run synchronously within the same commit, so this reference
-      // passes through null and no window exists in which the outgoing socket's tick
-      // could be applied to the incoming symbol.
-      onTick: (update) => {
-        if (activeSocketRef.current !== socket) return;
-        tickRef.current(update);
-      },
-      onStatus: (next) => {
-        if (activeSocketRef.current !== socket) return;
-        setStatus(next);
-      },
+    if (!symbol) return;
+    return subscribeTicker(symbol, () => {
+      const update = getTicker(symbol).update;
+      if (update) tickRef.current(update);
     });
-    activeSocketRef.current = socket;
-    socket.start();
-
-    const subscription = AppState.addEventListener('change', (state: AppStateStatus) => {
-      if (state === 'active') socket.start();
-      else socket.stop();
-    });
-
-    return () => {
-      if (activeSocketRef.current === socket) activeSocketRef.current = null;
-      socket.stop();
-      subscription.remove();
-    };
   }, [symbol]);
 
   const refresh = useCallback(() => {
     fetchHistory();
   }, [fetchHistory]);
 
-  return { candles, ticker, status, isLoading, error, refresh };
+  return { candles, seedPrice, isLoading, error, refresh };
 }

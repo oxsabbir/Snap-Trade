@@ -7,41 +7,22 @@ import {
   LayersIcon,
   RowsIcon,
 } from "@/components/Icons";
+import { MidPrice } from "@/components/MidPrice";
+import { useLevel2Book } from "@/hooks/useLevel2Book";
 import { useOrderBook } from "@/hooks/useOrderBook";
-import {
-  aggregationOptions,
-  type DepthRow,
-  type Level2Snapshot,
-} from "@/lib/kucoin/orderbook";
+import { useSymbolRules } from "@/hooks/useSymbolRules";
+import { aggregationOptions, type DepthRow } from "@/lib/kucoin/orderbook";
 import { colors, radius, spacing } from "@/theme";
 import { decimalsFromIncrement, formatPrice } from "@/utils/format";
 
 export type OrderBookViewMode = "split" | "bids" | "asks";
 
 type Props = {
-  snapshot: Level2Snapshot | null;
-  /** Price step for a pair — also the base aggregation and the price formatting precision. */
-  tickSize: string;
-  /** Base-currency step, i.e. the size formatting precision. */
-  baseIncrement: string;
-  baseCurrency: string;
-  quoteCurrency: string;
-  lastPrice?: number | null;
-  isUp?: boolean;
+  symbol: string;
   onPriceSelect: (price: string) => void;
 };
 
 const ROW_HEIGHT = 20;
-/** Currencies worth one dollar, so the mid price can carry a fiat line without a rates source. */
-const USD_STABLES = new Set([
-  "USD",
-  "USDT",
-  "USDC",
-  "DAI",
-  "BUSD",
-  "TUSD",
-  "USDD",
-]);
 
 const VIEW_MODES: OrderBookViewMode[] = ["split", "bids", "asks"];
 
@@ -64,6 +45,14 @@ const DepthRowView = memo(function DepthRowView({
   const fill =
     side === "ask" ? "rgba(246,70,93,0.16)" : "rgba(35,175,137,0.16)";
   return (
+    // `onPress` fires on release, not on touch-down, and that is deliberate. The rows sit
+    // inside the screen's scroll view, so firing on press-in would fill the form every time
+    // someone scrolled the page with a finger starting on the book.
+    //
+    // The rows are keyed by position (see the maps below), which keeps this same Pressable
+    // mounted across snapshots. Keying them by price, as this did before, remounted all ten
+    // rows on every depth snapshot — about seven times a second — so a press that was in
+    // progress when one landed was cancelled by the row being torn out from under the finger.
     <Pressable
       onPress={() => onPress(row.price)}
       style={styles.row}
@@ -86,24 +75,37 @@ const DepthRowView = memo(function DepthRowView({
   );
 });
 
-function OrderBookBase({
-  snapshot,
-  tickSize,
-  baseIncrement,
-  baseCurrency,
-  quoteCurrency,
-  lastPrice,
-  isUp,
-  onPriceSelect,
-}: Props) {
-  const [aggregation, setAggregation] = useState(tickSize);
+/**
+ * One pair's depth.
+ *
+ * Owns both of the things it displays rather than taking them as props. The Level 2 feed used
+ * to be subscribed one level up, in the component that also renders the order form, so every
+ * snapshot — six or seven a second — re-rendered that shared parent and the form's wrapper with
+ * it. The feed belongs to the book, so it is subscribed here and the parent is left with nothing
+ * to re-render on.
+ *
+ * The mid price went the other way: it used to arrive as a `lastPrice` prop, which changed on
+ * every price tick and re-rendered the whole column to change two text nodes. It is now a leaf
+ * that subscribes to the price itself.
+ */
+function OrderBookBase({ symbol, onPriceSelect }: Props) {
+  const { snapshot } = useLevel2Book(symbol);
+  const { rules } = useSymbolRules(symbol);
+  const [baseCurrency = "", quoteCurrency = ""] = symbol.split("-");
+
+  const [aggregation, setAggregation] = useState("0.000001");
   const [viewMode, setViewMode] = useState<OrderBookViewMode>("split");
   const [pickerOpen, setPickerOpen] = useState(false);
 
-  // Rules arrive asynchronously, so the first render may use the fallback tick. Resetting during
-  // render re-bases the step on the pair's real tick rather than leaving it on the fallback.
-  const [activeTick, setActiveTick] = useState(tickSize);
-  if (tickSize !== activeTick) {
+  // Price step for the pair — also the base aggregation and the price formatting precision.
+  // Rules arrive asynchronously, so the first render has nothing real to go on. Re-basing
+  // during render switches to the pair's actual tick once it lands, rather than leaving the
+  // book aggregating at the fallback.
+  const tickSize = rules?.priceIncrement ?? "0.000001";
+  const baseIncrement = rules?.baseIncrement ?? "0.000001";
+
+  const [activeTick, setActiveTick] = useState<string | null>(null);
+  if (activeTick !== tickSize) {
     setActiveTick(tickSize);
     setAggregation(tickSize);
   }
@@ -120,15 +122,6 @@ function OrderBookBase({
     );
   };
 
-  const hasPrice =
-    lastPrice !== null && lastPrice !== undefined && Number.isFinite(lastPrice);
-  const midColor = !hasPrice
-    ? colors.textMuted
-    : isUp
-      ? colors.up
-      : colors.down;
-  const fiat = hasPrice && USD_STABLES.has(quoteCurrency) ? lastPrice : null;
-
   return (
     <View style={styles.container}>
       <View style={styles.header}>
@@ -140,9 +133,9 @@ function OrderBookBase({
 
       {viewMode !== "bids" ? (
         <View style={styles.asks}>
-          {depth.asks.map((row) => (
+          {depth.asks.map((row, index) => (
             <DepthRowView
-              key={row.price}
+              key={`ask:${index}`}
               row={row}
               side="ask"
               priceDecimals={priceDecimals}
@@ -153,20 +146,17 @@ function OrderBookBase({
         </View>
       ) : null}
 
-      <View style={styles.middle}>
-        <Text style={[styles.midPrice, { color: midColor }]}>
-          {hasPrice ? formatPrice(lastPrice, priceDecimals) : "—"}
-        </Text>
-        {fiat !== null ? (
-          <Text style={styles.fiat}>≈${formatPrice(fiat, 2)}</Text>
-        ) : null}
-      </View>
+      <MidPrice
+        symbol={symbol}
+        priceDecimals={priceDecimals}
+        quoteCurrency={quoteCurrency}
+      />
 
       {viewMode !== "asks" ? (
         <View style={styles.bids}>
-          {depth.bids.map((row) => (
+          {depth.bids.map((row, index) => (
             <DepthRowView
-              key={row.price}
+              key={`bid:${index}`}
               row={row}
               side="bid"
               priceDecimals={priceDecimals}
@@ -321,24 +311,6 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     fontSize: 10,
     fontVariant: ["tabular-nums"],
-  },
-  middle: {
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: spacing.xs,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.border,
-  },
-  midPrice: {
-    fontSize: 16,
-    fontWeight: "800",
-    fontVariant: ["tabular-nums"],
-  },
-  fiat: {
-    color: colors.textFaint,
-    fontSize: 9,
-    marginTop: 1,
   },
   percentBar: {
     flexDirection: "row",

@@ -1,32 +1,119 @@
-import { useCallback, useMemo, useState, type ReactNode } from 'react';
+import { memo, useCallback, useMemo, useState, type ReactNode } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { CoinInfoSheet } from '@/components/CoinInfoSheet';
 import { InfoIcon } from '@/components/Icons';
+import { LiveBadge } from '@/components/LiveBadge';
+import { LivePrice } from '@/components/LivePrice';
 import { PriceChart } from '@/components/PriceChart';
 import { TimeframeTabs } from '@/components/TimeframeTabs';
 import { useLifetimeSeries } from '@/hooks/useLifetimeSeries';
 import { useLiveCandles } from '@/hooks/useLiveCandles';
 import { useStableChartHeight } from '@/hooks/useStableChartHeight';
 import { timeframeByKey, LINE_TIMEFRAME, type TimeframeOrLine } from '@/lib/kucoin/candles';
-import { deriveQuote, type Quote } from '@/lib/quote';
 import { colors, radius, spacing } from '@/theme';
-import { formatPercent, formatPrice } from '@/utils/format';
 
 type Props = {
   symbol: string;
   name?: string;
   decimals?: number;
   /**
-   * Sections rendered under the chart, given the live quote so one can label itself with the
-   * price. The screen that renders this owns the scroll view and the order of the sections, so
-   * anything added later is a sibling here rather than another branch inside this component.
+   * Sections rendered under the chart. The screen that renders this owns the scroll view and
+   * the order of the sections, so anything added later is a sibling here rather than another
+   * branch inside this component.
+   *
+   * Plain children, deliberately: this used to be a render prop handed the live quote, which
+   * is what put a price ticking several times a second into state above the order book and the
+   * order form. Neither reads the quote now — the price is subscribed to directly where it is
+   * displayed — so there is nothing left to pass down.
    */
-  children?: (quote: Quote | null) => ReactNode;
+  children?: ReactNode;
 };
 
 /** Timeframe a freshly opened pair starts on. */
 const DEFAULT_TIMEFRAME_KEY = '1min';
+
+type ChromeProps = {
+  symbol: string;
+  name?: string;
+  decimals?: number;
+  /**
+   * The current bucket's open. Only changes when the series changes or rolls over, so this is
+   * what lets the whole chrome sit still through a tick.
+   */
+  bucketOpen?: number;
+  /**
+   * The last candle's close, shown until the socket's first tick. Seeded once per series and
+   * deliberately not kept current — see the note on `seedPrice`.
+   */
+  seedPrice: number | null;
+  timeframeKey: string;
+  onSelectTimeframe: (next: TimeframeOrLine) => void;
+  onOpenInfo: () => void;
+  periodLabel: string;
+};
+
+/**
+ * Everything above the chart: the pair's name, its price, the timeframe tabs and the caption.
+ *
+ * Memoised because every one of its props is stable across a price tick. `CoinDetail` itself
+ * still re-renders on each tick — the chart's series live in it — but before this existed that
+ * re-render redrew all of this too. The price and the connection badge reach the screen through
+ * the leaves inside it, which subscribe to the store themselves.
+ */
+const ChartChrome = memo(function ChartChrome({
+  symbol,
+  name,
+  decimals,
+  bucketOpen,
+  seedPrice,
+  timeframeKey,
+  onSelectTimeframe,
+  onOpenInfo,
+  periodLabel,
+}: ChromeProps) {
+  const base = symbol.split('-')[0] ?? '';
+
+  return (
+    <>
+      <View style={styles.header}>
+        <View style={styles.headerText}>
+          <Text style={styles.symbol}>{symbol || '—'}</Text>
+          {name && name !== base ? <Text style={styles.name}>{name}</Text> : null}
+        </View>
+        <Pressable
+          onPress={onOpenInfo}
+          hitSlop={12}
+          style={styles.infoButton}
+          accessibilityRole="button"
+          accessibilityLabel={`About ${symbol}`}
+        >
+          <InfoIcon size={17} color={colors.textMuted} />
+        </Pressable>
+      </View>
+
+      <View style={styles.priceBlock}>
+        <LivePrice
+          symbol={symbol}
+          bucketOpen={bucketOpen}
+          fallbackPrice={seedPrice ?? undefined}
+          decimals={decimals}
+        />
+        <LiveBadge symbol={symbol} />
+      </View>
+
+      <View style={styles.timeframeRow}>
+        <TimeframeTabs value={timeframeKey} onChange={onSelectTimeframe} />
+      </View>
+
+      <View style={styles.toolbar}>
+        <Text style={styles.periodLabel} numberOfLines={1}>
+          {periodLabel}
+        </Text>
+      </View>
+    </>
+  );
+});
 
 export function CoinDetail({ symbol, name, decimals, children }: Props) {
   const [timeframeKey, setTimeframeKey] = useState(DEFAULT_TIMEFRAME_KEY);
@@ -61,110 +148,58 @@ export function CoinDetail({ symbol, name, decimals, children }: Props) {
   const isLine = timeframeKey === LINE_TIMEFRAME.key;
   const mode = isLine ? 'line' : 'candle';
 
-  // `enabled` skips only the candle history fetch. The socket stays mounted either way,
-  // because the header price, the change pill and the Live badge all read from it — and
-  // the lifetime view reuses that same ticker for its last point.
   const live = useLiveCandles(symbol, timeframe, !isLine);
-  const lifetime = useLifetimeSeries(symbol, isLine, live.ticker);
+  const lifetime = useLifetimeSeries(symbol, isLine);
 
   const candles = isLine ? lifetime.candles : live.candles;
   const isLoading = isLine ? lifetime.isLoading : live.isLoading;
   const error = isLine ? lifetime.error : live.error;
   const refresh = isLine ? lifetime.refresh : live.refresh;
-  const { ticker, status } = live;
 
-  // Only the currently forming candle is needed for the header, so nothing here walks
-  // the array. A range summary used to be computed over all 100 candles on every tick.
+  // Only the currently forming candle is needed for the header, so nothing here walks the
+  // array. A range summary used to be computed over all 100 candles on every tick.
   const current = candles.length > 0 ? candles[candles.length - 1]! : null;
 
-  // The header is derived from the price and the bucket open separately, because they are
-  // not available at the same time. Changing timeframe clears the candles while the chart
-  // refetches, but the pair — and therefore its price — has not changed, so the header must
-  // stay put. The socket keeps ticking throughout, so the price stays live rather than
-  // freezing on the outgoing bucket's close. See deriveQuote.
-  const quote = deriveQuote(ticker?.price ?? current?.close, current?.open);
-  const base = symbol.split('-')[0] ?? '';
-
+  // Seeded lazily from the first candles of the series, once per series.
+  // The header can show a price before the socket's first tick. Both series hooks seed one
+  // from their own history, and both freeze it, so this value only moves when the series does.
+  const seedPrice = isLine ? lifetime.seedPrice : live.seedPrice;
   const onSelectTimeframe = useCallback((next: TimeframeOrLine) => setTimeframeKey(next.key), []);
-
-  // "466 weeks · since 2017-10-19" reads as a lifetime at a glance. Absolute dates, not
-  // "8 years ago", per the no-relative-date convention.
-  const lineSummary = useMemo(() => {
-    const first = candles[0];
-    if (!first) return 'Line · loading history';
-    const weeks = candles.length;
-    const since = new Date(first.time);
-    const pad = (value: number) => value.toString().padStart(2, '0');
-    return `Line · ${weeks} weeks · since ${since.getFullYear()}-${pad(since.getMonth() + 1)}-${pad(since.getDate())}`;
-  }, [candles]);
   const onOpenInfo = useCallback(() => setInfoOpen(true), []);
   const onCloseInfo = useCallback(() => setInfoOpen(false), []);
   const onVisibleRangeChange = useCallback((visible: number) => setVisibleCount(visible), []);
   const isZoomed = visibleCount !== null && visibleCount < candles.length;
 
+  // "466 weeks · since 2017-10-19" reads as a lifetime at a glance. Absolute dates, not
+  // "8 years ago", per the no-relative-date convention. Keyed on the two values it reads
+  // rather than the array, so a forming candle does not recompute it every tick.
+  const firstCandle = candles[0];
+  const periodLabel = useMemo(() => {
+    if (isLine) {
+      if (!firstCandle) return 'Line · loading history';
+      const pad = (value: number) => value.toString().padStart(2, '0');
+      const since = new Date(firstCandle.time);
+      return `Line · ${candles.length} weeks · since ${since.getFullYear()}-${pad(since.getMonth() + 1)}-${pad(since.getDate())}`;
+    }
+    if (isZoomed) {
+      return `${visibleCount} of ${candles.length} · pan, pinch, double tap to reset`;
+    }
+    return `${candles.length} × ${timeframe.label} · drag to pan, pinch to zoom`;
+  }, [candles.length, firstCandle, isLine, isZoomed, timeframe.label, visibleCount]);
+
   return (
     <View style={styles.section}>
-      <View style={styles.header}>
-        <View style={styles.headerText}>
-          <Text style={styles.symbol}>{symbol || '—'}</Text>
-          {name && name !== base ? <Text style={styles.name}>{name}</Text> : null}
-        </View>
-        <Pressable
-          onPress={onOpenInfo}
-          hitSlop={12}
-          style={styles.infoButton}
-          accessibilityRole="button"
-          accessibilityLabel={`About ${symbol}`}
-        >
-          <InfoIcon size={17} color={colors.textMuted} />
-        </Pressable>
-      </View>
-
-      {quote ? (
-        <View style={styles.priceBlock}>
-          <Text style={styles.price}>{formatPrice(quote.price, decimals)}</Text>
-          {quote.change !== null ? (
-            <View
-              style={[
-                styles.changePill,
-                { backgroundColor: quote.isUp ? 'rgba(35,175,137,0.14)' : 'rgba(246,70,93,0.14)' },
-              ]}
-            >
-              <Text style={[styles.change, { color: quote.isUp ? colors.up : colors.down }]}>
-                {formatPercent(quote.change)}
-              </Text>
-            </View>
-          ) : null}
-          <View style={styles.liveBadge}>
-            <View
-              style={[
-                styles.liveDot,
-                { backgroundColor: status === 'live' ? colors.up : colors.textFaint },
-              ]}
-            />
-            <Text style={styles.liveText}>
-              {status === 'live' ? 'Live' : status === 'connecting' ? 'Connecting' : 'Reconnecting'}
-            </Text>
-          </View>
-        </View>
-      ) : null}
-
-      <View style={styles.timeframeRow}>
-        <TimeframeTabs value={timeframeKey} onChange={onSelectTimeframe} />
-      </View>
-
-      <View style={styles.toolbar}>
-        <Text style={styles.periodLabel} numberOfLines={1}>
-          {/* This row is only ~40 characters wide before it truncates, so the Line tab
-              drops the "drag to pan" nudge and the candle tabs drop the timeframe
-              label — the selected tab sits directly above and already shows it. */}
-          {isLine
-            ? lineSummary
-            : isZoomed
-              ? `${visibleCount} of ${candles.length} · pan, pinch, double tap to reset`
-              : `${candles.length} × ${timeframe.label} · drag to pan, pinch to zoom`}
-        </Text>
-      </View>
+      <ChartChrome
+        symbol={symbol}
+        name={name}
+        decimals={decimals}
+        bucketOpen={current?.open}
+        seedPrice={seedPrice}
+        timeframeKey={timeframeKey}
+        onSelectTimeframe={onSelectTimeframe}
+        onOpenInfo={onOpenInfo}
+        periodLabel={periodLabel}
+      />
 
       <View style={styles.chartWrap}>
         {isLoading && candles.length === 0 ? (
@@ -205,7 +240,7 @@ export function CoinDetail({ symbol, name, decimals, children }: Props) {
         )}
       </View>
 
-      {children?.(quote)}
+      {children}
 
       <CoinInfoSheet symbol={symbol} visible={infoOpen} onClose={onCloseInfo} decimals={decimals} />
     </View>
@@ -243,42 +278,6 @@ const styles = StyleSheet.create({
     gap: spacing.md,
     paddingHorizontal: spacing.lg,
     paddingBottom: spacing.lg,
-  },
-  price: {
-    color: colors.text,
-    fontSize: 30,
-    fontWeight: '700',
-    fontVariant: ['tabular-nums'],
-  },
-  changePill: {
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 4,
-  },
-  change: {
-    fontSize: 12,
-    fontWeight: '600',
-    fontVariant: ['tabular-nums'],
-  },
-  liveBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    marginLeft: 'auto',
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 3,
-    borderRadius: radius.pill,
-    backgroundColor: colors.surfaceAlt,
-  },
-  liveDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-  },
-  liveText: {
-    color: colors.textMuted,
-    fontSize: 11,
-    fontWeight: '600',
   },
   timeframeRow: {
     flexGrow: 0,

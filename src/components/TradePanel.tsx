@@ -28,12 +28,11 @@ import {
   type FillPercent,
 } from '@/lib/trade';
 import { colors, radius, spacing } from '@/theme';
+import { useSeedPrice } from '@/state/ticker';
 import { formatAmount } from '@/utils/format';
 
 type Props = {
   symbol: string;
-  /** Latest traded price from the socket; prefills Price once per pair. */
-  lastPrice?: number | null;
   /** Override the app-wide `TEST_MODE` for this panel. */
   testMode?: boolean;
   /**
@@ -55,11 +54,19 @@ function sanitizeAmount(text: string): string {
   return `${cleaned.slice(0, firstDot + 1)}${cleaned.slice(firstDot + 1).replace(/\./g, '')}`;
 }
 
-function TradePanelBase({ symbol, lastPrice, testMode = TEST_MODE, priceSelection }: Props) {
+function TradePanelBase({ symbol, testMode = TEST_MODE, priceSelection }: Props) {
   const [baseCurrency = '', quoteCurrency = ''] = symbol.split('-');
 
   const { rules, isLoading: rulesLoading, error: rulesError } = useSymbolRules(symbol);
   const { available, refresh: refreshBalance } = useAccountBalance();
+
+  // The form needs a price once per pair and then not again — it is a seed, not a live value.
+  // Read through the store rather than passed in as a prop: a `lastPrice` prop changed several
+  // times a second, and although the prefill below guards on the pair, the prop itself still
+  // changed, which defeated this component's memoisation and re-rendered the whole form — every
+  // input, the slider and the button — five times a second to display a number that had already
+  // been consumed.
+  const seedPrice = useSeedPrice(symbol);
 
   const [side, setSide] = useState<OrderSide>('buy');
   const [price, setPrice] = useState('');
@@ -88,7 +95,7 @@ function TradePanelBase({ symbol, lastPrice, testMode = TEST_MODE, priceSelectio
 
   // Prefill Price once per pair, from the socket's last trade. Re-prefilling on every tick would
   // fight the user for the field, so it happens only until the pair is priced.
-  const prefill = rules ? prefillPrice(rules, lastPrice) : null;
+  const prefill = rules ? prefillPrice(rules, seedPrice) : null;
   if (rules && prefill !== null && pricedSymbol !== symbol) {
     setPricedSymbol(symbol);
     setPrice(prefill);

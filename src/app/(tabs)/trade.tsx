@@ -43,13 +43,7 @@ export default function TradeScreenRoute() {
         showsVerticalScrollIndicator={false}
       >
         <CoinDetail symbol={coin.symbol} name={coin.name} decimals={coin.decimals}>
-          {(quote) => (
-            <TradeScreen
-              symbol={coin.symbol}
-              lastPrice={quote?.price ?? null}
-              isUp={quote?.isUp}
-            />
-          )}
+          <TradeScreen symbol={coin.symbol} />
         </CoinDetail>
       </ScrollView>
     </SafeAreaView>
