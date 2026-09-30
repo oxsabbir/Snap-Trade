@@ -6,7 +6,7 @@ import { CoinInfoSheet } from '@/components/CoinInfoSheet';
 import { InfoIcon } from '@/components/Icons';
 import { PriceChart } from '@/components/PriceChart';
 import { TimeframeTabs } from '@/components/TimeframeTabs';
-import { TradePanel } from '@/components/TradePanel';
+import { TradeScreen } from '@/components/TradeScreen';
 import { useLifetimeSeries } from '@/hooks/useLifetimeSeries';
 import { useLiveCandles } from '@/hooks/useLiveCandles';
 import { useStableChartHeight } from '@/hooks/useStableChartHeight';
@@ -201,10 +201,10 @@ export function CoinDetail({ symbol, name, decimals }: Props) {
         )}
       </View>
 
-      {/* The order form reclaims the space under the chart. It prefills Price from the same
-          live price the header shows, so the first keystroke is never a stale number. */}
+      {/* The order form and the live book share the space under the chart: book left, form
+          right. The book's rows feed the form's Price field, so the two sit together. */}
       <View style={styles.belowChart}>
-        <TradePanel symbol={symbol} lastPrice={quote?.price ?? null} />
+        <TradeScreen symbol={symbol} lastPrice={quote?.price ?? null} isUp={quote?.isUp} />
       </View>
 
       <CoinInfoSheet symbol={symbol} visible={infoOpen} onClose={onCloseInfo} decimals={decimals} />

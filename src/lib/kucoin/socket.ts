@@ -44,7 +44,7 @@ type Listener = {
   onStatus: (status: SocketStatus) => void;
 };
 
-async function fetchBullet(): Promise<BulletResponse['instanceServers'][number] & { token: string }> {
+export async function fetchBullet(): Promise<BulletResponse['instanceServers'][number] & { token: string }> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {

@@ -173,3 +173,35 @@ export function CaretDownIcon({ size = 12, color = colors.textMuted }: IconProps
     </Svg>
   );
 }
+
+export function LayersIcon({ size = 14, color = colors.textMuted }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path d="M12 3l8 4.5-8 4.5-8-4.5L12 3z" stroke={color} strokeWidth={1.8} strokeLinejoin="round" />
+      <Path
+        d="M5 12.5L12 16.5l7-4"
+        stroke={color}
+        strokeWidth={1.8}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <Path
+        d="M5 16.5L12 20.5l7-4"
+        stroke={color}
+        strokeWidth={1.8}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Svg>
+  );
+}
+
+export function RowsIcon({ size = 14, color = colors.textMuted }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Line x1={4} y1={7} x2={20} y2={7} stroke={color} strokeWidth={2} strokeLinecap="round" />
+      <Line x1={4} y1={12} x2={20} y2={12} stroke={color} strokeWidth={2} strokeLinecap="round" />
+      <Line x1={4} y1={17} x2={14} y2={17} stroke={color} strokeWidth={2} strokeLinecap="round" />
+    </Svg>
+  );
+}

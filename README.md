@@ -453,15 +453,23 @@ last candle, not a pass over all 100, which also removed an O(n) volume/turnover
 been re-running on every one of the 5 ticks per second.
 
 The chart sits at a **standard height** rather than filling whatever space is left, matching the
-other trading apps and leaving the space below it for the ordering UI that is still to come.
-`standardChartHeight` in `src/theme/index.ts` takes 38% of the window height clamped to
-260–340: floored so a short device cannot squeeze the candles into a sliver, capped so a tall one
-cannot stretch them past a standard reading height. `useStableChartHeight` wraps it so the height
-survives the soft keyboard: on Android focusing an input resizes the window, and a height-only
-change would otherwise collapse the chart. It recomputes on a **width** change instead, which is
-what rotation and split screen produce. A `belowChart` view with `flex: 1` claims the remainder,
-so the ordering UI can move into it without revisiting the chart's sizing. `PriceChart` measures
-its own width and takes its height as a prop, so nothing here depends on a parent layout callback.
+other trading apps and leaving the space below it for the ordering UI. `standardChartHeight` in
+`src/theme/index.ts` takes 26.6% of the window height, subtracts a flat `CHART_HEIGHT_REDUCTION`
+of 40px, and clamps the result to 170–198: floored so a short device cannot squeeze the candles
+into a sliver, capped so a tall one cannot stretch them past a standard reading height. The order
+view claimed the space below the chart with two full-height columns, so the chart's share came down
+30% from its original 38% and 40px comes off flat on top of that; a negative reduction adds height
+instead, which is the same knob in the other direction. The reduction is a single constant because
+the clamps are kept in step with it — the floor and the cap are the reduced ones, so a device on the
+floor, in the middle of the range and on the cap all move by the same amount. Lowering only the ratio
+would leave every capped device untouched, and lowering only the clamps would leave every device
+inside the range untouched; both look like the change did nothing on some screen.
+`useStableChartHeight` wraps it so the height survives the soft keyboard: on Android focusing an
+input resizes the window, and a height-only change would otherwise collapse the chart. It
+recomputes on a **width** change instead, which is what rotation and split screen produce. A
+`belowChart` view with `flex: 1` claims the remainder, so the ordering UI can move into it without
+revisiting the chart's sizing. `PriceChart` measures its own width and takes its height as a prop,
+so nothing here depends on a parent layout callback.
 
 ## Navigation
 

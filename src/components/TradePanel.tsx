@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { memo, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -37,7 +37,14 @@ type Props = {
   lastPrice?: number | null;
   /** Override the app-wide `TEST_MODE` for this panel. */
   testMode?: boolean;
+  /**
+   * A price picked elsewhere, e.g. a tap on a row of the order book. Applied whenever `id`
+   * changes, so the same price tapped twice still refills the field.
+   */
+  priceSelection?: ExternalPriceSelection | null;
 };
+
+export type ExternalPriceSelection = { id: number; value: string };
 
 type Toast = { tone: 'success' | 'error'; message: string };
 
@@ -49,7 +56,7 @@ function sanitizeAmount(text: string): string {
   return `${cleaned.slice(0, firstDot + 1)}${cleaned.slice(firstDot + 1).replace(/\./g, '')}`;
 }
 
-export function TradePanel({ symbol, lastPrice, testMode = TEST_MODE }: Props) {
+function TradePanelBase({ symbol, lastPrice, testMode = TEST_MODE, priceSelection }: Props) {
   const [baseCurrency = '', quoteCurrency = ''] = symbol.split('-');
 
   const { rules, isLoading: rulesLoading, error: rulesError } = useSymbolRules(symbol);
@@ -88,6 +95,19 @@ export function TradePanel({ symbol, lastPrice, testMode = TEST_MODE }: Props) {
     setPrice(prefill);
   }
 
+  // A price tapped in the order book fills Price with the row's value, and re-runs the total when
+  // an amount is already entered so the two stay in step as if Price had been typed. Applied
+  // during render rather than in an effect: this is a prop changing, not an external
+  // subscription, and doing it in an effect would cost a second commit per tap.
+  const [appliedSelectionId, setAppliedSelectionId] = useState<number | null>(null);
+  if (priceSelection && priceSelection.id !== appliedSelectionId) {
+    setAppliedSelectionId(priceSelection.id);
+    setPrice(priceSelection.value);
+    setPercent(null);
+    setInlineError(null);
+    if (size) setTotal(totalFromSize(priceSelection.value, size) ?? '');
+  }
+
   useEffect(() => {
     if (!toast) return;
     const timer = setTimeout(() => setToast(null), 3500);
@@ -105,6 +125,7 @@ export function TradePanel({ symbol, lastPrice, testMode = TEST_MODE }: Props) {
   const syncTotal = (nextPrice: string, nextSize: string) => {
     setTotal(nextPrice && nextSize ? totalFromSize(nextPrice, nextSize) ?? '' : '');
   };
+
 
   const applyPercent = (next: FillPercent) => {
     setPercent(next);
@@ -365,6 +386,8 @@ export function TradePanel({ symbol, lastPrice, testMode = TEST_MODE }: Props) {
     </ScrollView>
   );
 }
+
+export const TradePanel = memo(TradePanelBase);
 
 type AmountFieldProps = {
   label: string;
