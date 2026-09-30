@@ -227,44 +227,53 @@ export function CoinDetail({ symbol, name, decimals }: Props) {
       />
 
       <View style={styles.chartWrap}>
-        {isLoading && candles.length === 0 ? (
-          <View style={styles.loader}>
-            <ActivityIndicator color={colors.accent} />
-            {isLine && lifetime.pages > 0 ? (
-              <Text style={styles.loaderCaption}>
-                Loading full history · page {lifetime.pages}
-              </Text>
+        {/*
+          Rendered unconditionally, and deliberately not keyed on the symbol. Replacing it
+          with a spinner while a pair loaded tore down the canvas, the Skia surface, every
+          shared value and the mapper that feeds them, then rebuilt all of it — and the
+          rebuilt chart drew a half-initialised picture on every coin after the first. The
+          chart already draws nothing for an empty series, so the loading and error states
+          go over the top instead of taking its place. `resetKey` alone resets the window,
+          because `PriceChart` re-derives its viewport whenever that key changes.
+        */}
+        <PriceChart
+          candles={candles}
+          mode={mode}
+          height={chartHeight}
+          decimals={decimals}
+          resetKey={`${symbol}:${timeframe.key}`}
+          onVisibleRangeChange={onVisibleRangeChange}
+        />
+
+        {candles.length === 0 ? (
+          <View style={styles.chartOverlay}>
+            {isLoading ? (
+              <View style={styles.loader}>
+                <ActivityIndicator color={colors.accent} />
+                {isLine && lifetime.pages > 0 ? (
+                  <Text style={styles.loaderCaption}>
+                    Loading full history · page {lifetime.pages}
+                  </Text>
+                ) : null}
+              </View>
+            ) : error ? (
+              <Pressable style={styles.errorBox} onPress={refresh}>
+                <Text style={styles.errorTitle}>
+                  {isLine ? "Could not load history" : "Could not load candles"}
+                </Text>
+                <Text style={styles.errorBody}>{error}</Text>
+                <Text style={styles.errorHint}>Tap to retry.</Text>
+              </Pressable>
+            ) : isLine ? (
+              <View style={styles.errorBox}>
+                <Text style={styles.errorTitle}>No price history yet</Text>
+                <Text style={styles.errorBody}>
+                  This pair is too new to chart.
+                </Text>
+              </View>
             ) : null}
           </View>
-        ) : error && candles.length === 0 ? (
-          <Pressable style={styles.errorBox} onPress={refresh}>
-            <Text style={styles.errorTitle}>
-              {isLine ? "Could not load history" : "Could not load candles"}
-            </Text>
-            <Text style={styles.errorBody}>{error}</Text>
-            <Text style={styles.errorHint}>Tap to retry.</Text>
-          </Pressable>
-        ) : isLine && candles.length === 0 ? (
-          <View style={styles.errorBox}>
-            <Text style={styles.errorTitle}>No price history yet</Text>
-            <Text style={styles.errorBody}>This pair is too new to chart.</Text>
-          </View>
-        ) : (
-          <PriceChart
-            // Remounts on a symbol change, which discards the pan offset, zoom level,
-            // latched crosshair and cached price band outright. The chart's own resetKey
-            // only handles a timeframe change; relying on it alone for the symbol left
-            // enough state behind to render a broken chart.
-            key={symbol}
-            candles={candles}
-            mode={mode}
-            height={chartHeight}
-            decimals={decimals}
-            defaultSpan={isLine ? candles.length : undefined}
-            resetKey={`${symbol}:${timeframe.key}`}
-            onVisibleRangeChange={onVisibleRangeChange}
-          />
-        )}
+        ) : null}
       </View>
 
       {/* {children} */}
@@ -331,6 +340,17 @@ const styles = StyleSheet.create({
   },
   chartWrap: {
     justifyContent: "center",
+  },
+  // Sits over the chart, which stays mounted underneath it.
+  chartOverlay: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: colors.bg,
   },
   loader: {
     alignSelf: "center",
