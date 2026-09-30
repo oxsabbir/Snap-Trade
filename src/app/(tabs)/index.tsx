@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -8,33 +8,112 @@ import {
   StyleSheet,
   Text,
   View,
-} from 'react-native';
-import { useIsFocused } from 'expo-router';
-import { SafeAreaView } from 'react-native-safe-area-context';
+} from "react-native";
+import { useIsFocused } from "expo-router";
+import { SafeAreaView } from "react-native-safe-area-context";
 
-import { FAVORITES_TAB, QuoteTabs, type TabValue } from '@/components/QuoteTabs';
-import { PopularSearches } from '@/components/PopularSearches';
-import { RecentSearches } from '@/components/RecentSearches';
-import { SearchBar } from '@/components/SearchBar';
-import { SpotRow } from '@/components/SpotRow';
-import { useRecentSearches } from '@/hooks/useRecentSearches';
-import { useSpotMarkets } from '@/hooks/useSpotMarkets';
-import { searchMarkets, type QuoteFilter } from '@/lib/kucoin/market';
-import type { SpotMarket } from '@/lib/kucoin/types';
-import { colors, spacing } from '@/theme';
-import { formatTime } from '@/utils/format';
+import {
+  FAVORITES_TAB,
+  QuoteTabs,
+  type TabValue,
+} from "@/components/QuoteTabs";
+import { PopularSearches } from "@/components/PopularSearches";
+import { RecentSearches } from "@/components/RecentSearches";
+import { SearchBar } from "@/components/SearchBar";
+import { SpotRow } from "@/components/SpotRow";
+import { useRecentSearches } from "@/hooks/useRecentSearches";
+import { useSpotMarkets } from "@/hooks/useSpotMarkets";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
+import { searchMarkets, type QuoteFilter } from "@/lib/kucoin/market";
+import type { SpotMarket } from "@/lib/kucoin/types";
+import { colors, spacing } from "@/theme";
+import { formatTime } from "@/utils/format";
 
 const POPULAR_COUNT = 10;
 /** Module level so the list always sees the same extractor and never rebuilds its key map. */
 const keyExtractor = (market: SpotMarket) => market.symbol;
 
-export default function MarketsScreen() {
-  const { markets, isLoading, isRefreshing, error, lastUpdated, refresh } = useSpotMarkets(
-    useIsFocused()
+const MarketsList = memo(function MarketsList({
+  visibleMarkets,
+  renderRow,
+  keyExtractor,
+  isLoading,
+  isRefreshing,
+  error,
+  activeQuery,
+  tab,
+  refresh,
+  onTabChange,
+  favoritesCount,
+  popularSymbols,
+}: {
+  visibleMarkets: SpotMarket[];
+  renderRow: ListRenderItem<SpotMarket>;
+  keyExtractor: (item: SpotMarket) => string;
+  isLoading: boolean;
+  isRefreshing: boolean;
+  error: string | null;
+  activeQuery: string;
+  tab: TabValue;
+  refresh: () => void;
+  onTabChange: (tab: TabValue) => void;
+  favoritesCount: number;
+  popularSymbols: string[];
+}) {
+  return (
+    <>
+      <View style={styles.tabs}>
+        <QuoteTabs value={tab} onChange={onTabChange} favoritesCount={favoritesCount} />
+      </View>
+
+      {activeQuery.length === 0 && !isLoading ? (
+        <PopularSearches symbols={popularSymbols} onSelect={() => {}} />
+      ) : null}
+
+      <FlatList
+        data={visibleMarkets}
+        keyExtractor={keyExtractor}
+        renderItem={renderRow}
+        ItemSeparatorComponent={Separator}
+        contentContainerStyle={styles.listContent}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
+        refreshControl={
+          <RefreshControl
+            refreshing={isRefreshing}
+            onRefresh={refresh}
+            tintColor={colors.accent}
+            colors={[colors.accent]}
+            progressBackgroundColor={colors.surfaceAlt}
+          />
+        }
+        ListEmptyComponent={
+          isLoading ? (
+            <ActivityIndicator style={styles.empty} color={colors.accent} />
+          ) : (
+            <EmptyState tab={tab} hasSearch={activeQuery.length > 0} error={error} />
+          )
+        }
+        ListFooterComponent={<View style={styles.footer} />}
+        initialNumToRender={20}
+        maxToRenderPerBatch={16}
+        windowSize={9}
+      />
+    </>
   );
-  const { recents, add: addRecent, remove: removeRecent, clear: clearRecents } = useRecentSearches();
-  const [search, setSearch] = useState('');
-  const [tab, setTab] = useState<TabValue>('All');
+});
+
+export default function MarketsScreen() {
+  const { markets, isLoading, isRefreshing, error, lastUpdated, refresh } =
+    useSpotMarkets(useIsFocused());
+  const {
+    recents,
+    add: addRecent,
+    remove: removeRecent,
+    clear: clearRecents,
+  } = useRecentSearches();
+  const [search, setSearch] = useState("");
+  const [tab, setTab] = useState<TabValue>("All");
   const [favorites, setFavorites] = useState<Set<string>>(() => new Set());
   const [isSearchFocused, setIsSearchFocused] = useState(false);
   const interactingRef = useRef(false);
@@ -50,11 +129,13 @@ export default function MarketsScreen() {
 
   const sortedMarkets = useMemo(
     () => [...markets].sort((a, b) => b.quoteVolume - a.quoteVolume),
-    [markets]
+    [markets],
   );
 
-  const quoteFilter: QuoteFilter = tab === FAVORITES_TAB ? 'All' : (tab as QuoteFilter);
-  const activeQuery = search.trim();
+  const quoteFilter: QuoteFilter =
+    tab === FAVORITES_TAB ? "All" : (tab as QuoteFilter);
+  // Debounce the search query to avoid re-filtering on every keystroke
+  const activeQuery = useDebouncedValue(search.trim(), 300);
 
   const visibleMarkets = useMemo(() => {
     const source =
@@ -86,10 +167,10 @@ export default function MarketsScreen() {
         onToggleFavorite={toggleFavorite}
       />
     ),
-    [favorites, toggleFavorite]
+    [favorites, toggleFavorite],
   );
 
-  const dismissKeyboard = useCallback(() => Keyboard.dismiss(), []);
+  /* dismissed with keyboardDismissMode="on-drag" */
 
   const handleSearchFocus = useCallback(() => {
     interactingRef.current = false;
@@ -109,7 +190,7 @@ export default function MarketsScreen() {
       interactingRef.current = false;
       Keyboard.dismiss();
     },
-    [addRecent]
+    [addRecent],
   );
 
   const handleSubmit = useCallback(() => {
@@ -119,13 +200,13 @@ export default function MarketsScreen() {
   const showSuggestions = isSearchFocused && activeQuery.length === 0;
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={['top']}>
+    <SafeAreaView style={styles.safeArea} edges={["top"]}>
       <View style={styles.header}>
         <View style={styles.titleRow}>
           <Text style={styles.title}>Spot</Text>
           <Text style={styles.subtitle}>
-            {isLoading ? 'Loading markets…' : `${visibleMarkets.length} pairs`}
-            {lastUpdated ? ` · ${formatTime(lastUpdated)}` : ''}
+            {isLoading ? "Loading markets…" : `${visibleMarkets.length} pairs`}
+            {lastUpdated ? ` · ${formatTime(lastUpdated)}` : ""}
           </Text>
         </View>
         <SearchBar
@@ -152,46 +233,20 @@ export default function MarketsScreen() {
           <PopularSearches symbols={popularSymbols} onSelect={commitSearch} />
         </>
       ) : (
-        <>
-          <View style={styles.tabs}>
-            <QuoteTabs value={tab} onChange={setTab} favoritesCount={favorites.size} />
-          </View>
-
-          {activeQuery.length === 0 && !isLoading ? (
-            <PopularSearches symbols={popularSymbols} onSelect={setSearch} />
-          ) : null}
-
-          <FlatList
-            data={visibleMarkets}
-            keyExtractor={keyExtractor}
-            renderItem={renderRow}
-            ItemSeparatorComponent={Separator}
-            contentContainerStyle={styles.listContent}
-            keyboardShouldPersistTaps="handled"
-            keyboardDismissMode="on-drag"
-            onScrollBeginDrag={dismissKeyboard}
-            refreshControl={
-              <RefreshControl
-                refreshing={isRefreshing}
-                onRefresh={refresh}
-                tintColor={colors.accent}
-                colors={[colors.accent]}
-                progressBackgroundColor={colors.surfaceAlt}
-              />
-            }
-            ListEmptyComponent={
-              isLoading ? (
-                <ActivityIndicator style={styles.empty} color={colors.accent} />
-              ) : (
-                <EmptyState tab={tab} hasSearch={activeQuery.length > 0} error={error} />
-              )
-            }
-            ListFooterComponent={<View style={styles.footer} />}
-            initialNumToRender={20}
-            maxToRenderPerBatch={16}
-            windowSize={9}
-          />
-        </>
+        <MarketsList
+          visibleMarkets={visibleMarkets}
+          renderRow={renderRow}
+          keyExtractor={keyExtractor}
+          isLoading={isLoading}
+          isRefreshing={isRefreshing}
+          error={error}
+          activeQuery={activeQuery}
+          tab={tab}
+          refresh={refresh}
+          onTabChange={setTab}
+          favoritesCount={favorites.size}
+          popularSymbols={popularSymbols}
+        />
       )}
     </SafeAreaView>
   );
@@ -201,7 +256,15 @@ function Separator() {
   return <View style={styles.separator} />;
 }
 
-function EmptyState({ tab, hasSearch, error }: { tab: TabValue; hasSearch: boolean; error: string | null }) {
+function EmptyState({
+  tab,
+  hasSearch,
+  error,
+}: {
+  tab: TabValue;
+  hasSearch: boolean;
+  error: string | null;
+}) {
   if (error) {
     return (
       <View style={styles.empty}>
@@ -216,7 +279,9 @@ function EmptyState({ tab, hasSearch, error }: { tab: TabValue; hasSearch: boole
     return (
       <View style={styles.empty}>
         <Text style={styles.emptyTitle}>No favorites yet</Text>
-        <Text style={styles.emptyBody}>Tap the star on any pair to pin it here.</Text>
+        <Text style={styles.emptyBody}>
+          Tap the star on any pair to pin it here.
+        </Text>
       </View>
     );
   }
@@ -224,7 +289,9 @@ function EmptyState({ tab, hasSearch, error }: { tab: TabValue; hasSearch: boole
   return (
     <View style={styles.empty}>
       <Text style={styles.emptyTitle}>No pairs found</Text>
-      <Text style={styles.emptyBody}>Try a different coin or quote currency.</Text>
+      <Text style={styles.emptyBody}>
+        Try a different coin or quote currency.
+      </Text>
     </View>
   );
 }
@@ -241,14 +308,14 @@ const styles = StyleSheet.create({
     gap: spacing.md,
   },
   titleRow: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
+    flexDirection: "row",
+    alignItems: "baseline",
     gap: spacing.sm,
   },
   title: {
     color: colors.text,
     fontSize: 26,
-    fontWeight: '700',
+    fontWeight: "700",
   },
   subtitle: {
     color: colors.textFaint,
@@ -268,20 +335,20 @@ const styles = StyleSheet.create({
     height: spacing.xl,
   },
   empty: {
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
     paddingVertical: spacing.xl * 2,
     gap: spacing.sm,
   },
   emptyTitle: {
     color: colors.text,
     fontSize: 15,
-    fontWeight: '600',
+    fontWeight: "600",
   },
   emptyBody: {
     color: colors.textMuted,
     fontSize: 13,
-    textAlign: 'center',
+    textAlign: "center",
   },
   emptyHint: {
     color: colors.textFaint,
