@@ -1,9 +1,4 @@
-import {
-  memo,
-  useEffect,
-  useState,
-  type ReactNode,
-} from 'react';
+import { memo, useEffect, useState, type ReactNode } from "react";
 import {
   ActivityIndicator,
   Pressable,
@@ -13,16 +8,20 @@ import {
   View,
   type GestureResponderEvent,
   type LayoutChangeEvent,
-} from 'react-native';
+} from "react-native";
 
-import { CaretDownIcon, CaretUpIcon, PlusIcon } from '@/components/Icons';
-import { useAccountBalance } from '@/hooks/useAccountBalance';
-import { useSymbolRules } from '@/hooks/useSymbolRules';
-import { describeError } from '@/lib/kucoin/errors';
-import { fetchOrderBookSnapshot } from '@/lib/kucoin/level2';
-import { createClientOid, placeLimitOrder, TEST_MODE } from '@/lib/kucoin/orders';
-import { validateLimitOrder } from '@/lib/kucoin/orderRules';
-import type { OrderSide } from '@/lib/kucoin/types';
+import { CaretDownIcon, CaretUpIcon, PlusIcon } from "@/components/Icons";
+import { useAccountBalance } from "@/hooks/useAccountBalance";
+import { useSymbolRules } from "@/hooks/useSymbolRules";
+import { describeError } from "@/lib/kucoin/errors";
+import { fetchOrderBookSnapshot } from "@/lib/kucoin/level2";
+import {
+  createClientOid,
+  placeLimitOrder,
+  TEST_MODE,
+} from "@/lib/kucoin/orders";
+import { validateLimitOrder } from "@/lib/kucoin/orderRules";
+import type { OrderSide } from "@/lib/kucoin/types";
 import {
   FILL_STOPS,
   fillByPercent,
@@ -32,10 +31,10 @@ import {
   stepAmount,
   totalFromSize,
   type FillPercent,
-} from '@/lib/trade';
-import { colors, radius, spacing } from '@/theme';
-import { trackPlacedOrder } from '@/state/openOrders';
-import { formatAmount } from '@/utils/format';
+} from "@/lib/trade";
+import { colors, radius, spacing } from "@/theme";
+import { trackPlacedOrder } from "@/state/openOrders";
+import { formatAmount } from "@/utils/format";
 
 type Props = {
   symbol: string;
@@ -50,29 +49,37 @@ type Props = {
 
 export type ExternalPriceSelection = { id: number; value: string };
 
-type Toast = { tone: 'success' | 'error'; message: string };
+type Toast = { tone: "success" | "error"; message: string };
 
 /** Keeps only digits and a single decimal point, so a stray paste cannot reach the math. */
 function sanitizeAmount(text: string): string {
-  const cleaned = text.replace(/[^0-9.]/g, '');
-  const firstDot = cleaned.indexOf('.');
+  const cleaned = text.replace(/[^0-9.]/g, "");
+  const firstDot = cleaned.indexOf(".");
   if (firstDot === -1) return cleaned;
-  return `${cleaned.slice(0, firstDot + 1)}${cleaned.slice(firstDot + 1).replace(/\./g, '')}`;
+  return `${cleaned.slice(0, firstDot + 1)}${cleaned.slice(firstDot + 1).replace(/\./g, "")}`;
 }
 
-function TradePanelBase({ symbol, testMode = TEST_MODE, priceSelection }: Props) {
-  const [baseCurrency = '', quoteCurrency = ''] = symbol.split('-');
+function TradePanelBase({
+  symbol,
+  testMode = TEST_MODE,
+  priceSelection,
+}: Props) {
+  const [baseCurrency = "", quoteCurrency = ""] = symbol.split("-");
 
-  const { rules, isLoading: rulesLoading, error: rulesError } = useSymbolRules(symbol);
+  const {
+    rules,
+    isLoading: rulesLoading,
+    error: rulesError,
+  } = useSymbolRules(symbol);
   // Read from the shared balance store, so a cancel driven from the order list below updates the
   // number here instead of leaving a second, independently fetched copy behind. The same store is
   // written by `/account/balance`, so a change made on the desktop moves this too.
   const { available } = useAccountBalance();
 
-  const [side, setSide] = useState<OrderSide>('buy');
-  const [price, setPrice] = useState('');
-  const [size, setSize] = useState('');
-  const [total, setTotal] = useState('');
+  const [side, setSide] = useState<OrderSide>("buy");
+  const [price, setPrice] = useState("");
+  const [size, setSize] = useState("");
+  const [total, setTotal] = useState("");
   const [percent, setPercent] = useState<FillPercent | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isFetchingBestPrice, setIsFetchingBestPrice] = useState(false);
@@ -84,10 +91,10 @@ function TradePanelBase({ symbol, testMode = TEST_MODE, priceSelection }: Props)
   const [activeSymbol, setActiveSymbol] = useState(symbol);
   if (symbol !== activeSymbol) {
     setActiveSymbol(symbol);
-    setSide('buy');
-    setPrice('');
-    setSize('');
-    setTotal('');
+    setSide("buy");
+    setPrice("");
+    setSize("");
+    setTotal("");
     setPercent(null);
     setInlineError(null);
     setToast(null);
@@ -98,13 +105,15 @@ function TradePanelBase({ symbol, testMode = TEST_MODE, priceSelection }: Props)
   // an amount is already entered so the two stay in step as if Price had been typed. Applied
   // during render rather than in an effect: this is a prop changing, not an external
   // subscription, and doing it in an effect would cost a second commit per tap.
-  const [appliedSelectionId, setAppliedSelectionId] = useState<number | null>(null);
+  const [appliedSelectionId, setAppliedSelectionId] = useState<number | null>(
+    null,
+  );
   if (priceSelection && priceSelection.id !== appliedSelectionId) {
     setAppliedSelectionId(priceSelection.id);
     setPrice(priceSelection.value);
     setPercent(null);
     setInlineError(null);
-    if (size) setTotal(totalFromSize(priceSelection.value, size) ?? '');
+    if (size) setTotal(totalFromSize(priceSelection.value, size) ?? "");
   }
 
   useEffect(() => {
@@ -113,18 +122,24 @@ function TradePanelBase({ symbol, testMode = TEST_MODE, priceSelection }: Props)
     return () => clearTimeout(timer);
   }, [toast]);
 
-  const baseAvailable = available[baseCurrency] ?? '0';
-  const quoteAvailable = available[quoteCurrency] ?? '0';
-  const availableForSide = side === 'buy' ? quoteAvailable : baseAvailable;
-  const availableCurrency = side === 'buy' ? quoteCurrency : baseCurrency;
+  const baseAvailable = available[baseCurrency] ?? "0";
+  const quoteAvailable = available[quoteCurrency] ?? "0";
+  const availableForSide = side === "buy" ? quoteAvailable : baseAvailable;
+  const availableCurrency = side === "buy" ? quoteCurrency : baseCurrency;
 
-  const max = rules ? maxSize(side, rules, price, { base: baseAvailable, quote: quoteAvailable }) : null;
-  const maxLabel = side === 'buy' ? 'Max Buy' : 'Max Sell';
+  const max = rules
+    ? maxSize(side, rules, price, {
+        base: baseAvailable,
+        quote: quoteAvailable,
+      })
+    : null;
+  const maxLabel = side === "buy" ? "Max Buy" : "Max Sell";
 
   const syncTotal = (nextPrice: string, nextSize: string) => {
-    setTotal(nextPrice && nextSize ? totalFromSize(nextPrice, nextSize) ?? '' : '');
+    setTotal(
+      nextPrice && nextSize ? (totalFromSize(nextPrice, nextSize) ?? "") : "",
+    );
   };
-
 
   const applyPercent = (next: FillPercent) => {
     setPercent(next);
@@ -139,11 +154,15 @@ function TradePanelBase({ symbol, testMode = TEST_MODE, priceSelection }: Props)
     setTotal(filled.total);
   };
 
-  const onTrackLayout = (event: LayoutChangeEvent) => setTrackWidth(event.nativeEvent.layout.width);
+  const onTrackLayout = (event: LayoutChangeEvent) =>
+    setTrackWidth(event.nativeEvent.layout.width);
 
   const onTrackTouch = (event: GestureResponderEvent) => {
     if (trackWidth <= 0) return;
-    const ratio = Math.min(1, Math.max(0, event.nativeEvent.locationX / trackWidth));
+    const ratio = Math.min(
+      1,
+      Math.max(0, event.nativeEvent.locationX / trackWidth),
+    );
     applyPercent(FILL_STOPS[Math.round(ratio * (FILL_STOPS.length - 1))]!);
   };
 
@@ -169,24 +188,24 @@ function TradePanelBase({ symbol, testMode = TEST_MODE, priceSelection }: Props)
     setPercent(null);
     setInlineError(null);
     if (!clean) {
-      setSize('');
+      setSize("");
       return;
     }
     const derived = rules ? sizeFromTotal(clean, price, rules) : null;
     if (derived !== null) setSize(derived);
   };
 
-  const onStep = (field: 'price' | 'size' | 'total', direction: 1 | -1) => {
+  const onStep = (field: "price" | "size" | "total", direction: 1 | -1) => {
     if (!rules) return;
     setPercent(null);
     setInlineError(null);
-    if (field === 'price') {
+    if (field === "price") {
       const next = stepAmount(price, rules.priceIncrement, direction);
       setPrice(next);
       syncTotal(next, size);
       return;
     }
-    if (field === 'size') {
+    if (field === "size") {
       const next = stepAmount(size, rules.baseIncrement, direction);
       setSize(next);
       syncTotal(price, next);
@@ -224,21 +243,23 @@ function TradePanelBase({ symbol, testMode = TEST_MODE, priceSelection }: Props)
     try {
       const snapshot = await fetchOrderBookSnapshot(symbol);
       // Asks are sorted best-first by the parser, so the first entry is the one to lift.
-      const best = side === 'buy' ? snapshot.asks[0] : snapshot.bids[0];
+      const best = side === "buy" ? snapshot.asks[0] : snapshot.bids[0];
       if (!best) {
-        setInlineError(`No ${side === 'buy' ? 'sell' : 'buy'} orders on the book for ${symbol}.`);
+        setInlineError(
+          `No ${side === "buy" ? "sell" : "buy"} orders on the book for ${symbol}.`,
+        );
         return;
       }
       const next = prefillPrice(rules, Number(best.price));
       if (next === null) {
-        setInlineError('Could not read the best price.');
+        setInlineError("Could not read the best price.");
         return;
       }
       setPrice(next);
       setPercent(null);
       syncTotal(next, size);
     } catch (caught) {
-      setInlineError(describeError(caught, 'Could not load the best price.'));
+      setInlineError(describeError(caught, "Could not load the best price."));
     } finally {
       setIsFetchingBestPrice(false);
     }
@@ -252,7 +273,9 @@ function TradePanelBase({ symbol, testMode = TEST_MODE, priceSelection }: Props)
       quote: quoteAvailable,
     });
     if (!check.valid || !check.normalized) {
-      setInlineError(check.issues[0]?.message ?? 'Enter a valid price and amount.');
+      setInlineError(
+        check.issues[0]?.message ?? "Enter a valid price and amount.",
+      );
       return;
     }
 
@@ -267,7 +290,7 @@ function TradePanelBase({ symbol, testMode = TEST_MODE, priceSelection }: Props)
           price: check.normalized.price,
           size: check.normalized.size,
         },
-        { test: testMode }
+        { test: testMode },
       );
       // Show it in the open-orders list on this tap rather than after its next poll. A dry run
       // returns an id the exchange never created, so there is nothing real to list.
@@ -277,19 +300,27 @@ function TradePanelBase({ symbol, testMode = TEST_MODE, priceSelection }: Props)
       if (!testMode) {
         trackPlacedOrder(
           { orderId: placed.orderId, clientOid },
-          { symbol, side, price: check.normalized.price, size: check.normalized.size }
+          {
+            symbol,
+            side,
+            price: check.normalized.price,
+            size: check.normalized.size,
+          },
         );
       }
-      const verb = side === 'buy' ? 'Buy' : 'Sell';
+      const verb = side === "buy" ? "Buy" : "Sell";
       setToast({
-        tone: 'success',
-        message: `${testMode ? 'Test ' : ''}${verb} order placed · ${placed.orderId.slice(0, 8)}`,
+        tone: "success",
+        message: `${testMode ? "Test " : ""}${verb} order placed · ${placed.orderId.slice(0, 8)}`,
       });
-      setSize('');
-      setTotal('');
+      setSize("");
+      setTotal("");
       setPercent(null);
     } catch (caught) {
-      setToast({ tone: 'error', message: describeError(caught, 'Order failed.') });
+      setToast({
+        tone: "error",
+        message: describeError(caught, "Order failed."),
+      });
     } finally {
       setIsSubmitting(false);
     }
@@ -300,7 +331,12 @@ function TradePanelBase({ symbol, testMode = TEST_MODE, priceSelection }: Props)
   return (
     <View style={styles.content}>
       {toast ? (
-        <View style={[styles.toast, toast.tone === 'success' ? styles.toastOk : styles.toastError]}>
+        <View
+          style={[
+            styles.toast,
+            toast.tone === "success" ? styles.toastOk : styles.toastError,
+          ]}
+        >
           <Text style={styles.toastText} numberOfLines={2}>
             {toast.message}
           </Text>
@@ -309,32 +345,36 @@ function TradePanelBase({ symbol, testMode = TEST_MODE, priceSelection }: Props)
 
       <View style={styles.toggle}>
         <Pressable
-          onPress={() => switchSide('buy')}
-          style={[styles.tab, side === 'buy' && styles.tabBuy]}
+          onPress={() => switchSide("buy")}
+          style={[styles.tab, side === "buy" && styles.tabBuy]}
           accessibilityRole="button"
-          accessibilityState={{ selected: side === 'buy' }}
+          accessibilityState={{ selected: side === "buy" }}
         >
-          <Text style={[styles.tabText, side === 'buy' && styles.tabTextBuy]}>Buy</Text>
+          <Text style={[styles.tabText, side === "buy" && styles.tabTextBuy]}>
+            Buy
+          </Text>
         </Pressable>
         <Pressable
-          onPress={() => switchSide('sell')}
-          style={[styles.tab, side === 'sell' && styles.tabSell]}
+          onPress={() => switchSide("sell")}
+          style={[styles.tab, side === "sell" && styles.tabSell]}
           accessibilityRole="button"
-          accessibilityState={{ selected: side === 'sell' }}
+          accessibilityState={{ selected: side === "sell" }}
         >
-          <Text style={[styles.tabText, side === 'sell' && styles.tabTextSell]}>Sell</Text>
+          <Text style={[styles.tabText, side === "sell" && styles.tabTextSell]}>
+            Sell
+          </Text>
         </Pressable>
       </View>
 
       <AmountField
         label="Price"
         value={price}
-        placeholder={rules ? rules.priceIncrement : '0'}
+        placeholder={rules ? rules.priceIncrement : "0"}
         unit={quoteCurrency}
         editable={editable}
         onChangeText={onPriceChange}
-        onStepUp={() => onStep('price', 1)}
-        onStepDown={() => onStep('price', -1)}
+        onStepUp={() => onStep("price", 1)}
+        onStepDown={() => onStep("price", -1)}
         labelAction={
           <Pressable
             onPress={applyBestPrice}
@@ -344,10 +384,11 @@ function TradePanelBase({ symbol, testMode = TEST_MODE, priceSelection }: Props)
             hitSlop={8}
             style={[
               styles.bestPrice,
-              (!rules || isSubmitting || isFetchingBestPrice) && styles.bestPriceDisabled,
+              (!rules || isSubmitting || isFetchingBestPrice) &&
+                styles.bestPriceDisabled,
             ]}
             accessibilityRole="button"
-            accessibilityLabel={`Use the best ${side === 'buy' ? 'ask' : 'bid'} price`}
+            accessibilityLabel={`Use the best ${side === "buy" ? "ask" : "bid"} price`}
             accessibilityState={{ busy: isFetchingBestPrice }}
           >
             {isFetchingBestPrice ? (
@@ -362,42 +403,55 @@ function TradePanelBase({ symbol, testMode = TEST_MODE, priceSelection }: Props)
       <AmountField
         label="Amount"
         value={size}
-        placeholder={rules ? `Minimum: ${rules.baseMinSize}` : '0'}
+        placeholder={rules ? `Minimum: ${rules.baseMinSize}` : "0"}
         unit={baseCurrency}
         editable={editable}
         onChangeText={onSizeChange}
-        onStepUp={() => onStep('size', 1)}
-        onStepDown={() => onStep('size', -1)}
+        onStepUp={() => onStep("size", 1)}
+        onStepDown={() => onStep("size", -1)}
       />
 
-      <View
-        style={styles.slider}
-        onLayout={onTrackLayout}
-        onStartShouldSetResponder={() => true}
-        onMoveShouldSetResponder={() => true}
-        onResponderGrant={onTrackTouch}
-        onResponderMove={onTrackTouch}
-        accessibilityRole="adjustable"
-        accessibilityLabel="Amount percentage of available balance"
-        accessibilityValue={{ min: 0, max: 100, now: percent ?? 0 }}
-      >
-        <View style={styles.sliderTrack} />
-        <View style={[styles.sliderFill, { width: `${percent ?? 0}%` }]} />
-        {FILL_STOPS.map((stop) => {
-          const active = percent !== null && stop <= percent;
-          return <View key={stop} style={[styles.dot, { left: `${stop}%` }, active && styles.dotActive]} />;
-        })}
+      <View style={styles.sliderWrapper}>
+        <View
+          style={styles.slider}
+          onLayout={onTrackLayout}
+          onStartShouldSetResponder={() => true}
+          onMoveShouldSetResponder={() => true}
+          onResponderGrant={onTrackTouch}
+          onResponderMove={onTrackTouch}
+          accessibilityRole="adjustable"
+          accessibilityLabel="Amount percentage of available balance"
+          accessibilityValue={{ min: 0, max: 100, now: percent ?? 0 }}
+        >
+          <View style={styles.sliderInner}>
+            <View style={styles.sliderTrack} />
+            <View style={[styles.sliderFill, { width: `${percent ?? 0}%` }]} />
+            {FILL_STOPS.map((stop) => {
+              const active = percent !== null && stop <= percent;
+              return (
+                <View
+                  key={stop}
+                  style={[
+                    styles.dot,
+                    { left: `${stop}%` },
+                    active && styles.dotActive,
+                  ]}
+                />
+              );
+            })}
+          </View>
+        </View>
       </View>
 
       <AmountField
         label="Total"
         value={total}
-        placeholder={rules ? `Minimum: ${rules.minFunds}` : '0'}
+        placeholder={rules ? `Minimum: ${rules.minFunds}` : "0"}
         unit={quoteCurrency}
         editable={editable}
         onChangeText={onTotalChange}
-        onStepUp={() => onStep('total', 1)}
-        onStepDown={() => onStep('total', -1)}
+        onStepUp={() => onStep("total", 1)}
+        onStepDown={() => onStep("total", -1)}
       />
 
       <View style={styles.row}>
@@ -421,7 +475,7 @@ function TradePanelBase({ symbol, testMode = TEST_MODE, priceSelection }: Props)
       <View style={styles.row}>
         <Text style={styles.rowLabel}>{maxLabel}</Text>
         <Text style={styles.rowValue}>
-          {max === null ? '—' : `${formatAmount(Number(max))} ${baseCurrency}`}
+          {max === null ? "—" : `${formatAmount(Number(max))} ${baseCurrency}`}
         </Text>
       </View>
 
@@ -433,22 +487,24 @@ function TradePanelBase({ symbol, testMode = TEST_MODE, priceSelection }: Props)
         disabled={!rules || isSubmitting}
         style={[
           styles.action,
-          side === 'buy' ? styles.actionBuy : styles.actionSell,
+          side === "buy" ? styles.actionBuy : styles.actionSell,
           (!rules || isSubmitting) && styles.actionDisabled,
         ]}
         accessibilityRole="button"
-        accessibilityLabel={`${side === 'buy' ? 'Buy' : 'Sell'} ${baseCurrency}`}
+        accessibilityLabel={`${side === "buy" ? "Buy" : "Sell"} ${baseCurrency}`}
       >
         {isSubmitting ? (
           <ActivityIndicator color="#FFFFFF" />
         ) : (
           <Text style={styles.actionText}>
-            {side === 'buy' ? 'Buy' : 'Sell'} {baseCurrency}
+            {side === "buy" ? "Buy" : "Sell"} {baseCurrency}
           </Text>
         )}
       </Pressable>
 
-      {rulesLoading ? <ActivityIndicator color={colors.accent} style={styles.rulesLoader} /> : null}
+      {rulesLoading ? (
+        <ActivityIndicator color={colors.accent} style={styles.rulesLoader} />
+      ) : null}
     </View>
   );
 }
@@ -540,18 +596,18 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   toastOk: {
-    backgroundColor: 'rgba(35,175,137,0.16)',
+    backgroundColor: "rgba(35,175,137,0.16)",
   },
   toastError: {
-    backgroundColor: 'rgba(246,70,93,0.16)',
+    backgroundColor: "rgba(246,70,93,0.16)",
   },
   toastText: {
     color: colors.text,
     fontSize: 11,
-    fontWeight: '600',
+    fontWeight: "600",
   },
   toggle: {
-    flexDirection: 'row',
+    flexDirection: "row",
     backgroundColor: colors.surfaceAlt,
     borderRadius: radius.pill,
     padding: 2,
@@ -560,8 +616,8 @@ const styles = StyleSheet.create({
   tab: {
     flex: 1,
     height: 32,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
     borderRadius: radius.pill,
   },
   tabBuy: {
@@ -573,26 +629,26 @@ const styles = StyleSheet.create({
   tabText: {
     color: colors.textMuted,
     fontSize: 13,
-    fontWeight: '700',
+    fontWeight: "700",
   },
   tabTextBuy: {
-    color: '#FFFFFF',
+    color: "#FFFFFF",
   },
   tabTextSell: {
-    color: '#FFFFFF',
+    color: "#FFFFFF",
   },
   field: {
     gap: 4,
   },
   fieldLabelRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
   },
   fieldLabel: {
     color: colors.textFaint,
     fontSize: 10,
-    fontWeight: '600',
+    fontWeight: "600",
     letterSpacing: 0.3,
   },
   bestPrice: {
@@ -605,11 +661,11 @@ const styles = StyleSheet.create({
   bestPriceText: {
     color: colors.accent,
     fontSize: 10,
-    fontWeight: '700',
+    fontWeight: "700",
   },
   inputWrap: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     backgroundColor: colors.surfaceAlt,
     borderRadius: radius.sm,
     paddingLeft: spacing.sm,
@@ -621,46 +677,58 @@ const styles = StyleSheet.create({
     flex: 1,
     color: colors.text,
     fontSize: 14,
-    fontWeight: '600',
-    fontVariant: ['tabular-nums'],
+    fontWeight: "600",
+    fontVariant: ["tabular-nums"],
     padding: 0,
   },
   unit: {
     color: colors.textMuted,
     fontSize: 11,
-    fontWeight: '600',
+    fontWeight: "600",
   },
   steppers: {
-    justifyContent: 'center',
+    justifyContent: "center",
     gap: 1,
   },
   stepper: {
     paddingHorizontal: 2,
   },
+  sliderWrapper: {
+    marginTop: 12,
+    marginBottom: 12,
+  },
   slider: {
-    height: 22,
-    justifyContent: 'center',
+    height: 12,
+    justifyContent: "center",
+    paddingHorizontal: 5,
+  },
+  sliderInner: {
+    ...StyleSheet.absoluteFill,
+    justifyContent: "center",
+    right: 12,
+    left: 12,
   },
   sliderTrack: {
-    height: 3,
-    borderRadius: 2,
+    height: 12,
+    borderRadius: 4,
     backgroundColor: colors.surfaceAlt,
   },
   sliderFill: {
-    position: 'absolute',
+    position: "absolute",
     left: 0,
-    height: 3,
-    borderRadius: 2,
+    height: 8,
+    borderRadius: 4,
     backgroundColor: colors.accent,
   },
   dot: {
-    position: 'absolute',
-    width: 9,
-    height: 9,
-    marginLeft: -4.5,
-    borderRadius: 4.5,
+    position: "absolute",
+    width: 16,
+    height: 16,
+    marginLeft: -6,
+    marginTop: -1,
+    borderRadius: 5,
     backgroundColor: colors.surfaceAlt,
-    borderWidth: 1,
+    borderWidth: 1.5,
     borderColor: colors.border,
   },
   dotActive: {
@@ -668,32 +736,32 @@ const styles = StyleSheet.create({
     borderColor: colors.accent,
   },
   row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
   },
   rowLabel: {
     color: colors.textMuted,
     fontSize: 11,
   },
   rowValueWrap: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 6,
   },
   rowValue: {
     color: colors.text,
     fontSize: 11,
-    fontWeight: '600',
-    fontVariant: ['tabular-nums'],
+    fontWeight: "600",
+    fontVariant: ["tabular-nums"],
   },
   deposit: {
     width: 16,
     height: 16,
     borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(35,175,137,0.16)',
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(35,175,137,0.16)",
   },
   error: {
     color: colors.down,
@@ -702,12 +770,12 @@ const styles = StyleSheet.create({
   },
   action: {
     height: 42,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
     borderRadius: radius.pill,
     // Absorbs whatever height the book column leaves this one short by, so the button sits on the
     // bottom edge of the section and both columns finish at the same line.
-    marginTop: 'auto',
+    marginTop: "auto",
   },
   actionBuy: {
     backgroundColor: colors.up,
@@ -719,9 +787,9 @@ const styles = StyleSheet.create({
     opacity: 0.4,
   },
   actionText: {
-    color: '#FFFFFF',
+    color: "#FFFFFF",
     fontSize: 14,
-    fontWeight: '700',
+    fontWeight: "700",
   },
   rulesLoader: {
     marginTop: 2,
