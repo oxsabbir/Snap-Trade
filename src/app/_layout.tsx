@@ -1,5 +1,6 @@
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { StyleSheet, View } from 'react-native';
 import { initialWindowMetrics, SafeAreaProvider } from 'react-native-safe-area-context';
 
@@ -13,20 +14,22 @@ export default function RootLayout() {
   usePrivateFeed();
 
   return (
-    <SafeAreaProvider initialMetrics={initialWindowMetrics}>
-      <ActiveCoinProvider>
-        <View style={styles.root}>
-          <StatusBar style="light" />
-          <Stack
-            screenOptions={{
-              headerShown: false,
-              contentStyle: { backgroundColor: colors.bg },
-              animation: 'fade',
-            }}
-          />
-        </View>
-      </ActiveCoinProvider>
-    </SafeAreaProvider>
+    <GestureHandlerRootView style={styles.root}>
+      <SafeAreaProvider initialMetrics={initialWindowMetrics}>
+        <ActiveCoinProvider>
+          <View style={styles.root}>
+            <StatusBar style="light" />
+            <Stack
+              screenOptions={{
+                headerShown: false,
+                contentStyle: { backgroundColor: colors.bg },
+                animation: 'fade',
+              }}
+            />
+          </View>
+        </ActiveCoinProvider>
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
   );
 }
 

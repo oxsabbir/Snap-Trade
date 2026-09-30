@@ -1,23 +1,8 @@
-import { Fragment, memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  PanResponder,
-  StyleSheet,
-  Text,
-  View,
-  type GestureResponderEvent,
-  type LayoutChangeEvent,
-  type NativeTouchEvent,
-} from 'react-native';
-import Svg, {
-  Circle,
-  Defs,
-  Line,
-  LinearGradient,
-  Path,
-  Rect,
-  Stop,
-  Text as SvgText,
-} from 'react-native-svg';
+import { memo, useCallback, useDeferredValue, useEffect, useMemo, useState } from 'react';
+import { StyleSheet, Text, View, type LayoutChangeEvent } from 'react-native';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import { runOnJS, useDerivedValue, useSharedValue } from 'react-native-reanimated';
+import { Canvas, Circle, Group, Line, LinearGradient, Path, Rect, Skia, vec } from '@shopify/react-native-skia';
 
 import type { Candle, ChartMode } from '@/lib/kucoin/types';
 import { colors, radius, spacing } from '@/theme';
@@ -28,728 +13,184 @@ const PAD_BOTTOM = 18;
 const AXIS_WIDTH = 54;
 const GRID_LINES = 4;
 const X_LABELS = 4;
-
-/** Zooming in past this leaves too few candles to read, so it acts as the floor. */
 const MIN_VISIBLE = 20;
-/**
- * Candles shown on load. Zooming out still reaches the full `count` via pinch, so this
- * is a starting view rather than a cap. Clamped down by callers for thinly traded
- * symbols that have fewer candles than this.
- */
 const DEFAULT_SPAN = 35;
-const DOUBLE_TAP_MS = 300;
-const DOUBLE_TAP_SLOP = 24;
-/** Horizontal travel past this turns a touch into a pan instead of a crosshair tap. */
-const PAN_SLOP = 6;
-
-/**
- * Inset from the SVG edge so the first and last candles are not clipped in half.
- * See `plotInset` for how the value is derived.
- */
-const PLOT_PAD = 6;
-/**
- * Extra inset on the right only. The newest candle is the one users are reading and it
- * sits against the price axis, so it gets more clearance than the left edge.
- */
-const RIGHT_EDGE_GAP = 10;
-/** Candle body width as a fraction of one slot. */
 const CANDLE_BODY_RATIO = 0.72;
 
-/**
- * Inset that keeps the outermost candles clear of both SVG edges for `n` candles.
- *
- * The last candle's centre sits at `innerWidth - pad` and its body half-width is
- * `(innerWidth - 2*pad) * R / (2n)`, so clearing the right edge means
- * `pad >= (innerWidth - 2*pad) * R / (2n)`. Solving for `pad` (the width depends on the
- * pad, so it cannot simply be added afterwards) gives `pad >= R*innerWidth / (2*(n+R))`.
- * `PLOT_PAD` is a floor so a normal chart keeps a little breathing room at the edges.
- */
-function plotInset(innerWidth: number, n: number): number {
-  const exact = (CANDLE_BODY_RATIO * innerWidth) / (2 * (n + CANDLE_BODY_RATIO));
-  return Math.max(PLOT_PAD, exact);
-}
+type Props = { candles: Candle[]; mode: ChartMode; height?: number; decimals?: number; defaultSpan?: number; resetKey?: string; onVisibleRangeChange?: (visible: number, total: number) => void };
+type Viewport = { span: number; offset: number };
+type Domain = { lower: number; upper: number };
 
-type Props = {
-  candles: Candle[];
-  mode: ChartMode;
-  height?: number;
-  decimals?: number;
-  /**
-   * Candles shown on load, overriding `DEFAULT_SPAN`. The lifetime view passes its whole
-   * series: showing 35 of 466 weekly points would cover about eight months, which is the
-   * opposite of a lifetime chart.
-   */
-  defaultSpan?: number;
-  /** Change this to force the viewport back to the full range, e.g. on timeframe switch. */
-  resetKey?: string;
-  onVisibleRangeChange?: (visible: number, total: number) => void;
-};
+function clamp(value: number, min: number, max: number): number { 'worklet'; return Math.min(Math.max(value, min), max); }
+function resolveSpan(count: number, span: number): number { 'worklet'; return count <= 0 ? 0 : clamp(Math.round(span), Math.min(MIN_VISIBLE, count), count); }
+function initialViewport(count: number, defaultSpan?: number): Viewport { return { span: resolveSpan(count, defaultSpan ?? DEFAULT_SPAN), offset: 0 }; }
 
-/** The visible window after clamping against the loaded candle count. */
-type ResolvedViewport = {
-  span: number;
-  offset: number;
-  start: number;
-};
-
-type PinchBaseline = {
-  distance: number;
-  mid: number;
-  span: number;
-  offset: number;
-};
-
-type PanBaseline = {
-  x0: number;
-  span: number;
-  offset: number;
-  moved: boolean;
-};
-
-/** A quantised price band. `key` changes only when a refit is allowed to shrink it. */
-type Domain = { key: string; lower: number; upper: number };
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(Math.max(value, min), max);
-}
-
-/**
- * Rounds a raw axis step up to the nearest 1/2/5 x 10^n, so grid labels land on round
- * numbers instead of values like $60,123.45678.
- */
 function niceStep(raw: number): number {
   if (!(raw > 0)) return 1;
   const magnitude = Math.pow(10, Math.floor(Math.log10(raw)));
   const mantissa = raw / magnitude;
-  const factor = mantissa <= 1 ? 1 : mantissa <= 2 ? 2 : mantissa <= 5 ? 5 : 10;
-  return factor * magnitude;
+  return (mantissa <= 1 ? 1 : mantissa <= 2 ? 2 : mantissa <= 5 ? 5 : 10) * magnitude;
 }
 
-/**
- * A band snapped outward to a round step. The step is always derived from the data
- * range, never from the width of an existing band: a width divided by GRID_LINES is
- * not a 1/2/5 number, so deriving it that way shifts the rounding lattice on every
- * pass and the axis never settles.
- *
- * A flat series would otherwise snap to a zero-height band and make the chart
- * disappear, so that case is widened by one step either side.
- */
-function niceBand(min: number, max: number): { lower: number; upper: number } {
+function niceBand(min: number, max: number): Domain {
   const span = max > min ? max - min : Math.abs(max || 1) * 0.01;
   const gap = niceStep(span / GRID_LINES);
   const lower = Math.floor(min / gap) * gap;
   const upper = Math.ceil(max / gap) * gap;
-  if (upper - lower <= 0) return { lower: lower - gap, upper: upper + gap };
-  return { lower, upper };
+  return upper > lower ? { lower, upper } : { lower: lower - gap, upper: upper + gap };
 }
-
-/** Span past which a bare MM/DD label would be ambiguous, so the year is shown instead. */
-const YEAR_MS = 31_536_000_000;
 
 function formatAxisTime(timestamp: number, spanMs: number): string {
   const date = new Date(timestamp);
   const pad = (n: number) => n.toString().padStart(2, '0');
   if (spanMs <= 86_400_000) return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
-  // The lifetime view spans years, where 03/04 could be 2017 or 2026. Four labels across
-  // a nine-year span are ~2 years apart, so the bare year reads better than a full date.
-  if (spanMs > YEAR_MS * 2) return date.getFullYear().toString();
+  if (spanMs > 63_072_000_000) return date.getFullYear().toString();
   return `${pad(date.getMonth() + 1)}/${pad(date.getDate())}`;
 }
 
-function touchDistance(a: NativeTouchEvent, b: NativeTouchEvent): number {
-  return Math.hypot(a.locationX - b.locationX, a.locationY - b.locationY);
-}
-
-function PriceChartComponent({
-  candles: liveCandles,
-  mode,
-  height = 250,
-  decimals,
-  defaultSpan,
-  resetKey,
-  onVisibleRangeChange,
-}: Props) {
+function PriceChartComponent({ candles: incomingCandles, mode, height = 250, decimals, defaultSpan, resetKey, onVisibleRangeChange }: Props) {
+  // Socket bursts may update the source several times per second. The canvas adopts the latest
+  // deferred snapshot, leaving the UI runtime free to keep an in-flight gesture responsive.
+  const candles = useDeferredValue(incomingCandles);
   const [width, setWidth] = useState(0);
+  const [viewport, setViewport] = useState(() => initialViewport(incomingCandles.length, defaultSpan));
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
-  const [span, setSpan] = useState<number | null>(null);
-  const [offset, setOffset] = useState(0);
-  const [domain, setDomain] = useState<Domain | null>(null);
-
-  // Touch moves arrive faster than the screen refreshes, and each one rebuilds the window,
-  // the scales and the SVG paths. Committing every move queues renders faster than they drain,
-  // so a drag trails the finger by however far it got behind. Collecting the moves and writing
-  // once per frame bounds that to a single rebuild per frame and drops the surplus.
-  const frameRef = useRef<number | null>(null);
-  const pendingViewportRef = useRef<{ span: number; offset: number } | null>(null);
-
-  const commitViewport = useCallback(() => {
-    frameRef.current = null;
-    const pending = pendingViewportRef.current;
-    pendingViewportRef.current = null;
-    if (!pending) return;
-    setSpan(pending.span);
-    setOffset(pending.offset);
-  }, []);
-
-  const scheduleViewport = useCallback(
-    (nextSpan: number, nextOffset: number) => {
-      pendingViewportRef.current = { span: nextSpan, offset: nextOffset };
-      if (frameRef.current === null) frameRef.current = requestAnimationFrame(commitViewport);
-    },
-    [commitViewport]
-  );
-
-  const cancelPendingViewport = useCallback(() => {
-    pendingViewportRef.current = null;
-    if (frameRef.current === null) return;
-    cancelAnimationFrame(frameRef.current);
-    frameRef.current = null;
-  }, []);
-
-  // Rendering the series, rather than the incoming one, is what keeps a price tick off the
-  // critical path of a drag. Every new tick hands over a fresh array, which invalidates the
-  // window slice, the scales and the SVG path strings below — a few hundred elements rebuilt
-  // five times a second. While a finger is down that work lands between touch moves and the
-  // drag visibly stutters. React paints the gesture from the previous series immediately and
-  // rebuilds in the background, so a tick that arrives mid-drag can no longer delay it, and a
-  // burst of them collapses into a single rebuild instead of one per tick.
-  const candles = useDeferredValue(liveCandles);
-
-  const onLayout = useCallback((event: LayoutChangeEvent) => {
-    setWidth(event.nativeEvent.layout.width);
-  }, []);
-
-  // Reset to defaults when the caller signals a new series, so a timeframe or pair switch never
-  // shows the old window. Done during render, matching the pattern in useLiveCandles, so the new
-  // series is never drawn with the old window's zoom and pan.
-  const [activeKey, setActiveKey] = useState(resetKey);
-  if (resetKey !== activeKey) {
-    setActiveKey(resetKey);
-    setSpan(null);
-    setOffset(0);
+  const resetId = `${resetKey ?? ''}:${incomingCandles.length}:${defaultSpan ?? ''}`;
+  const [activeResetId, setActiveResetId] = useState(resetId);
+  if (resetId !== activeResetId) {
+    setActiveResetId(resetId);
+    setViewport(initialViewport(incomingCandles.length, defaultSpan));
     setActiveIndex(null);
-    setDomain(null);
   }
-
-  // Cancelling a queued frame is a side effect on the scheduler, so it cannot happen during
-  // render, and it is the one part of the reset above that has to wait. Without it a frame
-  // queued by a gesture in flight would land after the reset and put the old zoom and pan back.
-  useEffect(() => {
-    cancelPendingViewport();
-  }, [cancelPendingViewport, resetKey]);
-
   const count = candles.length;
   const innerWidth = Math.max(width - AXIS_WIDTH, 0);
-  const priceHeight = Math.max(height - PAD_TOP - PAD_BOTTOM, 0);
+  const priceHeight = Math.max(height - PAD_TOP - PAD_BOTTOM, 1);
+  const settledSpan = resolveSpan(count, viewport.span);
+  const settledOffset = clamp(viewport.offset, 0, Math.max(count - settledSpan, 0));
+  const settledStart = Math.max(count - settledOffset - settledSpan, 0);
 
-  const { span: resolvedSpan, offset: resolvedOffset, start } = useMemo<ResolvedViewport>(() => {
-    if (count === 0) return { span: 0, offset: 0, start: 0 };
-    // The `count` upper bound already handles thinly traded symbols: asking for 35
-    // when only 5 exist clamps down to 5, so no extra min() is needed here.
-    const fallback = defaultSpan ?? DEFAULT_SPAN;
-    const resolved = clamp(span ?? fallback, Math.min(MIN_VISIBLE, count), count);
-    const maxOffset = Math.max(count - resolved, 0);
-    const resolvedOffsetIndex = clamp(offset, 0, maxOffset);
-    return { span: resolved, offset: resolvedOffsetIndex, start: count - resolvedOffsetIndex - resolved };
-  }, [count, defaultSpan, offset, span]);
+  const zoomSpan = useSharedValue(settledSpan || 1);
+  const zoomOffset = useSharedValue(settledOffset);
+  const panStartOffset = useSharedValue(0);
+  const pinchStartSpan = useSharedValue(settledSpan || 1);
+  const pinchStartOffset = useSharedValue(settledOffset);
 
-  /**
-   * The plot area is inset from the SVG edges. Without this the first and last candles
-   * are centred exactly on x=0 and x=innerWidth, so in candle mode half of each body is
-   * clipped — the newest candle, the one that matters most, ends up sliced against the
-   * price axis. Sized from the real span, since a symbol with only a handful of candles
-   * has much wider bars than one zoomed to the 20-candle floor.
-   *
-   * The inset is deliberately asymmetric. `plotInset` returns the minimum that keeps bars
-   * clear of the left edge; the right gets that plus `RIGHT_EDGE_GAP`, because that is the
-   * edge the newest candle sits against and the one users read. The right side is therefore
-   * always at least as safe as before, and the left side is unchanged.
-   */
-  const plotPadLeft = plotInset(innerWidth, Math.max(resolvedSpan, 1));
-  const plotPadRight = plotPadLeft + RIGHT_EDGE_GAP;
-  const plotWidth = Math.max(innerWidth - plotPadLeft - plotPadRight, 1);
-  const plotLeft = plotPadLeft;
-
-  // Reported upward so the toolbar can show the visible count. Deduped by value so
-  // a drag never re-renders the parent on every frame.
-  const reportedRef = useRef('');
   useEffect(() => {
-    if (count === 0) return;
-    const key = `${resolvedSpan}:${count}`;
-    if (key === reportedRef.current) return;
-    reportedRef.current = key;
-    onVisibleRangeChange?.(resolvedSpan, count);
-  }, [count, onVisibleRangeChange, resolvedSpan]);
+    zoomSpan.set(settledSpan || 1);
+    zoomOffset.set(settledOffset);
+  }, [settledOffset, settledSpan, zoomOffset, zoomSpan]);
+
+  useEffect(() => { if (count > 0) onVisibleRangeChange?.(settledSpan, count); }, [count, onVisibleRangeChange, settledSpan]);
 
   const window = useMemo(() => {
-    if (count === 0 || innerWidth <= 0) return null;
-    const slice = candles.slice(start, start + resolvedSpan);
-    if (slice.length === 0) return null;
-
+    const visible = candles.slice(settledStart, settledStart + settledSpan);
+    if (visible.length === 0) return null;
     let min = Number.POSITIVE_INFINITY;
     let max = Number.NEGATIVE_INFINITY;
-    for (const candle of slice) {
-      if (candle.low < min) min = candle.low;
-      if (candle.high > max) max = candle.high;
-    }
-    if (!Number.isFinite(min) || !Number.isFinite(max)) return null;
+    for (const candle of visible) { min = Math.min(min, candle.low); max = Math.max(max, candle.high); }
+    return { candles: visible, domain: niceBand(min, max) };
+  }, [candles, settledSpan, settledStart]);
 
-    return { candles: slice, min, max };
-  }, [candles, count, innerWidth, resolvedSpan, start]);
-
-  /**
-   * Sticky price band. Ticks may only push it wider, so the chart does not rescale
-   * itself under the user during a pump. A refit — new first candle from a bucket
-   * rollover, or a new visible span from pinch/drag — is allowed to shrink it back.
-   */
-  if (window) {
-    const key = `${window.candles[0]!.time}:${resolvedSpan}`;
-    const current = domain && domain.key === key ? domain : null;
-
-    if (!current) {
-      const band = niceBand(window.min, window.max);
-      setDomain({ key, ...band });
-    } else if (window.min < current.lower || window.max > current.upper) {
-      const band = niceBand(Math.min(window.min, current.lower), Math.max(window.max, current.upper));
-      setDomain({ key, ...band });
-    }
-  }
-
-  const scales = useMemo(() => {
-    if (!window || !domain || innerWidth <= 0) return null;
+  const domain = window?.domain;
+  const geometry = useMemo(() => {
+    if (!domain || count === 0 || innerWidth <= 0) return null;
     const range = domain.upper - domain.lower;
-    if (!(range > 0)) return null;
-
-    const n = window.candles.length;
-    const x = (index: number) => (n === 1 ? plotLeft + plotWidth / 2 : plotLeft + (index / (n - 1)) * plotWidth);
+    const x = (index: number) => count === 1 ? innerWidth / 2 : (index / (count - 1)) * innerWidth;
     const y = (value: number) => PAD_TOP + (1 - (value - domain.lower) / range) * priceHeight;
+    const linePath = Skia.Path.Make();
+    const areaPath = Skia.Path.Make();
+    if (mode === 'line') {
+      candles.forEach((candle, index) => {
+        const px = x(index); const py = y(candle.close);
+        if (index === 0) { linePath.moveTo(px, py); areaPath.moveTo(px, py); }
+        else { linePath.lineTo(px, py); areaPath.lineTo(px, py); }
+      });
+      if (count > 1) { areaPath.lineTo(x(count - 1), PAD_TOP + priceHeight); areaPath.lineTo(x(0), PAD_TOP + priceHeight); areaPath.close(); }
+    }
+    return { x, y, linePath, areaPath, bodyWidth: Math.max(1, (innerWidth / Math.max(count, 1)) * CANDLE_BODY_RATIO) };
+  }, [candles, count, domain, innerWidth, mode, priceHeight]);
 
-    return { x, y, n };
-  }, [domain, innerWidth, plotLeft, plotWidth, priceHeight, window]);
+  // This transform is evaluated on Reanimated's UI runtime. Pan and pinch redraw Skia without
+  // creating React elements, re-slicing arrays, or sending touch events through the JS thread.
+  const chartTransform = useDerivedValue(() => {
+    const visible = resolveSpan(count, zoomSpan.get());
+    const offset = clamp(zoomOffset.get(), 0, Math.max(count - visible, 0));
+    const start = Math.max(count - offset - visible, 0);
+    const scaleX = count <= 1 || visible <= 1 ? 1 : (count - 1) / (visible - 1);
+    const step = innerWidth / Math.max(count - 1, 1);
+    return [{ scaleX }, { translateX: -start * step * scaleX }];
+  }, [count, innerWidth, zoomOffset, zoomSpan]);
 
-  const pinchRef = useRef<PinchBaseline | null>(null);
-  const panRef = useRef<PanBaseline | null>(null);
-  const multiRef = useRef(false);
-  const suppressCrosshairRef = useRef(false);
-  const lastTapRef = useRef<{ time: number; x: number; y: number } | null>(null);
-
+  const onLayout = useCallback((event: LayoutChangeEvent) => setWidth(event.nativeEvent.layout.width), []);
+  const commitViewport = useCallback((span: number, offset: number) => {
+    const nextSpan = resolveSpan(candles.length, span);
+    setViewport({ span: nextSpan, offset: clamp(Math.round(offset), 0, Math.max(candles.length - nextSpan, 0)) });
+  }, [candles.length]);
   const resetViewport = useCallback(() => {
-    cancelPendingViewport();
-    setSpan(null);
-    setOffset(0);
-    setActiveIndex(null);
-    setDomain(null);
-  }, [cancelPendingViewport]);
+    const next = initialViewport(candles.length, defaultSpan);
+    zoomSpan.set(next.span || 1); zoomOffset.set(0); setViewport(next); setActiveIndex(null);
+  }, [candles.length, defaultSpan, zoomOffset, zoomSpan]);
+  const selectAt = useCallback((x: number) => {
+    if (!geometry || settledSpan === 0) return;
+    const index = settledStart + Math.round(clamp(x / Math.max(innerWidth, 1), 0, 1) * (settledSpan - 1));
+    setActiveIndex((previous) => previous === index ? null : index);
+  }, [geometry, innerWidth, settledSpan, settledStart]);
+  const clearActive = useCallback(() => setActiveIndex(null), []);
 
-  const indexAt = useCallback(
-    (locationX: number) => {
-      // Measured against the plot area, not the raw width, so a touch in the inset
-      // padding still resolves to the first or last candle instead of overshooting.
-      const ratio = clamp((locationX - plotLeft) / plotWidth, 0, 1);
-      return start + Math.round(ratio * (resolvedSpan - 1));
-    },
-    [plotLeft, plotWidth, resolvedSpan, start]
-  );
+  const pan = useMemo(() => Gesture.Pan().activeOffsetX([-6, 6]).failOffsetY([-14, 14])
+    .onBegin(() => { panStartOffset.set(zoomOffset.get()); runOnJS(clearActive)(); })
+    .onUpdate((event) => { const span = resolveSpan(count, zoomSpan.get()); const next = panStartOffset.get() + (event.translationX / Math.max(innerWidth, 1)) * span; zoomOffset.set(clamp(next, 0, Math.max(count - span, 0))); })
+    .onEnd(() => runOnJS(commitViewport)(zoomSpan.get(), zoomOffset.get())),
+  [clearActive, commitViewport, count, innerWidth, panStartOffset, zoomOffset, zoomSpan]);
+  const pinch = useMemo(() => Gesture.Pinch()
+    .onBegin(() => { pinchStartSpan.set(zoomSpan.get()); pinchStartOffset.set(zoomOffset.get()); runOnJS(clearActive)(); })
+    .onUpdate((event) => { const span = resolveSpan(count, pinchStartSpan.get() / Math.max(event.scale, 0.01)); const shift = ((event.focalX - innerWidth / 2) / Math.max(innerWidth, 1)) * span; zoomSpan.set(span); zoomOffset.set(clamp(pinchStartOffset.get() + shift, 0, Math.max(count - span, 0))); })
+    .onEnd(() => runOnJS(commitViewport)(zoomSpan.get(), zoomOffset.get())),
+  [clearActive, commitViewport, count, innerWidth, pinchStartOffset, pinchStartSpan, zoomOffset, zoomSpan]);
+  const singleTap = useMemo(() => Gesture.Tap().onEnd((event, success) => { if (success) runOnJS(selectAt)(event.x); }), [selectAt]);
+  const doubleTap = useMemo(() => Gesture.Tap().numberOfTaps(2).onEnd((_event, success) => { if (success) runOnJS(resetViewport)(); }), [resetViewport]);
+  const gestures = useMemo(() => Gesture.Simultaneous(pan, pinch, Gesture.Exclusive(doubleTap, singleTap)), [doubleTap, pan, pinch, singleTap]);
 
-  const trackCrosshair = useCallback(
-    (locationX: number) => {
-      if (count === 0 || suppressCrosshairRef.current) return;
-      setActiveIndex(indexAt(locationX));
-    },
-    [count, indexAt]
-  );
+  if (!window || !geometry || !domain || width === 0) return <View style={{ height }} onLayout={onLayout} />;
 
-  const handlePinch = useCallback(
-    (touches: NativeTouchEvent[]) => {
-      if (touches.length < 2 || count <= 0) return;
-      const distance = touchDistance(touches[0]!, touches[1]!);
-      const mid = (touches[0]!.locationX + touches[1]!.locationX) / 2;
-
-      if (!pinchRef.current || distance <= 0) {
-        pinchRef.current = {
-          distance,
-          mid,
-          span: Math.max(resolvedSpan, 1),
-          offset: resolvedOffset,
-        };
-        return;
-      }
-
-      const base = pinchRef.current;
-      if (base.distance <= 0) return;
-
-      // Spreading fingers zooms in, so a larger span divisor means fewer candles.
-      const nextSpan = clamp(
-        Math.round(base.span / (distance / base.distance)),
-        Math.min(MIN_VISIBLE, count),
-        count
-      );
-      const dx = mid - base.mid;
-      const nextOffset = base.offset + (dx / plotWidth) * nextSpan;
-
-      scheduleViewport(nextSpan, nextOffset);
-
-      // Incremental baseline: each move measures from the last, so a long drag
-      // cannot accumulate drift away from the fingers.
-      pinchRef.current = { distance, mid, span: nextSpan, offset: nextOffset };
-    },
-    [count, plotWidth, resolvedOffset, resolvedSpan, scheduleViewport]
-  );
-
-  const onGrant = useCallback(
-    (event: GestureResponderEvent) => {
-      const { touches, locationX, locationY } = event.nativeEvent;
-      if (touches.length >= 2) {
-        multiRef.current = true;
-        // A pinch is not a tap, so it must not leave a timestamp that a quick
-        // follow-up tap could pair with and be misread as a double tap.
-        lastTapRef.current = null;
-        pinchRef.current = null;
-        panRef.current = null;
-        setActiveIndex(null);
-        return;
-      }
-
-      const now = Date.now();
-      const last = lastTapRef.current;
-      const isDoubleTap =
-        last !== null &&
-        now - last.time < DOUBLE_TAP_MS &&
-        Math.abs(locationX - last.x) < DOUBLE_TAP_SLOP &&
-        Math.abs(locationY - last.y) < DOUBLE_TAP_SLOP;
-      if (isDoubleTap) {
-        lastTapRef.current = null;
-        suppressCrosshairRef.current = true;
-        resetViewport();
-        return;
-      }
-      lastTapRef.current = { time: now, x: locationX, y: locationY };
-
-      panRef.current = { x0: locationX, span: resolvedSpan, offset: resolvedOffset, moved: false };
-
-      if (count === 0 || suppressCrosshairRef.current) return;
-      // Tapping the candle the crosshair is already on dismisses it, which is the
-      // only way back to a clean chart once a tap has latched it.
-      const index = indexAt(locationX);
-      setActiveIndex((previous) => (previous === index ? null : index));
-    },
-    [count, indexAt, resetViewport, resolvedOffset, resolvedSpan]
-  );
-
-  const onMove = useCallback(
-    (event: GestureResponderEvent) => {
-      const { touches, locationX } = event.nativeEvent;
-      if (touches.length >= 2) {
-        // Drop the crosshair the moment a second finger joins, so the pinch
-        // gesture is not fighting an active inspection readout.
-        if (!multiRef.current) setActiveIndex(null);
-        multiRef.current = true;
-        lastTapRef.current = null;
-        handlePinch(touches);
-        return;
-      }
-      // Lifting one finger mid-pinch should not suddenly start inspecting.
-      if (multiRef.current) return;
-
-      const pan = panRef.current;
-      if (pan) {
-        const dx = locationX - pan.x0;
-        if (!pan.moved && Math.abs(dx) > PAN_SLOP) {
-          pan.moved = true;
-          // A drag is navigation, not inspection.
-          setActiveIndex(null);
-        }
-        if (pan.moved) {
-          // Dragging right pulls older candles into view, so offset grows.
-          scheduleViewport(pan.span, pan.offset + (dx / plotWidth) * pan.span);
-          return;
-        }
-      }
-
-      trackCrosshair(locationX);
-    },
-    [handlePinch, plotWidth, scheduleViewport, trackCrosshair]
-  );
-
-  const onEnd = useCallback(() => {
-    // Applied without waiting for a frame: the last position before release is the one the
-    // chart should settle on, and the finger is already off the glass. Committing rather than
-    // cancelling — cancelling would discard the queued position and snap the chart back to
-    // wherever it sat when the drag started. Any frame still queued finds nothing pending and
-    // returns.
-    commitViewport();
-    pinchRef.current = null;
-    panRef.current = null;
-    multiRef.current = false;
-    suppressCrosshairRef.current = false;
-    // The crosshair deliberately survives release: a tap latches it.
-  }, [commitViewport]);
-
-  // `PanResponder.create` is called during render, but every handler it receives is
-  // only ever invoked later by the gesture system, at event time. Those handlers
-  // read refs that hold gesture-local state (pinch baseline, pan baseline, tap
-  // timing, whether a second finger is down) which has no render-time equivalent,
-  // so the generic "no refs in render" rule does not apply here.
-  /* eslint-disable react-hooks/refs */
-  const panResponder = useMemo(
-    () =>
-      PanResponder.create({
-        onStartShouldSetPanResponder: () => true,
-        onMoveShouldSetPanResponder: () => true,
-        onPanResponderGrant: onGrant,
-        onPanResponderMove: onMove,
-        onPanResponderRelease: onEnd,
-        onPanResponderTerminate: onEnd,
-      }),
-    [onEnd, onGrant, onMove]
-  );
-  /* eslint-enable react-hooks/refs */
-
-  if (!window || !scales || width === 0) {
-    return <View style={{ height }} onLayout={onLayout} />;
-  }
-
-  const { x, y, n } = scales;
   const visible = window.candles;
   const first = visible[0]!;
-  const last = visible[n - 1]!;
-  const changePct = first.open === 0 ? 0 : ((last.close - first.open) / first.open) * 100;
-  const tint = changePct >= 0 ? colors.up : colors.down;
-  const localIndex = activeIndex === null ? -1 : activeIndex - start;
-  const active = localIndex >= 0 && localIndex < n ? visible[localIndex]! : null;
+  const last = visible[visible.length - 1]!;
+  const tint = last.close >= first.open ? colors.up : colors.down;
+  const active = activeIndex === null ? null : candles[activeIndex] ?? null;
+  const activeX = activeIndex === null ? 0 : geometry.x(activeIndex);
+  const activeY = active ? geometry.y(active.close) : 0;
   const spanMs = last.time - first.time;
 
-  let linePath = '';
-  let areaPath = '';
-  if (mode === 'line') {
-    const points = visible.map((candle, i) => `${x(i).toFixed(2)},${y(candle.close).toFixed(2)}`);
-    linePath = `M${points.join('L')}`;
-    areaPath = `${linePath}L${x(n - 1).toFixed(2)},${(PAD_TOP + priceHeight).toFixed(2)}L${x(0).toFixed(2)},${(PAD_TOP + priceHeight).toFixed(2)}Z`;
-  }
-
-  const bodyWidth = Math.max(1, (plotWidth / n) * CANDLE_BODY_RATIO);
-
-  return (
-    <View onLayout={onLayout} style={styles.container}>
-      <View style={{ width: innerWidth, height }} {...panResponder.panHandlers}>
-        <Svg width={innerWidth} height={height}>
-          <Defs>
-            <LinearGradient id="chartFill" x1="0" y1="0" x2="0" y2="1">
-              <Stop offset="0" stopColor={tint} stopOpacity={0.28} />
-              <Stop offset="1" stopColor={tint} stopOpacity={0.01} />
-            </LinearGradient>
-          </Defs>
-
-          {Array.from({ length: GRID_LINES + 1 }, (_, i) => {
-            const value = domain!.upper - ((domain!.upper - domain!.lower) / GRID_LINES) * i;
-            const gy = y(value);
-            return (
-              <Line
-                key={`grid-${i}`}
-                x1={0}
-                y1={gy}
-                x2={innerWidth}
-                y2={gy}
-                stroke={colors.border}
-                strokeWidth={StyleSheet.hairlineWidth}
-              />
-            );
-          })}
-
-          {mode === 'line' ? (
-            <>
-              {n === 1 ? (
-                // A path of a single `M` command paints nothing, so a symbol with only
-                // one lifetime point would render as a blank chart. A dot is the honest
-                // representation of "one observation".
-                <Circle cx={x(0)} cy={y(last.close)} r={3} fill={tint} />
-              ) : (
-                <>
-                  <Path d={areaPath} fill="url(#chartFill)" />
-                  <Path
-                    d={linePath}
-                    stroke={tint}
-                    strokeWidth={1.6}
-                    fill="none"
-                    strokeLinejoin="round"
-                    strokeLinecap="round"
-                  />
-                </>
-              )}
-            </>
-          ) : (
-            visible.map((candle, i) => {
-              const isUp = candle.close >= candle.open;
-              const color = isUp ? colors.up : colors.down;
-              const cx = x(i);
-              const bodyTop = y(Math.max(candle.open, candle.close));
-              const bodyBottom = y(Math.min(candle.open, candle.close));
-              return (
-                <Fragment key={candle.time}>
-                  <Line x1={cx} y1={y(candle.high)} x2={cx} y2={y(candle.low)} stroke={color} strokeWidth={1} />
-                  <Rect
-                    x={cx - bodyWidth / 2}
-                    y={bodyTop}
-                    width={bodyWidth}
-                    height={Math.max(bodyBottom - bodyTop, 1)}
-                    fill={color}
-                    fillOpacity={isUp ? 0.85 : 1}
-                  />
-                </Fragment>
-              );
-            })
-          )}
-
-          {Array.from({ length: X_LABELS }, (_, i) => {
-            const index = Math.round((i / (X_LABELS - 1)) * (n - 1));
-            const candle = visible[index];
-            if (!candle) return null;
-            const isFirst = i === 0;
-            const isLast = i === X_LABELS - 1;
-            // The edge labels are anchored inwards, so they sit directly under their
-            // candle without needing a clamp. Only the middle ones need one, to keep a
-            // long time string from running off the plot.
-            const labelX = isFirst || isLast ? x(index) : Math.min(Math.max(x(index), 28), innerWidth - 28);
-            return (
-              <SvgText
-                key={`x-${i}`}
-                x={labelX}
-                y={height - 4}
-                fill={colors.textFaint}
-                fontSize={10}
-                textAnchor={isFirst ? 'start' : isLast ? 'end' : 'middle'}
-              >
-                {formatAxisTime(candle.time, spanMs)}
-              </SvgText>
-            );
-          })}
-
-          {active ? (
-            <>
-              <Line
-                x1={x(localIndex)}
-                y1={PAD_TOP}
-                x2={x(localIndex)}
-                y2={PAD_TOP + priceHeight}
-                stroke={colors.textMuted}
-                strokeWidth={1}
-                strokeDasharray="3 3"
-              />
-              <Line
-                x1={0}
-                y1={y(active.close)}
-                x2={innerWidth}
-                y2={y(active.close)}
-                stroke={colors.textMuted}
-                strokeWidth={1}
-                strokeDasharray="3 3"
-              />
-            </>
-          ) : null}
-        </Svg>
-      </View>
-
-      <View style={{ width: AXIS_WIDTH, height }}>
-        <View style={{ marginTop: PAD_TOP, height: priceHeight, justifyContent: 'space-between' }}>
-          {Array.from({ length: GRID_LINES + 1 }, (_, i) => {
-            const value = domain!.upper - ((domain!.upper - domain!.lower) / GRID_LINES) * i;
-            return (
-              <Text key={`axis-${i}`} style={styles.axisLabel}>
-                {formatPrice(value, decimals)}
-              </Text>
-            );
-          })}
-        </View>
-      </View>
-
-      {active ? (
-        <View style={styles.readout} pointerEvents="none">
-          <Text style={styles.readoutTime}>
-            {new Date(active.time).toLocaleString(undefined, {
-              month: 'short',
-              day: 'numeric',
-              hour: '2-digit',
-              minute: '2-digit',
+  return <View style={styles.container} onLayout={onLayout}>
+    <GestureDetector gesture={gestures}>
+      <View style={{ width: innerWidth, height }}>
+        <Canvas style={styles.canvas}>
+          {Array.from({ length: GRID_LINES + 1 }, (_, index) => { const value = domain.upper - ((domain.upper - domain.lower) / GRID_LINES) * index; const y = geometry.y(value); return <Line key={`grid-${index}`} p1={vec(0, y)} p2={vec(innerWidth, y)} color={colors.border} strokeWidth={StyleSheet.hairlineWidth} />; })}
+          <Group transform={chartTransform} clip={{ x: 0, y: 0, width: innerWidth, height }}>
+            {mode === 'line' ? (count === 1 ? <Circle cx={geometry.x(0)} cy={geometry.y(last.close)} r={3} color={tint} /> : <><Path path={geometry.areaPath} color={tint} opacity={0.2}><LinearGradient start={vec(0, PAD_TOP)} end={vec(0, PAD_TOP + priceHeight)} colors={[tint, 'transparent']} /></Path><Path path={geometry.linePath} color={tint} style="stroke" strokeWidth={1.6} strokeJoin="round" strokeCap="round" /></>) : candles.map((candle, index) => {
+              const up = candle.close >= candle.open; const color = up ? colors.up : colors.down; const cx = geometry.x(index); const top = geometry.y(Math.max(candle.open, candle.close)); const bottom = geometry.y(Math.min(candle.open, candle.close));
+              return <Group key={candle.time}><Line p1={vec(cx, geometry.y(candle.high))} p2={vec(cx, geometry.y(candle.low))} color={color} strokeWidth={1} /><Rect x={cx - geometry.bodyWidth / 2} y={top} width={geometry.bodyWidth} height={Math.max(bottom - top, 1)} color={color} opacity={up ? 0.85 : 1} /></Group>;
             })}
-          </Text>
-          <View style={styles.readoutGrid}>
-            <OhlcCell label="O" value={formatPrice(active.open, decimals)} />
-            <OhlcCell label="H" value={formatPrice(active.high, decimals)} />
-            <OhlcCell label="L" value={formatPrice(active.low, decimals)} />
-            <OhlcCell label="C" value={formatPrice(active.close, decimals)} />
-          </View>
-          <Text style={styles.readoutVolume}>
-            Vol {formatAmount(active.volume)}
-            {active.open !== 0
-              ? `  ${formatPercent(((active.close - active.open) / active.open) * 100)}`
-              : ''}
-          </Text>
-        </View>
-      ) : null}
-    </View>
-  );
+            {active ? <><Line p1={vec(activeX, PAD_TOP)} p2={vec(activeX, PAD_TOP + priceHeight)} color={colors.textMuted} strokeWidth={1} /><Line p1={vec(0, activeY)} p2={vec(innerWidth, activeY)} color={colors.textMuted} strokeWidth={1} /></> : null}
+          </Group>
+        </Canvas>
+      </View>
+    </GestureDetector>
+    <View style={{ width: AXIS_WIDTH, height }}><View style={{ marginTop: PAD_TOP, height: priceHeight, justifyContent: 'space-between' }}>{Array.from({ length: GRID_LINES + 1 }, (_, index) => { const value = domain.upper - ((domain.upper - domain.lower) / GRID_LINES) * index; return <Text key={`axis-${index}`} style={styles.axisLabel}>{formatPrice(value, decimals)}</Text>; })}</View></View>
+    {Array.from({ length: X_LABELS }, (_, index) => { const candle = visible[Math.round((index / (X_LABELS - 1)) * (visible.length - 1))]; if (!candle) return null; const left = (index / (X_LABELS - 1)) * Math.max(innerWidth - 44, 0); return <Text key={`time-${index}`} style={[styles.timeLabel, { left }]}>{formatAxisTime(candle.time, spanMs)}</Text>; })}
+    {active ? <Readout candle={active} decimals={decimals} /> : null}
+  </View>;
 }
 
-function OhlcCell({ label, value }: { label: string; value: string }) {
-  return (
-    <View style={styles.ohlcCell}>
-      <Text style={styles.ohlcLabel}>{label}</Text>
-      <Text style={styles.ohlcValue}>{value}</Text>
-    </View>
-  );
+function Readout({ candle, decimals }: { candle: Candle; decimals?: number }) {
+  return <View style={styles.readout} pointerEvents="none"><Text style={styles.readoutTime}>{new Date(candle.time).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</Text><View style={styles.readoutGrid}><OhlcCell label="O" value={formatPrice(candle.open, decimals)} /><OhlcCell label="H" value={formatPrice(candle.high, decimals)} /><OhlcCell label="L" value={formatPrice(candle.low, decimals)} /><OhlcCell label="C" value={formatPrice(candle.close, decimals)} /></View><Text style={styles.readoutVolume}>Vol {formatAmount(candle.volume)}{candle.open !== 0 ? `  ${formatPercent(((candle.close - candle.open) / candle.open) * 100)}` : ''}</Text></View>;
 }
+function OhlcCell({ label, value }: { label: string; value: string }) { return <View style={styles.ohlcCell}><Text style={styles.ohlcLabel}>{label}</Text><Text style={styles.ohlcValue}>{value}</Text></View>; }
 
 export const PriceChart = memo(PriceChartComponent);
 
 const styles = StyleSheet.create({
-  container: {
-    flexDirection: 'row',
-  },
-  axisLabel: {
-    color: colors.textFaint,
-    fontSize: 10,
-    textAlign: 'right',
-  },
-  readout: {
-    position: 'absolute',
-    top: spacing.xs,
-    left: spacing.xs,
-    backgroundColor: 'rgba(23,24,26,0.94)',
-    borderRadius: radius.sm,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.border,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 6,
-    gap: 3,
-  },
-  readoutTime: {
-    color: colors.textMuted,
-    fontSize: 10,
-    fontWeight: '600',
-  },
-  readoutGrid: {
-    flexDirection: 'row',
-    gap: spacing.md,
-  },
-  ohlcCell: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-  },
-  ohlcLabel: {
-    color: colors.textFaint,
-    fontSize: 10,
-    fontWeight: '700',
-  },
-  ohlcValue: {
-    color: colors.text,
-    fontSize: 10,
-    fontWeight: '600',
-    fontVariant: ['tabular-nums'],
-  },
-  readoutVolume: {
-    color: colors.textMuted,
-    fontSize: 10,
-    fontVariant: ['tabular-nums'],
-  },
+  container: { flexDirection: 'row', position: 'relative' }, canvas: { flex: 1 }, axisLabel: { color: colors.textFaint, fontSize: 10, textAlign: 'right' }, timeLabel: { position: 'absolute', bottom: 2, color: colors.textFaint, fontSize: 10, width: 44, textAlign: 'center' },
+  readout: { position: 'absolute', top: spacing.xs, left: spacing.xs, backgroundColor: 'rgba(23,24,26,0.94)', borderRadius: radius.sm, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border, paddingHorizontal: spacing.sm, paddingVertical: 6, gap: 3 }, readoutTime: { color: colors.textMuted, fontSize: 10, fontWeight: '600' }, readoutGrid: { flexDirection: 'row', gap: spacing.md }, ohlcCell: { flexDirection: 'row', alignItems: 'center', gap: 3 }, ohlcLabel: { color: colors.textFaint, fontSize: 10, fontWeight: '700' }, ohlcValue: { color: colors.text, fontSize: 10, fontWeight: '600', fontVariant: ['tabular-nums'] }, readoutVolume: { color: colors.textMuted, fontSize: 10, fontVariant: ['tabular-nums'] },
 });
