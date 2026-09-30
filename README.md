@@ -654,3 +654,4 @@ your IP list and they issue a `client_id`), so it is not a self-serve option.
 - The markets list is still on 10s REST polling. If you want the list live too, the topic is
   `/market/ticker:all`, but at 996 symbols that is a firehose — filter server-side or
   reconsider whether the list needs it.
+# Snap-Trade
