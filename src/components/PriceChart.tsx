@@ -1,7 +1,7 @@
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { StyleSheet, Text, View, type LayoutChangeEvent } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import { runOnJS, useDerivedValue, useSharedValue } from 'react-native-reanimated';
+import { runOnJS, useDerivedValue, useSharedValue, withSpring } from 'react-native-reanimated';
 import { Canvas, Line, PaintStyle, Picture, Skia, StrokeCap, StrokeJoin, TileMode, vec } from '@shopify/react-native-skia';
 
 import type { Candle, ChartMode } from '@/lib/kucoin/types';
@@ -11,6 +11,7 @@ import { formatAmount, formatPercent, formatPrice } from '@/utils/format';
 const PAD_TOP = 8;
 const PAD_BOTTOM = 18;
 const AXIS_WIDTH = 54;
+const TIME_LABEL_WIDTH = 44;
 const GRID_LINES = 4;
 const X_LABELS = 4;
 const MIN_VISIBLE = 20;
@@ -30,6 +31,22 @@ const TAP_SLOP = 12;
 const TAP_DURATION = 400;
 /** Window for the second tap. Shortened from the 500ms default so one tap feels immediate. */
 const DOUBLE_TAP_DELAY = 260;
+/**
+ * How far past the edge the window may travel, as a fraction of the visible window. The window
+ * hard-stops with the newest candle half a slot from the right edge; at 0.5 a full drag can
+ * carry it to the middle of the plot, and no further.
+ */
+const OVERSCROLL = 0.5;
+/** Fraction of a drag given up on the way out to that limit. */
+const RESIST = 0.5;
+/**
+ * Empty plot left after the newest candle when the window is at rest, as a fraction of the
+ * visible window. The window parks this far past the last candle so the series never ends flush
+ * against the price axis.
+ */
+const RIGHT_PAD = 0.1;
+/** Snaps the window back to its edge. Tight and slightly springy rather than bouncy. */
+const SPRING = { damping: 19, stiffness: 190, mass: 0.8, overshootClamping: true };
 
 type Props = { candles: Candle[]; mode: ChartMode; height?: number; decimals?: number; defaultSpan?: number; resetKey?: string; onVisibleRangeChange?: (visible: number, total: number) => void };
 type Viewport = { start: number; span: number };
@@ -37,8 +54,36 @@ type Committed = Viewport & { key: string | undefined; count: number };
 type Domain = { lower: number; upper: number };
 
 function clamp(value: number, min: number, max: number): number { 'worklet'; return Math.min(Math.max(value, min), max); }
+/**
+ * Softens a drag that runs past either end of the window, then stops it.
+ *
+ * `cap` is how far past the edge the window may travel, in candles. Resistance is a plain
+ * fraction rather than an asymptotic curve: an asymptotic one has to be approached to be felt,
+ * so reaching its own limit needs several screens of finger travel and, short of that, there is
+ * no real limit at all. A linear give-up reaches `cap` in one comfortable swipe and then holds,
+ * which is what makes the newest candle stop at the middle of the plot instead of drifting.
+ */
+function resistedStart(raw: number, maxStart: number, cap: number): number {
+  'worklet';
+  const eased = (distance: number) => Math.min(Math.max(distance, 0) * RESIST, cap);
+  if (raw > maxStart) return maxStart + eased(raw - maxStart);
+  if (raw < 0) return -eased(-raw);
+  return raw;
+}
 function resolveSpan(count: number, span: number): number { 'worklet'; return count <= 0 ? 0 : clamp(Math.round(span), Math.min(MIN_VISIBLE, count), count); }
-function resolveStart(count: number, start: number, span: number): number { 'worklet'; return count <= 0 ? 0 : clamp(Math.round(start), 0, Math.max(count - span, 0)); }
+/**
+ * The window's rightmost resting position: past the newest candle by `RIGHT_PAD` of the visible
+ * window, so there is always empty plot to the right of the series.
+ */
+function maxStartFor(count: number, span: number): number {
+  'worklet';
+  if (count <= 0) return 0;
+  // The newest candle already rests half a slot in from the edge, so only the shortfall is added
+  // on top. That makes RIGHT_PAD the fraction of the plot left empty after the last candle,
+  // rather than the fraction of the window travelled past it.
+  return Math.max(0, Math.round(Math.max(count - span, 0) + span * RIGHT_PAD - 0.5));
+}
+function resolveStart(count: number, start: number, span: number): number { 'worklet'; return count <= 0 ? 0 : clamp(Math.round(start), 0, maxStartFor(count, span)); }
 function defaultSpanFor(count: number, isLine: boolean, defaultSpan?: number): number { return resolveSpan(count, defaultSpan ?? (isLine ? count : DEFAULT_SPAN)); }
 
 function niceStep(raw: number): number { 'worklet'; if (!(raw > 0)) return 1; const magnitude = Math.pow(10, Math.floor(Math.log10(raw))); const mantissa = raw / magnitude; return (mantissa <= 1 ? 1 : mantissa <= 2 ? 2 : mantissa <= 5 ? 5 : 10) * magnitude; }
@@ -126,13 +171,13 @@ function PriceChartComponent({ candles, mode, height = 250, decimals, defaultSpa
   const viewport = useMemo<Viewport>(() => {
     if (committed.key !== resetKey) {
       const span = defaultSpanFor(count, isLine, defaultSpan);
-      return { start: Math.max(count - span, 0), span };
+      return { start: maxStartFor(count, span), span };
     }
     if (committed.count === count) return { start: committed.start, span: committed.span };
     const previousSpan = committed.span;
-    const atRightEdge = committed.start >= committed.count - previousSpan - 0.5;
+    const atRightEdge = committed.start >= maxStartFor(committed.count, previousSpan) - 0.5;
     const span = resolveSpan(count, isLine && previousSpan >= committed.count ? count : previousSpan);
-    const start = atRightEdge ? Math.max(count - span, 0) : resolveStart(count, committed.start, span);
+    const start = atRightEdge ? maxStartFor(count, span) : resolveStart(count, committed.start, span);
     return { start, span };
   }, [committed, count, defaultSpan, isLine, resetKey]);
 
@@ -201,7 +246,7 @@ function PriceChartComponent({ candles, mode, height = 250, decimals, defaultSpa
 
   const resetViewport = useCallback(() => {
     const span = defaultSpanFor(count, isLine, defaultSpan);
-    const start = Math.max(count - span, 0);
+    const start = maxStartFor(count, span);
     spanValue.set(span);
     startValue.set(start);
     setCommitted({ key: resetKey, count, start, span });
@@ -239,7 +284,11 @@ function PriceChartComponent({ candles, mode, height = 250, decimals, defaultSpa
     const total = countValue.get();
     const series = packed.get();
     const span = resolveSpan(total, spanValue.get()) || 1;
-    const start = resolveStart(total, startValue.get(), span);
+    // A rubber-banded drag parks `startValue` outside the window, so the indices read out of the
+    // series stay clamped while the offset that positions them is left alone — that offset is
+    // the whole point, it is what moves the candles and exposes the empty edge.
+    const offset = startValue.get();
+    const start = clamp(Math.round(offset), 0, maxStartFor(total, span));
     const band = visibleBand(series, total, start, span);
 
     if (!band) {
@@ -256,7 +305,7 @@ function PriceChartComponent({ candles, mode, height = 250, decimals, defaultSpa
     // candles exactly on the edges instead pinned them to x=0 and x=width, so the bodies of the
     // leftmost and rightmost candles were sliced in half by the canvas edge.
     const step = span <= 1 ? widthValue : widthValue / span;
-    const xOf = (index: number) => span <= 1 ? widthValue / 2 : (index - start + 0.5) * step;
+    const xOf = (index: number) => span <= 1 ? widthValue / 2 : (index - offset + 0.5) * step;
     const yOf = (value: number) => PAD_TOP + (1 - (value - band.lower) / range) * heightValue;
     const to = Math.min(total, start + span);
     const closeOf = (index: number) => series[index * 4 + 3];
@@ -361,11 +410,28 @@ function PriceChartComponent({ candles, mode, height = 250, decimals, defaultSpa
     // candle again unable to dismiss it.
     .onStart(() => { runOnJS(clearActive)(); })
     .onUpdate((event) => {
+      const count = countValue.get();
       const span = spanValue.get();
       const perPixel = span / Math.max(plotWidth.get(), 1);
-      startValue.set(clamp(panAnchor.get() - event.translationX * perPixel, 0, Math.max(countValue.get() - span, 0)));
+      const maxStart = maxStartFor(count, span);
+      // Resistance only past the edge, so the window still tracks the finger one-to-one for the
+      // whole of its travel and the stop is felt as a soft wall rather than a dead end.
+      const raw = panAnchor.get() - event.translationX * perPixel;
+      startValue.set(resistedStart(raw, maxStart, span * OVERSCROLL));
     })
-    .onFinalize(() => { runOnJS(commit)(); }), [clearActive, commit, countValue, panAnchor, plotWidth, spanValue, startValue]);
+    .onFinalize(() => {
+      const span = spanValue.get();
+      const maxStart = maxStartFor(countValue.get(), span);
+      const current = startValue.get();
+      const target = clamp(Math.round(current), 0, maxStart);
+      if (target === current) { runOnJS(commit)(); return; }
+      // Settle first, then latch. Committing up front would rewrite the committed window, whose
+      // effect pushes `startValue` back and cancel the animation mid-flight.
+      startValue.set(withSpring(target, SPRING, (finished) => {
+        'worklet';
+        if (finished) runOnJS(commit)();
+      }));
+    }), [clearActive, commit, countValue, panAnchor, plotWidth, spanValue, startValue]);
 
   const pinch = useMemo(() => Gesture.Pinch()
     .onBegin((event) => {
@@ -378,7 +444,7 @@ function PriceChartComponent({ candles, mode, height = 250, decimals, defaultSpa
       const span = resolveSpan(countValue.get(), pinchSpan.get() / Math.max(event.scale, 0.01));
       const focal = pinchFocal.get();
       const anchor = pinchStart.get() + focal * (pinchSpan.get() - 1);
-      startValue.set(clamp(anchor - focal * (span - 1), 0, Math.max(countValue.get() - span, 0)));
+      startValue.set(clamp(anchor - focal * (span - 1), 0, maxStartFor(countValue.get(), span)));
       spanValue.set(span);
     })
     .onFinalize(() => { runOnJS(commit)(); }), [clearActive, commit, countValue, pinchFocal, pinchSpan, pinchStart, plotWidth, spanValue, startValue]);
@@ -422,7 +488,15 @@ function PriceChartComponent({ candles, mode, height = 250, decimals, defaultSpa
       </View>
     </GestureDetector>
     <View style={{ width: AXIS_WIDTH, height }}><View style={{ marginTop: PAD_TOP, height: priceHeight, justifyContent: 'space-between' }}>{axisValues.map((value, index) => <Text key={`axis-${index}`} style={styles.axisLabel}>{formatPrice(value, decimals)}</Text>)}</View></View>
-    {Array.from({ length: X_LABELS }, (_, index) => { const candle = visible[Math.round((index / (X_LABELS - 1)) * (visible.length - 1))]; if (!candle) return null; const left = (index / (X_LABELS - 1)) * Math.max(innerWidth - 44, 0); return <Text key={`time-${index}`} style={[styles.timeLabel, { left }]}>{formatAxisTime(candle.time, spanMs)}</Text>; })}
+    {Array.from({ length: X_LABELS }, (_, index) => {
+      const at = Math.round((index / (X_LABELS - 1)) * (visible.length - 1));
+      const candle = visible[at];
+      if (!candle) return null;
+      // Anchored to the candle itself rather than to an even split of the width, which put the
+      // labels up to a full half-slot away from the candles they name.
+      const left = Math.max(plotX(settledStart + at) - TIME_LABEL_WIDTH / 2, 0);
+      return <Text key={`time-${index}`} style={[styles.timeLabel, { left }]}>{formatAxisTime(candle.time, spanMs)}</Text>;
+    })}
     {active ? <Readout candle={active} decimals={decimals} /> : null}
   </View>;
 }
@@ -435,6 +509,6 @@ function OhlcCell({ label, value }: { label: string; value: string }) { return <
 export const PriceChart = memo(PriceChartComponent);
 
 const styles = StyleSheet.create({
-  container: { flexDirection: 'row', position: 'relative' }, canvas: { flex: 1 }, axisLabel: { color: colors.textFaint, fontSize: 10, textAlign: 'right' }, timeLabel: { position: 'absolute', bottom: 2, color: colors.textFaint, fontSize: 10, width: 44, textAlign: 'center' },
+  container: { flexDirection: 'row', position: 'relative' }, canvas: { flex: 1 }, axisLabel: { color: colors.textFaint, fontSize: 10, textAlign: 'right' }, timeLabel: { position: 'absolute', bottom: 2, color: colors.textFaint, fontSize: 10, width: TIME_LABEL_WIDTH, textAlign: 'center' },
   readout: { position: 'absolute', top: spacing.xs, left: spacing.xs, backgroundColor: 'rgba(23,24,26,0.94)', borderRadius: radius.sm, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border, paddingHorizontal: spacing.sm, paddingVertical: 6, gap: 3 }, readoutTime: { color: colors.textMuted, fontSize: 10, fontWeight: '600' }, readoutGrid: { flexDirection: 'row', gap: spacing.md }, ohlcCell: { flexDirection: 'row', alignItems: 'center', gap: 3 }, ohlcLabel: { color: colors.textFaint, fontSize: 10, fontWeight: '700' }, ohlcValue: { color: colors.text, fontSize: 10, fontWeight: '600', fontVariant: ['tabular-nums'] }, readoutVolume: { color: colors.textMuted, fontSize: 10, fontVariant: ['tabular-nums'] },
 });
