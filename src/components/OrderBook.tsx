@@ -1,13 +1,5 @@
-import { memo, useCallback, useMemo, useState } from "react";
-import {
-  FlatList,
-  Modal,
-  Pressable,
-  StyleSheet,
-  Text,
-  View,
-  type ListRenderItemInfo,
-} from "react-native";
+import { memo, useMemo, useState } from "react";
+import { Modal, Pressable, StyleSheet, Text, View } from "react-native";
 
 import {
   CaretDownIcon,
@@ -121,42 +113,6 @@ function OrderBookBase({
   const priceDecimals = decimalsFromIncrement(tickSize);
   const sizeDecimals = decimalsFromIncrement(baseIncrement);
 
-  const renderAsk = useCallback(
-    ({ item }: ListRenderItemInfo<DepthRow>) => (
-      <DepthRowView
-        row={item}
-        side="ask"
-        priceDecimals={priceDecimals}
-        sizeDecimals={sizeDecimals}
-        onPress={onPriceSelect}
-      />
-    ),
-    [onPriceSelect, priceDecimals, sizeDecimals],
-  );
-
-  const renderBid = useCallback(
-    ({ item }: ListRenderItemInfo<DepthRow>) => (
-      <DepthRowView
-        row={item}
-        side="bid"
-        priceDecimals={priceDecimals}
-        sizeDecimals={sizeDecimals}
-        onPress={onPriceSelect}
-      />
-    ),
-    [onPriceSelect, priceDecimals, sizeDecimals],
-  );
-
-  const keyExtractor = useCallback((item: DepthRow) => item.price, []);
-  const getItemLayout = useCallback(
-    (_: ArrayLike<DepthRow> | null | undefined, index: number) => ({
-      length: ROW_HEIGHT,
-      offset: ROW_HEIGHT * index,
-      index,
-    }),
-    [],
-  );
-
   const cycleView = () => {
     setViewMode(
       (current) =>
@@ -183,15 +139,18 @@ function OrderBookBase({
       </View>
 
       {viewMode !== "bids" ? (
-        <FlatList
-          data={depth.asks}
-          renderItem={renderAsk}
-          keyExtractor={keyExtractor}
-          getItemLayout={getItemLayout}
-          inverted
-          style={styles.list}
-          showsVerticalScrollIndicator={false}
-        />
+        <View style={styles.asks}>
+          {depth.asks.map((row) => (
+            <DepthRowView
+              key={row.price}
+              row={row}
+              side="ask"
+              priceDecimals={priceDecimals}
+              sizeDecimals={sizeDecimals}
+              onPress={onPriceSelect}
+            />
+          ))}
+        </View>
       ) : null}
 
       <View style={styles.middle}>
@@ -204,14 +163,18 @@ function OrderBookBase({
       </View>
 
       {viewMode !== "asks" ? (
-        <FlatList
-          data={depth.bids}
-          renderItem={renderBid}
-          keyExtractor={keyExtractor}
-          getItemLayout={getItemLayout}
-          style={styles.list}
-          showsVerticalScrollIndicator={false}
-        />
+        <View style={styles.bids}>
+          {depth.bids.map((row) => (
+            <DepthRowView
+              key={row.price}
+              row={row}
+              side="bid"
+              priceDecimals={priceDecimals}
+              sizeDecimals={sizeDecimals}
+              onPress={onPriceSelect}
+            />
+          ))}
+        </View>
       ) : null}
 
       <View style={styles.percentBar}>
@@ -325,8 +288,16 @@ const styles = StyleSheet.create({
   headerRight: {
     textAlign: "right",
   },
-  list: {
+  // Each side grows into whatever height the taller column leaves it, anchored against the middle
+  // price band: asks sit on top of it and bids under it, so the extra space falls at the far
+  // edges of the column instead of opening a gap in the middle of the book.
+  asks: {
     flex: 1,
+    justifyContent: "flex-end",
+  },
+  bids: {
+    flex: 1,
+    justifyContent: "flex-start",
   },
   row: {
     height: ROW_HEIGHT,

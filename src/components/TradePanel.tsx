@@ -2,7 +2,6 @@ import { memo, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -248,13 +247,7 @@ function TradePanelBase({ symbol, lastPrice, testMode = TEST_MODE, priceSelectio
   const editable = !!rules && !isSubmitting;
 
   return (
-    <ScrollView
-      style={styles.scroll}
-      contentContainerStyle={styles.content}
-      keyboardShouldPersistTaps="handled"
-      automaticallyAdjustKeyboardInsets
-      showsVerticalScrollIndicator={false}
-    >
+    <View style={styles.content}>
       {toast ? (
         <View style={[styles.toast, toast.tone === 'success' ? styles.toastOk : styles.toastError]}>
           <Text style={styles.toastText} numberOfLines={2}>
@@ -383,7 +376,7 @@ function TradePanelBase({ symbol, lastPrice, testMode = TEST_MODE, priceSelectio
       </Pressable>
 
       {rulesLoading ? <ActivityIndicator color={colors.accent} style={styles.rulesLoader} /> : null}
-    </ScrollView>
+    </View>
   );
 }
 
@@ -456,19 +449,16 @@ function AmountField({
 }
 
 const styles = StyleSheet.create({
-  scroll: {
-    flex: 1,
-  },
+  // The parent owns the padding, and this column is stretched to the height of the taller one
+  // beside it, so the content spreads to fill rather than sitting in a scroll view of its own.
   content: {
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.sm,
-    paddingBottom: spacing.lg,
-    gap: spacing.md,
+    flex: 1,
+    gap: spacing.sm,
   },
   toast: {
-    borderRadius: radius.md,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
+    borderRadius: radius.sm,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 6,
   },
   toastOk: {
     backgroundColor: 'rgba(35,175,137,0.16)',
@@ -478,19 +468,19 @@ const styles = StyleSheet.create({
   },
   toastText: {
     color: colors.text,
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '600',
   },
   toggle: {
     flexDirection: 'row',
     backgroundColor: colors.surfaceAlt,
     borderRadius: radius.pill,
-    padding: 3,
-    gap: 3,
+    padding: 2,
+    gap: 2,
   },
   tab: {
     flex: 1,
-    height: 38,
+    height: 32,
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: radius.pill,
@@ -503,7 +493,7 @@ const styles = StyleSheet.create({
   },
   tabText: {
     color: colors.textMuted,
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '700',
   },
   tabTextBuy: {
@@ -513,46 +503,46 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
   },
   field: {
-    gap: 6,
+    gap: 4,
   },
   fieldLabel: {
     color: colors.textFaint,
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: '600',
-    letterSpacing: 0.4,
+    letterSpacing: 0.3,
   },
   inputWrap: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: colors.surfaceAlt,
-    borderRadius: radius.md,
-    paddingLeft: spacing.md,
-    paddingRight: spacing.sm,
-    height: 46,
-    gap: spacing.sm,
+    borderRadius: radius.sm,
+    paddingLeft: spacing.sm,
+    paddingRight: 6,
+    height: 38,
+    gap: 6,
   },
   input: {
     flex: 1,
     color: colors.text,
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '600',
     fontVariant: ['tabular-nums'],
     padding: 0,
   },
   unit: {
     color: colors.textMuted,
-    fontSize: 13,
+    fontSize: 11,
     fontWeight: '600',
   },
   steppers: {
     justifyContent: 'center',
-    gap: 2,
+    gap: 1,
   },
   stepper: {
     paddingHorizontal: 2,
   },
   slider: {
-    height: 28,
+    height: 22,
     justifyContent: 'center',
   },
   sliderTrack: {
@@ -569,10 +559,10 @@ const styles = StyleSheet.create({
   },
   dot: {
     position: 'absolute',
-    width: 10,
-    height: 10,
-    marginLeft: -5,
-    borderRadius: 5,
+    width: 9,
+    height: 9,
+    marginLeft: -4.5,
+    borderRadius: 4.5,
     backgroundColor: colors.surfaceAlt,
     borderWidth: 1,
     borderColor: colors.border,
@@ -588,38 +578,40 @@ const styles = StyleSheet.create({
   },
   rowLabel: {
     color: colors.textMuted,
-    fontSize: 12,
+    fontSize: 11,
   },
   rowValueWrap: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.sm,
+    gap: 6,
   },
   rowValue: {
     color: colors.text,
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '600',
     fontVariant: ['tabular-nums'],
   },
   deposit: {
-    width: 18,
-    height: 18,
-    borderRadius: 9,
+    width: 16,
+    height: 16,
+    borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: 'rgba(35,175,137,0.16)',
   },
   error: {
     color: colors.down,
-    fontSize: 12,
-    lineHeight: 17,
+    fontSize: 11,
+    lineHeight: 15,
   },
   action: {
-    height: 48,
+    height: 42,
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: radius.pill,
-    marginTop: spacing.xs,
+    // Absorbs whatever height the book column leaves this one short by, so the button sits on the
+    // bottom edge of the section and both columns finish at the same line.
+    marginTop: 'auto',
   },
   actionBuy: {
     backgroundColor: colors.up,
@@ -632,10 +624,10 @@ const styles = StyleSheet.create({
   },
   actionText: {
     color: '#FFFFFF',
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '700',
   },
   rulesLoader: {
-    marginTop: spacing.xs,
+    marginTop: 2,
   },
 });

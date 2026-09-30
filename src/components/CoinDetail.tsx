@@ -1,17 +1,15 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState, type ReactNode } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { CoinInfoSheet } from '@/components/CoinInfoSheet';
 import { InfoIcon } from '@/components/Icons';
 import { PriceChart } from '@/components/PriceChart';
 import { TimeframeTabs } from '@/components/TimeframeTabs';
-import { TradeScreen } from '@/components/TradeScreen';
 import { useLifetimeSeries } from '@/hooks/useLifetimeSeries';
 import { useLiveCandles } from '@/hooks/useLiveCandles';
 import { useStableChartHeight } from '@/hooks/useStableChartHeight';
 import { timeframeByKey, LINE_TIMEFRAME, type TimeframeOrLine } from '@/lib/kucoin/candles';
-import { deriveQuote } from '@/lib/quote';
+import { deriveQuote, type Quote } from '@/lib/quote';
 import { colors, radius, spacing } from '@/theme';
 import { formatPercent, formatPrice } from '@/utils/format';
 
@@ -19,12 +17,18 @@ type Props = {
   symbol: string;
   name?: string;
   decimals?: number;
+  /**
+   * Sections rendered under the chart, given the live quote so one can label itself with the
+   * price. The screen that renders this owns the scroll view and the order of the sections, so
+   * anything added later is a sibling here rather than another branch inside this component.
+   */
+  children?: (quote: Quote | null) => ReactNode;
 };
 
 /** Timeframe a freshly opened pair starts on. */
 const DEFAULT_TIMEFRAME_KEY = '1min';
 
-export function CoinDetail({ symbol, name, decimals }: Props) {
+export function CoinDetail({ symbol, name, decimals, children }: Props) {
   const [timeframeKey, setTimeframeKey] = useState(DEFAULT_TIMEFRAME_KEY);
   const [infoOpen, setInfoOpen] = useState(false);
   const [visibleCount, setVisibleCount] = useState<number | null>(null);
@@ -99,7 +103,7 @@ export function CoinDetail({ symbol, name, decimals }: Props) {
   const isZoomed = visibleCount !== null && visibleCount < candles.length;
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={['top']}>
+    <View style={styles.section}>
       <View style={styles.header}>
         <View style={styles.headerText}>
           <Text style={styles.symbol}>{symbol || '—'}</Text>
@@ -201,21 +205,16 @@ export function CoinDetail({ symbol, name, decimals }: Props) {
         )}
       </View>
 
-      {/* The order form and the live book share the space under the chart: book left, form
-          right. The book's rows feed the form's Price field, so the two sit together. */}
-      <View style={styles.belowChart}>
-        <TradeScreen symbol={symbol} lastPrice={quote?.price ?? null} isUp={quote?.isUp} />
-      </View>
+      {children?.(quote)}
 
       <CoinInfoSheet symbol={symbol} visible={infoOpen} onClose={onCloseInfo} decimals={decimals} />
-    </SafeAreaView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: colors.bg,
+  section: {
+    // Content-sized: this is one section of the screen's scroll view, not the screen itself.
   },
   header: {
     flexDirection: 'row',
@@ -301,9 +300,6 @@ const styles = StyleSheet.create({
   },
   chartWrap: {
     justifyContent: 'center',
-  },
-  belowChart: {
-    flex: 1,
   },
   loader: {
     alignSelf: 'center',
