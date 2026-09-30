@@ -6,16 +6,16 @@
  * hook gave each of them its own copy and its own request. Cancelling an order updated one copy
  * while the form kept showing another.
  *
- * It also has to be refreshed at the right *moments*, not just on demand. Placing an order freezes
- * funds immediately, but cancelling releases them a beat later, so a refresh fired the instant the
- * cancel returns still reads the pre-cancel figure. `refreshBalanceAfterSettle` re-reads a few
- * times over the next second and a half so the number converges on what the account actually holds
- * rather than on when we happened to ask.
+ * REST is only the baseline. The private `/account/balance` feed reports the *absolute* available
+ * and held amounts for every change — including ones made on the desktop — so `applyBalanceEvent`
+ * writes those straight in. `reconcileBalanceAfterChange` then re-reads once as a safety net for
+ * the case where the socket was not connected when the change happened.
  */
 import { AppState, type AppStateStatus } from 'react-native';
 
 import { fetchAccounts } from '@/lib/kucoin/account';
 import { describeError } from '@/lib/kucoin/errors';
+import type { PrivateBalanceMessage } from '@/lib/kucoin/privateSocket';
 import { addDecimal } from '@/utils/decimal';
 
 export type BalanceState = {
@@ -31,10 +31,24 @@ export type BalanceState = {
 const EMPTY: Record<string, string> = {};
 
 /**
- * Re-read offsets for a change the exchange applies asynchronously. The first is immediate, the
- * later ones cover the window in which a released or frozen balance settles.
+ * How long after a known balance-changing event the REST figure is re-read once.
+ *
+ * The push feed carries the new total, so this is only insurance: if the socket was down, or a
+ * change slipped through while the app was backgrounded, the number self-heals instead of sitting
+ * stale until the next foreground.
  */
-const SETTLE_OFFSETS_MS = [0, 500, 1500];
+const RECONCILE_DELAY_MS = 1000;
+
+/**
+ * The balance books this screen is allowed to display.
+ *
+ * `/account/balance` reports every book the account has and names the one that moved in
+ * `relationEvent` — `trade.hold` and `trade.setted` for the classic spot trade wallet, plus
+ * `main.*`, `trade_hf.*`, `margin.*` and `isolated*` for the others. Only the trade wallet can fund
+ * a spot limit order, so funds sitting in `main` are not spendable and must not be shown as if
+ * they were.
+ */
+const DISPLAYED_BOOK = 'trade.';
 
 let state: BalanceState = {
   available: EMPTY,
@@ -48,7 +62,7 @@ const listeners = new Set<() => void>();
 let inFlight: Promise<void> | null = null;
 /** Set when a refresh is asked for mid-flight, so it is not silently dropped. */
 let queued = false;
-let settleTimers: ReturnType<typeof setTimeout>[] = [];
+let reconcileTimer: ReturnType<typeof setTimeout> | null = null;
 let appStateSubscription: { remove: () => void } | null = null;
 
 function emit(patch: Partial<BalanceState>): void {
@@ -128,24 +142,62 @@ export function refreshBalance(): void {
 }
 
 /**
- * Re-reads the balance over the next second and a half, for changes the exchange applies late.
+ * Fills the balance the first time something needs it, and does nothing thereafter.
  *
- * This is what a cancel needs: the funds are released on KuCoin's side after `DELETE /orders/{id}`
- * has already returned, so asking once straight after it reads the balance as it was before the
- * cancel. Asking again a moment later is what makes the number actually move.
+ * This exists because the route and the order form both mount and both need a balance, and they
+ * mount at the same time. Two calls to `refreshBalance` there meant two sequential `/accounts`
+ * requests: the second one arrived mid-flight, so the trailing re-read the code above implements
+ * fired and the app paid for a round trip it already had the answer to. A genuine change still
+ * goes through `refreshBalance`, where losing a concurrent call would actually cost a stale number.
  */
-export function refreshBalanceAfterSettle(): void {
-  for (const timer of settleTimers) clearTimeout(timer);
-  settleTimers = SETTLE_OFFSETS_MS.map((delay) =>
-    setTimeout(() => {
-      refreshBalance();
-    }, delay)
-  );
+export function ensureBalanceLoaded(): void {
+  if (state.available !== EMPTY || inFlight) return;
+  run();
 }
 
-/** Drops any pending settle re-reads. Used when the screen goes away so they do not fire into a
- *  balance nobody is looking at. */
+/**
+ * Applies one `/account/balance` frame.
+ *
+ * The push carries absolute amounts rather than deltas, so there is nothing to add — the value it
+ * reports *is* the new balance. Overwriting rather than accumulating is what makes this immune to
+ * the duplicate frames and reconnect replays a push feed can send.
+ */
+export function applyBalanceEvent(message: PrivateBalanceMessage): void {
+  const book = message.relationEvent;
+  // No relationEvent means the exchange did not say which wallet moved, so the number cannot be
+  // attributed to the one this screen shows. Ignoring it is safer than showing main funds as
+  // trade funds.
+  if (typeof book !== 'string' || !book.startsWith(DISPLAYED_BOOK)) return;
+
+  const currency = typeof message.currency === 'string' ? message.currency : '';
+  const available = typeof message.available === 'string' ? message.available : '';
+  if (!currency || !available || !Number.isFinite(Number(available))) return;
+
+  emit({
+    available: { ...state.available, [currency]: available },
+    error: null,
+  });
+}
+
+/**
+ * Re-reads the balance once a moment after a known change.
+ *
+ * The push feed normally makes this redundant — it arrives before or with the REST view of the
+ * same change — but it is what keeps the number honest when the socket was not connected at the
+ * time. Kept as a single delayed re-read rather than the old 0/500/1500ms ladder, because the
+ * ladder existed to catch a settle that is now reported directly.
+ */
+export function reconcileBalanceAfterChange(): void {
+  if (reconcileTimer) clearTimeout(reconcileTimer);
+  reconcileTimer = setTimeout(() => {
+    reconcileTimer = null;
+    refreshBalance();
+  }, RECONCILE_DELAY_MS);
+}
+
+/** Drops a pending reconcile so it cannot fire into a screen nobody is looking at. */
 export function cancelPendingBalanceRefresh(): void {
-  for (const timer of settleTimers) clearTimeout(timer);
-  settleTimers = [];
+  if (!reconcileTimer) return;
+  clearTimeout(reconcileTimer);
+  reconcileTimer = null;
 }

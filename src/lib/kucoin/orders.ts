@@ -91,15 +91,64 @@ export async function placeLimitOrder(
 export type CancelOrderOptions = {
   /** Which spot wallet the order was placed from. Defaults to the classic `trade` book. */
   wallet?: SpotOrderWallet;
+  /**
+   * Required for the HF book, which will not cancel without it: `DELETE /hf/orders/{id}` takes
+   * `?symbol=`, because that book can hold orders on the same id's symbol across accounts. The
+   * classic book ignores it.
+   */
+  symbol?: string;
 };
 
 export async function cancelOrder(
   orderId: string,
-  { wallet = 'trade' }: CancelOrderOptions = {}
+  { wallet = 'trade', symbol }: CancelOrderOptions = {}
 ): Promise<void> {
-  const base = wallet === 'trade_hf' ? '/api/v1/hf/orders' : '/api/v1/orders';
+  const hf = wallet === 'trade_hf';
+  const base = hf ? '/api/v1/hf/orders' : '/api/v1/orders';
   await request<void>(`${base}/${orderId}`, {
     method: 'DELETE',
     signed: true,
+    // Omitting it is not an error for the classic book, so it is only sent where it is required.
+    ...(hf && symbol ? { query: { symbol } } : {}),
   });
+}
+
+/**
+ * Active orders on the high-frequency book.
+ *
+ * There is no account-wide listing on this book — `GET /hf/orders/active` requires a `symbol` — so
+ * the symbol list is fetched first and then one request per pair that actually has something open.
+ * That is what keeps a quiet account down to a single request instead of one per listed pair.
+ */
+export async function fetchHighFrequencyOpenOrders(symbol: string): Promise<unknown[]> {
+  const data = await request<unknown>('/hf/orders/active', { signed: true, query: { symbol } });
+  return asOrderList(data);
+}
+
+/** Pairs with at least one active HF order, so no per-symbol request is spent on a quiet pair. */
+export async function fetchHighFrequencyOrderSymbols(): Promise<string[]> {
+  const data = await request<unknown>('/hf/orders/active/symbols', { signed: true });
+  const list = asOrderList(data);
+  return list
+    .map((entry) => (typeof entry === 'string' ? entry : ''))
+    .filter((entry) => entry.includes('-'));
+}
+
+/**
+ * Both order books return their list either as a bare array or wrapped in `items`, and which one
+ * comes back is not consistent between them, so both shapes are accepted.
+ */
+function asOrderList(data: unknown): unknown[] {
+  if (Array.isArray(data)) return data;
+  const items = (data as { items?: unknown } | null)?.items;
+  return Array.isArray(items) ? items : [];
+}
+
+/** Classic active orders, whose list is account-wide and needs no symbol. */
+export async function fetchClassicOpenOrders(): Promise<unknown[]> {
+  const data = await request<unknown>('/orders', {
+    signed: true,
+    query: { status: 'active' },
+  });
+  return asOrderList(data);
 }

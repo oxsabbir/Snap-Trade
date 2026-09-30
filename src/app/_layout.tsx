@@ -5,8 +5,13 @@ import { initialWindowMetrics, SafeAreaProvider } from 'react-native-safe-area-c
 
 import { ActiveCoinProvider } from '@/state/activeCoin';
 import { colors } from '@/theme';
+import { usePrivateFeed } from '@/hooks/usePrivateFeed';
 
 export default function RootLayout() {
+  // App-wide, so an order filled or cancelled on the desktop lands even while the user is on
+  // another tab. Mounted here rather than on the trade screen for exactly that reason.
+  usePrivateFeed();
+
   return (
     <SafeAreaProvider initialMetrics={initialWindowMetrics}>
       <ActiveCoinProvider>

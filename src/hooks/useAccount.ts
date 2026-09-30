@@ -7,6 +7,7 @@ import { fetchAllTickers } from '@/lib/kucoin/market';
 import { clearAccountInfoCache, fetchAccountInfo } from '@/lib/kucoin/profile';
 import { describeError } from '@/lib/kucoin/errors';
 import type { AccountInfo, KuCoinCredentials, PortfolioAsset } from '@/lib/kucoin/types';
+import { restartPrivateFeed } from '@/state/privateFeed';
 
 const POLL_INTERVAL_MS = 30_000;
 
@@ -116,11 +117,15 @@ export function useAccount(): AccountState {
     async (credentials: KuCoinCredentials) => {
       await saveCredentials(credentials);
       clearAccountInfoCache();
+      // The feed's socket gave up while there was no key, so it has to be reopened now that there
+      // is one — otherwise orders and balances stay stale until the app is restarted.
+      restartPrivateFeed();
       try {
         await fetchPortfolio();
         loadAccountInfo();
       } catch (caught) {
         await clearCredentials();
+        restartPrivateFeed();
         if (mountedRef.current) {
           setPortfolio(EMPTY_PORTFOLIO);
           setStatus('disconnected');
@@ -134,6 +139,7 @@ export function useAccount(): AccountState {
   const disconnect = useCallback(async () => {
     await clearCredentials();
     clearAccountInfoCache();
+    restartPrivateFeed();
     if (!mountedRef.current) return;
     setPortfolio(EMPTY_PORTFOLIO);
     setAccountInfo(null);

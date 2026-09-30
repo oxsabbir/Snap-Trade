@@ -1,4 +1,9 @@
-import { memo, useEffect, useState } from 'react';
+import {
+  memo,
+  useEffect,
+  useState,
+  type ReactNode,
+} from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -14,6 +19,7 @@ import { CaretDownIcon, CaretUpIcon, PlusIcon } from '@/components/Icons';
 import { useAccountBalance } from '@/hooks/useAccountBalance';
 import { useSymbolRules } from '@/hooks/useSymbolRules';
 import { describeError } from '@/lib/kucoin/errors';
+import { fetchOrderBookSnapshot } from '@/lib/kucoin/level2';
 import { createClientOid, placeLimitOrder, TEST_MODE } from '@/lib/kucoin/orders';
 import { validateLimitOrder } from '@/lib/kucoin/orderRules';
 import type { OrderSide } from '@/lib/kucoin/types';
@@ -29,7 +35,6 @@ import {
 } from '@/lib/trade';
 import { colors, radius, spacing } from '@/theme';
 import { trackPlacedOrder } from '@/state/openOrders';
-import { useSeedPrice } from '@/state/ticker';
 import { formatAmount } from '@/utils/format';
 
 type Props = {
@@ -60,16 +65,9 @@ function TradePanelBase({ symbol, testMode = TEST_MODE, priceSelection }: Props)
 
   const { rules, isLoading: rulesLoading, error: rulesError } = useSymbolRules(symbol);
   // Read from the shared balance store, so a cancel driven from the order list below updates the
-  // number here instead of leaving a second, independently fetched copy behind.
+  // number here instead of leaving a second, independently fetched copy behind. The same store is
+  // written by `/account/balance`, so a change made on the desktop moves this too.
   const { available } = useAccountBalance();
-
-  // The form needs a price once per pair and then not again — it is a seed, not a live value.
-  // Read through the store rather than passed in as a prop: a `lastPrice` prop changed several
-  // times a second, and although the prefill below guards on the pair, the prop itself still
-  // changed, which defeated this component's memoisation and re-rendered the whole form — every
-  // input, the slider and the button — five times a second to display a number that had already
-  // been consumed.
-  const seedPrice = useSeedPrice(symbol);
 
   const [side, setSide] = useState<OrderSide>('buy');
   const [price, setPrice] = useState('');
@@ -77,16 +75,15 @@ function TradePanelBase({ symbol, testMode = TEST_MODE, priceSelection }: Props)
   const [total, setTotal] = useState('');
   const [percent, setPercent] = useState<FillPercent | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isFetchingBestPrice, setIsFetchingBestPrice] = useState(false);
   const [inlineError, setInlineError] = useState<string | null>(null);
   const [toast, setToast] = useState<Toast | null>(null);
   const [trackWidth, setTrackWidth] = useState(0);
 
   // Reset on a pair change during render so the form never carries the previous pair's amounts.
   const [activeSymbol, setActiveSymbol] = useState(symbol);
-  const [pricedSymbol, setPricedSymbol] = useState<string | null>(null);
   if (symbol !== activeSymbol) {
     setActiveSymbol(symbol);
-    setPricedSymbol(null);
     setSide('buy');
     setPrice('');
     setSize('');
@@ -94,14 +91,7 @@ function TradePanelBase({ symbol, testMode = TEST_MODE, priceSelection }: Props)
     setPercent(null);
     setInlineError(null);
     setToast(null);
-  }
-
-  // Prefill Price once per pair, from the socket's last trade. Re-prefilling on every tick would
-  // fight the user for the field, so it happens only until the pair is priced.
-  const prefill = rules ? prefillPrice(rules, seedPrice) : null;
-  if (rules && prefill !== null && pricedSymbol !== symbol) {
-    setPricedSymbol(symbol);
-    setPrice(prefill);
+    setIsFetchingBestPrice(false);
   }
 
   // A price tapped in the order book fills Price with the row's value, and re-runs the total when
@@ -214,6 +204,46 @@ function TradePanelBase({ symbol, testMode = TEST_MODE, priceSelection }: Props)
     setInlineError(null);
   };
 
+  /**
+   * Fills Price with the best price on the book the order would trade against, and only when the
+   * user asks for it.
+   *
+   * On demand rather than continuously, because a field that rewrites itself while someone is
+   * typing is a field that cannot be trusted: it was the reason this value used to arrive as a
+   * ticking prop and re-render the entire form several times a second.
+   *
+   * A buy lifts the best ask, the lowest price someone is willing to sell at. A sell lifts the best
+   * bid, the highest price someone will pay. Both are read from a one-off REST snapshot rather than
+   * the live Level 2 socket: the store drops its book as soon as nothing is subscribed, so a value
+   * taken from it after the user has been reading the form would often be missing.
+   */
+  const applyBestPrice = async () => {
+    if (!rules || isFetchingBestPrice) return;
+    setIsFetchingBestPrice(true);
+    setInlineError(null);
+    try {
+      const snapshot = await fetchOrderBookSnapshot(symbol);
+      // Asks are sorted best-first by the parser, so the first entry is the one to lift.
+      const best = side === 'buy' ? snapshot.asks[0] : snapshot.bids[0];
+      if (!best) {
+        setInlineError(`No ${side === 'buy' ? 'sell' : 'buy'} orders on the book for ${symbol}.`);
+        return;
+      }
+      const next = prefillPrice(rules, Number(best.price));
+      if (next === null) {
+        setInlineError('Could not read the best price.');
+        return;
+      }
+      setPrice(next);
+      setPercent(null);
+      syncTotal(next, size);
+    } catch (caught) {
+      setInlineError(describeError(caught, 'Could not load the best price.'));
+    } finally {
+      setIsFetchingBestPrice(false);
+    }
+  };
+
   const submit = async () => {
     if (!rules || isSubmitting) return;
     setInlineError(null);
@@ -305,6 +335,28 @@ function TradePanelBase({ symbol, testMode = TEST_MODE, priceSelection }: Props)
         onChangeText={onPriceChange}
         onStepUp={() => onStep('price', 1)}
         onStepDown={() => onStep('price', -1)}
+        labelAction={
+          <Pressable
+            onPress={applyBestPrice}
+            // Blocked while an order is in flight so a late reply cannot overwrite the amount the
+            // user is already submitting.
+            disabled={!rules || isSubmitting || isFetchingBestPrice}
+            hitSlop={8}
+            style={[
+              styles.bestPrice,
+              (!rules || isSubmitting || isFetchingBestPrice) && styles.bestPriceDisabled,
+            ]}
+            accessibilityRole="button"
+            accessibilityLabel={`Use the best ${side === 'buy' ? 'ask' : 'bid'} price`}
+            accessibilityState={{ busy: isFetchingBestPrice }}
+          >
+            {isFetchingBestPrice ? (
+              <ActivityIndicator size="small" color={colors.accent} />
+            ) : (
+              <Text style={styles.bestPriceText}>Best Price</Text>
+            )}
+          </Pressable>
+        }
       />
 
       <AmountField
@@ -412,6 +464,8 @@ type AmountFieldProps = {
   onChangeText: (text: string) => void;
   onStepUp: () => void;
   onStepDown: () => void;
+  /** Rendered on the right of the label row, e.g. the Best Price action. */
+  labelAction?: ReactNode;
 };
 
 function AmountField({
@@ -423,10 +477,14 @@ function AmountField({
   onChangeText,
   onStepUp,
   onStepDown,
+  labelAction,
 }: AmountFieldProps) {
   return (
     <View style={styles.field}>
-      <Text style={styles.fieldLabel}>{label}</Text>
+      <View style={styles.fieldLabelRow}>
+        <Text style={styles.fieldLabel}>{label}</Text>
+        {labelAction}
+      </View>
       <View style={styles.inputWrap}>
         <TextInput
           value={value}
@@ -526,11 +584,28 @@ const styles = StyleSheet.create({
   field: {
     gap: 4,
   },
+  fieldLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
   fieldLabel: {
     color: colors.textFaint,
     fontSize: 10,
     fontWeight: '600',
     letterSpacing: 0.3,
+  },
+  bestPrice: {
+    paddingHorizontal: 4,
+    paddingVertical: 1,
+  },
+  bestPriceDisabled: {
+    opacity: 0.5,
+  },
+  bestPriceText: {
+    color: colors.accent,
+    fontSize: 10,
+    fontWeight: '700',
   },
   inputWrap: {
     flexDirection: 'row',

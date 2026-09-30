@@ -1,6 +1,7 @@
 import { useEffect, useSyncExternalStore } from 'react';
 
 import {
+  ensureBalanceLoaded,
   getBalanceState,
   refreshBalance,
   subscribeBalance,
@@ -20,7 +21,9 @@ export function useAccountBalance(): AccountBalanceState {
   const state = useSyncExternalStore(subscribeBalance, getBalanceState, getBalanceState);
 
   useEffect(() => {
-    refreshBalance();
+    // Not `refreshBalance`: the route and the order form both mount together, and two unconditional
+    // refreshes in the same tick turned into two sequential `/accounts` requests.
+    ensureBalanceLoaded();
   }, []);
 
   return { ...state, refresh: refreshBalance };

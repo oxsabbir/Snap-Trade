@@ -210,49 +210,44 @@ export const OrderManagement = memo(function OrderManagement({
         activeIndex={activeSubTab}
         counts={[openCount, 0]}
         onPress={setActiveSubTab}
+        // Stop-loss and OCO are not implemented, so the tab stays visible for layout but refuses to
+        // be opened rather than presenting a placeholder as if it were a working screen.
+        disabledFrom={1}
       />
 
-      {activeSubTab === 0 ? (
-        <>
-          <FilterRow
-            hideOtherPairs={hideOtherPairs}
-            onToggle={setHideOtherPairs}
-          />
+      <FilterRow
+        hideOtherPairs={hideOtherPairs}
+        onToggle={setHideOtherPairs}
+      />
 
-          {error ? (
-            <View style={styles.errorBanner}>
-              <Text style={styles.errorText}>{error}</Text>
-            </View>
-          ) : null}
+      {error ? (
+        <View style={styles.errorBanner}>
+          <Text style={styles.errorText}>{error}</Text>
+        </View>
+      ) : null}
 
-          {showLoading ? (
-            <View style={styles.loadingContainer}>
-              <Text style={styles.loadingText}>Loading orders…</Text>
-            </View>
-          ) : showEmpty ? (
-            <EmptyState
-              balance={formatAmount(Number(usdtBalance))}
-              onDeposit={onDeposit}
-              onTutorial={onTutorial}
-            />
-          ) : (
-            // A plain column, not a scroll view: the route already owns one for the whole screen
-            // and a list nested inside it fights the user for the same gesture.
-            <View style={styles.list}>
-              {visibleOrders.map((order) => (
-                <OrderRow
-                  key={order.orderId}
-                  order={order}
-                  onCancel={() => handleCancel(order.orderId)}
-                  isCancelling={cancelling.has(order.orderId)}
-                />
-              ))}
-            </View>
-          )}
-        </>
+      {showLoading ? (
+        <View style={styles.loadingContainer}>
+          <Text style={styles.loadingText}>Loading orders…</Text>
+        </View>
+      ) : showEmpty ? (
+        <EmptyState
+          balance={formatAmount(Number(usdtBalance))}
+          onDeposit={onDeposit}
+          onTutorial={onTutorial}
+        />
       ) : (
-        <View style={styles.inactiveContent}>
-          <Text style={styles.inactiveText}>Advanced orders — coming soon</Text>
+        // A plain column, not a scroll view: the route already owns one for the whole screen
+        // and a list nested inside it fights the user for the same gesture.
+        <View style={styles.list}>
+          {visibleOrders.map((order) => (
+            <OrderRow
+              key={order.orderId}
+              order={order}
+              onCancel={() => handleCancel(order.orderId)}
+              isCancelling={cancelling.has(order.orderId)}
+            />
+          ))}
         </View>
       )}
     </View>
@@ -306,35 +301,44 @@ function SubTabBar({
   activeIndex,
   counts,
   onPress,
+  disabledFrom = tabs.length,
 }: {
   tabs: readonly string[];
   activeIndex: number;
   counts: readonly number[];
   onPress: (index: number) => void;
+  /** Tabs at or past this index are not built yet and must not be selectable. */
+  disabledFrom?: number;
 }) {
   return (
     <View style={styles.subTabBar}>
-      {tabs.map((tab, i) => (
-        <Pressable
-          key={tab}
-          onPress={() => onPress(i)}
-          style={[
-            styles.subTab,
-            i === activeIndex && styles.subTabActive,
-          ]}
-          accessibilityRole="tab"
-          accessibilityState={{ selected: i === activeIndex }}
-        >
-          <Text
-            style={[
-              styles.subTabText,
-              i === activeIndex && styles.subTabTextActive,
-            ]}
+      {tabs.map((tab, i) => {
+        const disabled = i >= disabledFrom;
+        return (
+          <Pressable
+            key={tab}
+            onPress={() => {
+              // Nothing to show, so the tap is refused rather than opening an empty screen that
+              // looks like the app lost the orders.
+              if (disabled) return;
+              onPress(i);
+            }}
+            style={[styles.subTab, i === activeIndex && styles.subTabActive]}
+            accessibilityRole="tab"
+            accessibilityState={{ selected: i === activeIndex, disabled }}
           >
-            {tab} ({counts[i] ?? 0})
-          </Text>
-        </Pressable>
-      ))}
+            <Text
+              style={[
+                styles.subTabText,
+                i === activeIndex && styles.subTabTextActive,
+                disabled && styles.subTabTextDisabled,
+              ]}
+            >
+              {tab} ({counts[i] ?? 0})
+            </Text>
+          </Pressable>
+        );
+      })}
     </View>
   );
 }
@@ -433,6 +437,9 @@ const styles = StyleSheet.create({
   },
   subTabTextActive: {
     color: '#06231C',
+  },
+  subTabTextDisabled: {
+    color: colors.textFaint,
   },
   filterRow: {
     flexDirection: 'row',
