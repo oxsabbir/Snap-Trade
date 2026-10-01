@@ -26,19 +26,22 @@ jobs:
       - name: Align and sign
         env:
           KS_PASS: ${{ secrets.KS_PASS }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
         run: |
-          echo "${{ secrets.KEYSTORE_B64 }}" | base64 -d > $RUNNER_TEMP/release.jks
+          echo "$KEYSTORE_B64" | base64 -d > $RUNNER_TEMP/release.p12
           BT=$(ls -d $ANDROID_HOME/build-tools/* | sort -V | tail -1)
           APK=$(ls app/build/outputs/apk/release/*.apk | head -1)
           $BT/zipalign -p -f 4 "$APK" aligned.apk
           $BT/apksigner sign \
-            --ks $RUNNER_TEMP/release.jks \
-            --ks-alias ${{ secrets.KEY_ALIAS }} \
+            --ks $RUNNER_TEMP/release.p12 \
+            --ks-type PKCS12 \
+            --ks-alias "$KEY_ALIAS" \
             --ks-pass env:KS_PASS \
             --key-pass env:KS_PASS \
             --out app-release.apk aligned.apk
           $BT/apksigner verify app-release.apk
-          rm $RUNNER_TEMP/release.jks
+          rm $RUNNER_TEMP/release.p12
 
       - uses: actions/upload-artifact@v4
         with:
