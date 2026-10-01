@@ -309,7 +309,7 @@ const styles = StyleSheet.create({
   },
   totalText: {
     color: colors.textMuted,
-    fontSize: 12,
+    fontSize: 10,
     paddingRight: 2,
     fontVariant: ["tabular-nums"],
   },

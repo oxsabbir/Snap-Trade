@@ -19,7 +19,7 @@ import { CaretDownIcon, CaretUpIcon, PlusIcon } from "@/components/Icons";
 import { useAccountBalance } from "@/hooks/useAccountBalance";
 import { useSymbolRules } from "@/hooks/useSymbolRules";
 import { describeError } from "@/lib/kucoin/errors";
-import { fetchOrderBookSnapshot } from "@/lib/kucoin/level2";
+import { useLevel2Book } from "@/hooks/useLevel2Book";
 import {
   createClientOid,
   placeLimitOrder,
@@ -123,10 +123,11 @@ function PercentChips({
               {chip}%
             </Text>
           </Pressable>
-        )})}
-      </View>
-    );
-  }
+        );
+      })}
+    </View>
+  );
+}
 
 function TradePanelBase({
   symbol,
@@ -140,6 +141,8 @@ function TradePanelBase({
     isLoading: rulesLoading,
     error: rulesError,
   } = useSymbolRules(symbol);
+  // Real-time Level 2 snapshot via WebSocket — used for Best Price so we don't hit REST.
+  const { snapshot: level2Snapshot } = useLevel2Book(symbol);
   // Read from the shared balance store, so a cancel driven from the order list below updates the
   // number here instead of leaving a second, independently fetched copy behind. The same store is
   // written by `/account/balance`, so a change made on the desktop moves this too.
@@ -185,6 +188,17 @@ function TradePanelBase({
     setIsFetchingBestPrice(false);
   }
 
+  useEffect(() => {
+    if (!toast) return;
+    const timer = setTimeout(() => setToast(null), 3505);
+    return () => clearTimeout(timer);
+  }, [toast]);
+
+  const baseAvailable = available[baseCurrency] ?? "0";
+  const quoteAvailable = available[quoteCurrency] ?? "0";
+  const availableForSide = side === "buy" ? quoteAvailable : baseAvailable;
+  const availableCurrency = side === "buy" ? quoteCurrency : baseCurrency;
+
   // A price tapped in the order book fills Price with the row's value, and re-runs the total when
   // an amount is already entered so the two stay in step as if Price had been typed. Applied
   // during render rather than in an effect: this is a prop changing, not an external
@@ -195,21 +209,24 @@ function TradePanelBase({
   if (priceSelection && priceSelection.id !== appliedSelectionId) {
     setAppliedSelectionId(priceSelection.id);
     setPrice(priceSelection.value);
-    setPercent(null);
+    // Persist the selected percentage chip — recalculate size/total at the new price
+    // instead of clearing the percentage chip.
     setInlineError(null);
-    if (size) setTotal(totalFromSize(priceSelection.value, size) ?? "");
+    if (percent !== null && rules) {
+      const filled = fillByPercent(side, percent, rules, priceSelection.value, {
+        base: baseAvailable,
+        quote: quoteAvailable,
+      });
+      if (filled) {
+        setSize(filled.size);
+        setTotal(filled.total);
+      } else if (size) {
+        setTotal(totalFromSize(priceSelection.value, size) ?? "");
+      }
+    } else if (size) {
+      setTotal(totalFromSize(priceSelection.value, size) ?? "");
+    }
   }
-
-  useEffect(() => {
-    if (!toast) return;
-    const timer = setTimeout(() => setToast(null), 3500);
-    return () => clearTimeout(timer);
-  }, [toast]);
-
-  const baseAvailable = available[baseCurrency] ?? "0";
-  const quoteAvailable = available[quoteCurrency] ?? "0";
-  const availableForSide = side === "buy" ? quoteAvailable : baseAvailable;
-  const availableCurrency = side === "buy" ? quoteCurrency : baseCurrency;
 
   const max = rules
     ? maxSize(side, rules, price, {
@@ -339,7 +356,18 @@ function TradePanelBase({
       if (chipFilled && chipFilled.size === size) return chip;
     }
     return null;
-  }, [rules, hasPrice, hasBalance, size, percent, side, rules, price, baseAvailable, quoteAvailable]);
+  }, [
+    rules,
+    hasPrice,
+    hasBalance,
+    size,
+    percent,
+    side,
+    rules,
+    price,
+    baseAvailable,
+    quoteAvailable,
+  ]);
 
   /**
    * Fills Price with the best price on the book the order would trade against, and only when the
@@ -350,18 +378,16 @@ function TradePanelBase({
    * ticking prop and re-render the entire form several times a second.
    *
    * A buy lifts the best ask, the lowest price someone is willing to sell at. A sell lifts the best
-   * bid, the highest price someone will pay. Both are read from a one-off REST snapshot rather than
-   * the live Level 2 socket: the store drops its book as soon as nothing is subscribed, so a value
-   * taken from it after the user has been reading the form would often be missing.
+   * bid, the highest price someone will pay. Read from the live Level 2 WebSocket snapshot so it
+   * is instant and doesn't hit REST.
    */
-  const applyBestPrice = async () => {
-    if (!rules || isFetchingBestPrice) return;
+  const applyBestPrice = () => {
+    if (!rules || isFetchingBestPrice || !level2Snapshot) return;
     setIsFetchingBestPrice(true);
     setInlineError(null);
     try {
-      const snapshot = await fetchOrderBookSnapshot(symbol);
-      // Asks are sorted best-first by the parser, so the first entry is the one to lift.
-      const best = side === "buy" ? snapshot.asks[0] : snapshot.bids[0];
+      // Use the live Level 2 WebSocket snapshot instead of REST
+      const best = side === "buy" ? level2Snapshot.asks[0] : level2Snapshot.bids[0];
       if (!best) {
         setInlineError(
           `No ${side === "buy" ? "sell" : "buy"} orders on the book for ${symbol}.`,
@@ -374,8 +400,21 @@ function TradePanelBase({
         return;
       }
       setPrice(next);
-      clearPercent();
-      syncTotal(next, size);
+      // Persist the selected percentage chip — recalculate size/total at the new price
+      if (percent !== null) {
+        const filled = fillByPercent(side, percent, rules, next, {
+          base: baseAvailable,
+          quote: quoteAvailable,
+        });
+        if (filled) {
+          setSize(filled.size);
+          setTotal(filled.total);
+        } else {
+          syncTotal(next, size);
+        }
+      } else {
+        syncTotal(next, size);
+      }
     } catch (caught) {
       setInlineError(describeError(caught, "Could not load the best price."));
     } finally {
@@ -747,7 +786,7 @@ const styles = StyleSheet.create({
   },
   bestPrice: {
     paddingHorizontal: 4,
-    paddingVertical: 1,
+    paddingVertical: 3,
   },
   bestPriceDisabled: {
     opacity: 0.5,
@@ -790,8 +829,8 @@ const styles = StyleSheet.create({
   chipRow: {
     flexDirection: "row",
     justifyContent: "space-between",
-    marginTop: 12,
-    marginBottom: 12,
+    marginTop: 4,
+    marginBottom: 4,
     gap: spacing.xs,
   },
   chip: {
