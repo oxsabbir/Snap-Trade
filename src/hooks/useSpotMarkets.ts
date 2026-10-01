@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
 
 import {
@@ -12,6 +12,8 @@ import {
 import type { SpotMarket, SymbolInfo, Ticker } from '@/lib/kucoin/types';
 
 const POLL_INTERVAL_MS = 10_000;
+const INITIAL_RETRY_DELAY_MS = 1_000;
+const MAX_INITIAL_RETRIES = 1;
 
 export type SpotMarketsState = {
   markets: SpotMarket[];
@@ -29,6 +31,8 @@ export function useSpotMarkets(enabled = true): SpotMarketsState {
   const mountedRef = useRef(true);
   const inFlightRef = useRef<Promise<void> | null>(null);
   const lastLoadedAtRef = useRef(0);
+  const initialRetryCountRef = useRef(0);
+  const isInitialLoadRef = useRef(true);
 
   const [markets, setMarkets] = useState<SpotMarket[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -81,32 +85,55 @@ export function useSpotMarkets(enabled = true): SpotMarketsState {
    * which surfaced as a failed load with no rows at all. A load already in flight is joined instead
    * of repeated.
    */
-  const load = useCallback((): Promise<void> => {
-    const pending = inFlightRef.current;
-    if (pending) return pending;
+  const loadRef = useRef<() => Promise<void>>(null);
 
-    const run = (async () => {
-      try {
-        await applyTickers();
-      } catch (caught) {
-        if (mountedRef.current) {
-          setError(caught instanceof Error ? caught.message : 'Failed to load markets');
+  useLayoutEffect(() => {
+    loadRef.current = async () => {
+      const pending = inFlightRef.current;
+      if (pending) return pending;
+
+      const run = (async () => {
+        try {
+          await applyTickers();
+        } catch (caught) {
+          if (mountedRef.current) {
+            const errorMessage = caught instanceof Error ? caught.message : 'Failed to load markets';
+            setError(errorMessage);
+
+            if (isInitialLoadRef.current && initialRetryCountRef.current < MAX_INITIAL_RETRIES) {
+              initialRetryCountRef.current += 1;
+              const delay = INITIAL_RETRY_DELAY_MS * Math.pow(2, initialRetryCountRef.current - 1);
+              setTimeout(() => {
+                if (mountedRef.current) {
+                  inFlightRef.current = null;
+                  void loadRef.current?.();
+                }
+              }, delay);
+              return;
+            }
+
+            isInitialLoadRef.current = false;
+          }
+        } finally {
+          lastLoadedAtRef.current = Date.now();
+          inFlightRef.current = null;
+          if (mountedRef.current) setIsLoading(false);
         }
-      } finally {
-        lastLoadedAtRef.current = Date.now();
-        inFlightRef.current = null;
-        if (mountedRef.current) setIsLoading(false);
-      }
-    })();
+      })();
 
-    inFlightRef.current = run;
-    return run;
+      inFlightRef.current = run;
+      return run;
+    };
   }, [applyTickers]);
+
+  const load = useCallback(() => loadRef.current?.() ?? Promise.resolve(), []);
 
   // Load once on mount whether or not this screen currently has focus, so a tab the user has not
   // opened yet already holds data by the time they reach it.
   useEffect(() => {
     mountedRef.current = true;
+    initialRetryCountRef.current = 0;
+    isInitialLoadRef.current = true;
     void load();
     return () => {
       mountedRef.current = false;

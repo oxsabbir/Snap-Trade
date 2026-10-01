@@ -45,7 +45,7 @@ export function fetchCurrencies(): Promise<Currency[]> {
 }
 
 export async function fetchAllTickers(): Promise<AllTickersResponse> {
-  return request<AllTickersResponse>('/market/allTickers');
+  return request<AllTickersResponse>('/market/allTickers', { timeoutMs: 30_000 });
 }
 
 /** 24h stats for a single pair, cached per symbol for the session. */
