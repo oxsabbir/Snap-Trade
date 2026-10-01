@@ -22,7 +22,7 @@ type Props = {
   onPriceSelect: (price: string) => void;
 };
 
-const ROW_HEIGHT = 20;
+const ROW_HEIGHT = 26;
 
 const VIEW_MODES: OrderBookViewMode[] = ["split", "bids", "asks"];
 
@@ -309,7 +309,8 @@ const styles = StyleSheet.create({
   },
   totalText: {
     color: colors.textMuted,
-    fontSize: 10,
+    fontSize: 12,
+    paddingRight: 2,
     fontVariant: ["tabular-nums"],
   },
   percentBar: {
