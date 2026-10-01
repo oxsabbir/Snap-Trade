@@ -2,16 +2,36 @@ import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AssetList } from '@/components/AssetList';
-import { ConnectAccountForm } from '@/components/ConnectAccountForm';
 import { AccountIcon } from '@/components/Icons';
 import { ProfileCard } from '@/components/ProfileCard';
 import { useAccount } from '@/hooks/useAccount';
 import { useProfile } from '@/hooks/useProfile';
+import { useApiCredentials, type OnboardingEntry } from '@/state/apiCredentials';
 import { colors, radius, spacing } from '@/theme';
+import { useState } from 'react';
+
+function maskApiKey(apiKey: string | null): string {
+  if (!apiKey || apiKey.length < 9) return '••••••';
+  return `${apiKey.slice(0, 4)}••••••${apiKey.slice(-4)}`;
+}
 
 export default function AccountScreen() {
-  const { status, portfolio, accountInfo, lastUpdated, error, connect, disconnect, refresh } = useAccount();
+  const { status, portfolio, accountInfo, lastUpdated, error, refresh } = useAccount();
   const { displayName, setDisplayName } = useProfile();
+  const { apiKey, disconnect } = useApiCredentials();
+  const [accountAction, setAccountAction] = useState<OnboardingEntry | null>(null);
+  const [accountActionError, setAccountActionError] = useState<string | null>(null);
+
+  const leaveAccount = async (entry: OnboardingEntry) => {
+    setAccountActionError(null);
+    setAccountAction(entry);
+    try {
+      await disconnect(entry);
+    } catch {
+      setAccountActionError('Could not clear the saved key securely. Try again.');
+      setAccountAction(null);
+    }
+  };
 
   const isBusy = status === 'loading' && portfolio.assets.length > 0;
 
@@ -25,7 +45,7 @@ export default function AccountScreen() {
       {status === 'loading' && portfolio.assets.length === 0 ? (
         <ActivityIndicator style={styles.centered} color={colors.accent} />
       ) : status === 'disconnected' ? (
-        <ConnectAccountForm onSubmit={connect} />
+        <ActivityIndicator style={styles.centered} color={colors.accent} />
       ) : status === 'error' && portfolio.assets.length === 0 ? (
         <View style={styles.card}>
           <View style={styles.cardIcon}>
@@ -43,12 +63,22 @@ export default function AccountScreen() {
               <Text style={styles.primaryText}>Retry</Text>
             </Pressable>
             <Pressable
-              onPress={disconnect}
+              onPress={() => void leaveAccount('setup')}
+              disabled={accountAction !== null}
               style={styles.secondaryButton}
               accessibilityRole="button"
-              accessibilityLabel="Disconnect account"
+              accessibilityLabel="Switch account"
             >
-              <Text style={styles.secondaryText}>Disconnect</Text>
+              <Text style={styles.secondaryText}>Switch</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => void leaveAccount('welcome')}
+              disabled={accountAction !== null}
+              style={styles.secondaryButton}
+              accessibilityRole="button"
+              accessibilityLabel="Log out"
+            >
+              <Text style={styles.secondaryText}>Log out</Text>
             </Pressable>
           </View>
         </View>
@@ -62,16 +92,41 @@ export default function AccountScreen() {
             lastUpdated={lastUpdated}
           />
 
-          <AssetList holdings={portfolio.holdings} />
+          <View style={styles.connection}>
+            <Text style={styles.connectionLabel}>CONNECTED API KEY</Text>
+            <Text style={styles.apiKey} selectable={false}>
+              {maskApiKey(apiKey)}
+            </Text>
+            <Pressable
+              onPress={() => void leaveAccount('setup')}
+              disabled={accountAction !== null}
+              style={[styles.switchButton, accountAction !== null && styles.actionDisabled]}
+              accessibilityRole="button"
+              accessibilityLabel="Switch account"
+            >
+              <Text style={styles.switchButtonText}>
+                {accountAction === 'setup' ? 'Switching…' : 'Switch account'}
+              </Text>
+            </Pressable>
+            <Pressable
+              onPress={() => void leaveAccount('welcome')}
+              disabled={accountAction !== null}
+              style={[styles.logoutButton, accountAction !== null && styles.actionDisabled]}
+              accessibilityRole="button"
+              accessibilityLabel="Log out"
+            >
+              <Text style={styles.logoutText}>
+                {accountAction === 'welcome' ? 'Logging out…' : 'Log out'}
+              </Text>
+            </Pressable>
+            {accountActionError ? (
+              <Text style={styles.actionError} accessibilityRole="alert">
+                {accountActionError}
+              </Text>
+            ) : null}
+          </View>
 
-          <Pressable
-            onPress={disconnect}
-            style={styles.disconnect}
-            accessibilityRole="button"
-            accessibilityLabel="Disconnect account"
-          >
-            <Text style={styles.disconnectText}>Disconnect</Text>
-          </Pressable>
+          <AssetList holdings={portfolio.holdings} />
         </ScrollView>
       )}
     </SafeAreaView>
@@ -145,7 +200,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   secondaryButton: {
-    paddingHorizontal: spacing.lg,
+    paddingHorizontal: spacing.md,
     height: 38,
     justifyContent: 'center',
     borderRadius: radius.pill,
@@ -153,21 +208,61 @@ const styles = StyleSheet.create({
   },
   secondaryText: {
     color: colors.textMuted,
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '600',
   },
   list: {
     paddingHorizontal: spacing.lg,
     paddingBottom: spacing.xl,
   },
-  disconnect: {
-    alignItems: 'center',
-    marginTop: spacing.md,
-    paddingVertical: spacing.md,
+  connection: {
+    marginTop: spacing.lg,
+    marginBottom: spacing.xl,
+    paddingTop: spacing.md,
+    borderTopColor: colors.border,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    gap: spacing.sm,
   },
-  disconnectText: {
+  connectionLabel: {
+    color: colors.textFaint,
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  apiKey: {
+    color: colors.text,
+    fontSize: 14,
+    fontWeight: '600',
+    fontVariant: ['tabular-nums'],
+  },
+  switchButton: {
+    minHeight: 42,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: radius.md,
+    backgroundColor: colors.surfaceAlt,
+    marginTop: spacing.xs,
+  },
+  switchButtonText: {
+    color: colors.text,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  logoutButton: {
+    minHeight: 38,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  logoutText: {
     color: colors.down,
     fontSize: 13,
     fontWeight: '600',
+  },
+  actionDisabled: {
+    opacity: 0.45,
+  },
+  actionError: {
+    color: colors.down,
+    fontSize: 12,
+    lineHeight: 17,
   },
 });

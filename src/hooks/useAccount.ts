@@ -2,12 +2,11 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
 
 import { buildPortfolio, fetchAccounts, type Portfolio } from '@/lib/kucoin/account';
-import { clearCredentials, loadCredentials, saveCredentials } from '@/lib/kucoin/credentials';
 import { fetchAllTickers } from '@/lib/kucoin/market';
-import { clearAccountInfoCache, fetchAccountInfo } from '@/lib/kucoin/profile';
+import { fetchAccountInfo } from '@/lib/kucoin/profile';
 import { describeError } from '@/lib/kucoin/errors';
-import type { AccountInfo, KuCoinCredentials, PortfolioAsset } from '@/lib/kucoin/types';
-import { restartPrivateFeed } from '@/state/privateFeed';
+import type { AccountInfo, PortfolioAsset } from '@/lib/kucoin/types';
+import { useApiCredentials } from '@/state/apiCredentials';
 
 const POLL_INTERVAL_MS = 30_000;
 
@@ -21,8 +20,6 @@ export type AccountState = {
   accountInfo: AccountInfo | null;
   error: string | null;
   lastUpdated: number | null;
-  connect: (credentials: KuCoinCredentials) => Promise<void>;
-  disconnect: () => Promise<void>;
   refresh: () => void;
 };
 
@@ -38,6 +35,7 @@ const EMPTY_PORTFOLIO: Portfolio = {
 
 export function useAccount(): AccountState {
   const mountedRef = useRef(true);
+  const { isConnected } = useApiCredentials();
 
   const [status, setStatus] = useState<AccountStatus>('loading');
   const [portfolio, setPortfolio] = useState<Portfolio>(EMPTY_PORTFOLIO);
@@ -70,9 +68,7 @@ export function useAccount(): AccountState {
   }, []);
 
   const load = useCallback(async () => {
-    const credentials = await loadCredentials();
-    if (!mountedRef.current) return;
-    if (!credentials) {
+    if (!isConnected) {
       setPortfolio(EMPTY_PORTFOLIO);
       setStatus('disconnected');
       return;
@@ -85,12 +81,11 @@ export function useAccount(): AccountState {
       setError(describeError(caught, 'Failed to load account'));
       setStatus('error');
     }
-  }, [fetchPortfolio, loadAccountInfo]);
+  }, [fetchPortfolio, isConnected, loadAccountInfo]);
 
   useEffect(() => {
     mountedRef.current = true;
-    // Every setState in load() is behind `await loadCredentials()`, so this is an async
-    // bootstrap, not a synchronous cascade. The rule cannot see through the await.
+    // The root route guard loads credentials before mounting any account screen.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void load();
 
@@ -109,45 +104,6 @@ export function useAccount(): AccountState {
     };
   }, [load]);
 
-  /**
-   * Verifies before committing: a key that fails the first call is cleared and the error
-   * is rethrown so the connect form can show it inline rather than landing on the error card.
-   */
-  const connect = useCallback(
-    async (credentials: KuCoinCredentials) => {
-      await saveCredentials(credentials);
-      clearAccountInfoCache();
-      // The feed's socket gave up while there was no key, so it has to be reopened now that there
-      // is one — otherwise orders and balances stay stale until the app is restarted.
-      restartPrivateFeed();
-      try {
-        await fetchPortfolio();
-        loadAccountInfo();
-      } catch (caught) {
-        await clearCredentials();
-        restartPrivateFeed();
-        if (mountedRef.current) {
-          setPortfolio(EMPTY_PORTFOLIO);
-          setStatus('disconnected');
-        }
-        throw new Error(describeError(caught, 'Failed to load account'));
-      }
-    },
-    [fetchPortfolio, loadAccountInfo]
-  );
-
-  const disconnect = useCallback(async () => {
-    await clearCredentials();
-    clearAccountInfoCache();
-    restartPrivateFeed();
-    if (!mountedRef.current) return;
-    setPortfolio(EMPTY_PORTFOLIO);
-    setAccountInfo(null);
-    setError(null);
-    setLastUpdated(null);
-    setStatus('disconnected');
-  }, []);
-
   const refresh = useCallback(() => {
     setStatus((current) => (current === 'disconnected' ? current : 'loading'));
     void load();
@@ -161,8 +117,6 @@ export function useAccount(): AccountState {
     accountInfo,
     error,
     lastUpdated,
-    connect,
-    disconnect,
     refresh,
   };
 }

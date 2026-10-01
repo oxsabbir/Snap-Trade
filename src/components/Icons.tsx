@@ -149,6 +149,20 @@ export function EyeOffIcon({ size = 18, color = colors.textMuted }: IconProps) {
   );
 }
 
+export function CheckIcon({ size = 20, color = colors.accent }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="m5 12.5 4.5 4.5L19 7.5"
+        stroke={color}
+        strokeWidth={2}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Svg>
+  );
+}
+
 export function PlusIcon({ size = 14, color = colors.textMuted }: IconProps) {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">

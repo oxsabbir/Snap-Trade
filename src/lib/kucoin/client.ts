@@ -1,10 +1,11 @@
 import { hmac } from '@noble/hashes/hmac.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 
-import { loadCredentials } from './credentials';
+import { getCachedCredentials } from './credentials';
+import type { KuCoinCredentials } from './types';
 
 const BASE_URL = 'https://api.kucoin.com';
-const API_VERSION = '3';
+const API_VERSION = '2';
 const REQUEST_TIMEOUT_MS = 15_000;
 
 const B64_ALPHABET =
@@ -39,6 +40,8 @@ export type RequestOptions = {
   body?: Record<string, unknown>;
   /** Attach KC-API-* headers. Requires credentials. */
   signed?: boolean;
+  /** Credentials for one signed request, used to verify a new key before saving it. */
+  credentials?: KuCoinCredentials;
   /**
    * Overrides the default timeout. The reference payloads are the largest responses the app asks
    * for and need noticeably longer than a ticker or an order book.
@@ -69,7 +72,7 @@ export class KuCoinApiError extends Error {
 }
 
 export async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  const { method = 'GET', query, body, signed = false } = options;
+  const { method = 'GET', query, body, signed = false, credentials: suppliedCredentials } = options;
   const requestPath = path.startsWith('/api') ? path : `/api/v1${path}`;
   const queryString = buildQuery(query);
   const bodyString = body ? JSON.stringify(body) : '';
@@ -78,7 +81,7 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
 
   if (signed) {
-    const credentials = await loadCredentials();
+    const credentials = suppliedCredentials ?? getCachedCredentials();
     if (!credentials) {
       throw new KuCoinApiError('NO_CREDENTIALS', 'Connect a KuCoin API key to use this endpoint.');
     }

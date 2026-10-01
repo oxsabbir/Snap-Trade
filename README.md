@@ -1,10 +1,10 @@
-# kucoin
+# SnapTrade
 
-A KuCoin **spot markets** app. Three tabs: a searchable, filterable list of every trading
-pair, a per-pair chart with live streaming prices, pinch-to-zoom and a coin info panel, and a
-read-only account view with balances.
+A KuCoin **spot trading** app. Three tabs: a searchable, filterable list of every trading
+pair, a per-pair chart with live streaming prices, pinch-to-zoom and a coin info panel, and an
+account view with balances and connection controls.
 
-Dark theme, no orders. Market data is public; balances use the user's own read-only API key.
+Market data is public; private account and trading requests use the user's own API key.
 
 ## Stack
 
@@ -19,7 +19,7 @@ Dark theme, no orders. Market data is public; balances use the user's own read-o
 | Storage | `expo-secure-store` for credentials, AsyncStorage for preferences |
 | Native dirs | none — Continuous Native Generation, never hand-edit `ios/`/`android/` |
 
-The KuCoin key is **entered at runtime and stored in the device keystore**. Nothing secret is
+KuCoin credentials are **entered at runtime and stored in the device keystore**. Nothing secret is
 read from `.env` or baked into the bundle — see "Account and credentials" below.
 
 ## Commands
@@ -40,7 +40,8 @@ Both `typecheck` and `lint` pass clean as of the last commit.
 app.config.ts          merges app.json + scheme + typedRoutes. No secrets.
 app.json               static Expo config (name, icon, dark UI, plugins)
 src/app/               ROUTES — every file here is a screen
-  _layout.tsx          SafeAreaProvider + ActiveCoinProvider + Stack
+  _layout.tsx          credential bootstrap/route gate + SafeAreaProvider + Stack
+  onboarding.tsx       first-launch welcome and secure API key setup
   (tabs)/_layout.tsx   Tabs navigator — Home / Trade / Account
   (tabs)/index.tsx     Home: markets list, search, favorites, recent searches
   (tabs)/trade.tsx     Trade: chart for the currently selected coin
@@ -503,8 +504,8 @@ These have all cost time. Don't regress them.
   `process.env`, transport builders) and does not bundle into Metro. The 148-line
   `client.ts` does the same job with zero dependencies. `react-native-svg` powers the chart
   for the same reason — no chart library, no Skia, no extra native module. Chart zoom and pan
-  likewise use the built-in `PanResponder` rather than `react-native-gesture-handler` or
-  Reanimated, so neither needed to be added as a direct dependency.
+  likewise use the built-in `PanResponder`; Reanimated drives only the staggered onboarding
+  transition.
 
 ## Conventions worth knowing
 
@@ -618,12 +619,13 @@ Signing details that are easy to get wrong:
 Totals deliberately do not repeat below the card: the profile card already carries the grand
 total and both wallet subtotals, so the list header shows only a holding count.
 
-`connect()` verifies before committing: it saves, tries one fetch, and on failure clears the
-key and rethrows so the form shows the error inline rather than dropping you on the error card.
+On first launch, onboarding verifies new credentials with read-only `GET /api/v1/accounts` before
+storing them in SecureStore. The signer uses an in-memory cache after the initial secure read; it
+does not access SecureStore on every request. Account controls can clear the saved key or switch
+accounts, and the key is only shown in masked form.
 
-The Account tab is read-only. The key needs the **General** permission and nothing else —
-leave Spot Trading and Withdrawal **off**. Even if this device were compromised, a
-General-only key cannot move funds. IP whitelisting is not usable here: mobile carrier IPs
+The key needs **General (read)** and **Spot Trading** permissions for balances and orders. Keep
+Transfer and Withdrawal **disabled**. IP whitelisting is not usable here: mobile carrier IPs
 change.
 
 ### Why there is no backend
@@ -633,13 +635,14 @@ infrastructure with no payoff: it holds the same secret, adds a deploy target, a
 nothing. KuCoin's own OAuth login exists but is restricted to approved brokers (you email them
 your IP list and they issue a `client_id`), so it is not a self-serve option.
 
-`.env.example` is kept only as a note for a future backend; **the app does not read it**.
+`.env.example` documents the credential policy; **the app does not read it**. No application
+source file reads the API key, secret, or passphrase from `process.env`.
 
 ## Known gaps
 
 - No tests, no test runner, no CI.
-- The Account tab is read-only and single-key. No multi-account, no order entry, no
-  deposits/withdrawals.
+- Only one API key is connected at a time; account switching replaces the saved key rather than
+  maintaining a multi-account list. Deposits and withdrawals are not supported.
 - The account display name is a local label, not a KuCoin identity — the API exposes no username.
 - No 24h portfolio change. Total value is a spot snapshot; it would need a cost-basis or
   historical equity series to show a percentage.

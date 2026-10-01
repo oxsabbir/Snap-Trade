@@ -12,6 +12,7 @@ const KEY = 'kucoin.credentials.v1';
 const isSupported = Platform.OS !== 'web';
 
 let cache: KuCoinCredentials | null | undefined;
+let loadPromise: Promise<KuCoinCredentials | null> | null = null;
 
 function parse(raw: string | null): KuCoinCredentials | null {
   if (!raw) return null;
@@ -19,7 +20,14 @@ function parse(raw: string | null): KuCoinCredentials | null {
     const value: unknown = JSON.parse(raw);
     if (!value || typeof value !== 'object') return null;
     const candidate = value as Partial<KuCoinCredentials>;
-    if (!candidate.apiKey || !candidate.apiSecret || !candidate.apiPassphrase) return null;
+    if (
+      typeof candidate.apiKey !== 'string' ||
+      typeof candidate.apiSecret !== 'string' ||
+      typeof candidate.apiPassphrase !== 'string' ||
+      !candidate.apiKey ||
+      !candidate.apiSecret ||
+      !candidate.apiPassphrase
+    ) return null;
     return {
       apiKey: candidate.apiKey,
       apiSecret: candidate.apiSecret,
@@ -32,10 +40,21 @@ function parse(raw: string | null): KuCoinCredentials | null {
 
 export async function loadCredentials(): Promise<KuCoinCredentials | null> {
   if (cache !== undefined) return cache;
-  cache = isSupported
-    ? parse(await SecureStore.getItemAsync(KEY).catch(() => null))
-    : null;
-  return cache;
+  if (!loadPromise) {
+    loadPromise = (async () => {
+      cache = isSupported
+        ? parse(await SecureStore.getItemAsync(KEY).catch(() => null))
+        : null;
+      return cache;
+    })().finally(() => {
+      loadPromise = null;
+    });
+  }
+  return loadPromise;
+}
+
+export function getCachedCredentials(): KuCoinCredentials | null {
+  return cache ?? null;
 }
 
 export async function saveCredentials(credentials: KuCoinCredentials): Promise<void> {
@@ -47,8 +66,7 @@ export async function saveCredentials(credentials: KuCoinCredentials): Promise<v
 }
 
 export async function clearCredentials(): Promise<void> {
-  if (isSupported) {
-    await SecureStore.deleteItemAsync(KEY).catch(() => undefined);
-  }
+  if (isSupported) await SecureStore.deleteItemAsync(KEY);
   cache = null;
+  loadPromise = null;
 }

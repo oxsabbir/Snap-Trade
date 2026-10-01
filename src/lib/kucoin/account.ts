@@ -1,5 +1,5 @@
 import { request } from './client';
-import type { KuCoinAccount } from './types';
+import type { KuCoinAccount, KuCoinCredentials } from './types';
 
 /**
  * `GET /api/v1/accounts`. The optional `type` is a KuCoin account kind (`main`, `trade`,
@@ -8,6 +8,11 @@ import type { KuCoinAccount } from './types';
  */
 export async function fetchAccounts(type?: string): Promise<KuCoinAccount[]> {
   return request<KuCoinAccount[]>('/accounts', { signed: true, query: type ? { type } : undefined });
+}
+
+/** Verifies new credentials with a read-only endpoint before they are persisted. */
+export async function validateCredentials(credentials: KuCoinCredentials): Promise<void> {
+  await request<KuCoinAccount[]>('/accounts', { signed: true, credentials });
 }
 
 export { buildPortfolio } from './portfolio';

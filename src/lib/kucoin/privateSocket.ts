@@ -15,7 +15,7 @@
  *   /account/balance           subject "account.balance"   privateChannel "true"
  */
 import { request } from '@/lib/kucoin/client';
-import { loadCredentials } from '@/lib/kucoin/credentials';
+import { getCachedCredentials } from '@/lib/kucoin/credentials';
 
 const MAX_BACKOFF_MS = 15_000;
 const BULLET_TTL_MS = 60 * 60 * 1000; // tokens last 24h; re-fetch hourly to stay well inside it
@@ -107,7 +107,7 @@ export function invalidatePrivateBullet(): void {
 
 /** True when an API key is available, so callers can avoid opening a socket that cannot auth. */
 export async function hasCredentials(): Promise<boolean> {
-  return (await loadCredentials()) !== null;
+  return getCachedCredentials() !== null;
 }
 
 /**
