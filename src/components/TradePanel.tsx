@@ -337,39 +337,6 @@ function TradePanelBase({
   };
 
   /**
-   * Determines which chip (if any) should appear active based on the current Amount value.
-   * Returns the matching percentage or null if no chip matches exactly.
-   */
-  const getActiveChip = useCallback((): number | null => {
-    if (!rules || !hasPrice || !hasBalance || size === "") return null;
-    const filled = fillByPercent(side, percent!, rules, price, {
-      base: baseAvailable,
-      quote: quoteAvailable,
-    });
-    if (!filled) return null;
-    // Check if current size matches any chip's calculated size exactly
-    for (const chip of PERCENT_CHIPS) {
-      const chipFilled = fillByPercent(side, chip, rules, price, {
-        base: baseAvailable,
-        quote: quoteAvailable,
-      });
-      if (chipFilled && chipFilled.size === size) return chip;
-    }
-    return null;
-  }, [
-    rules,
-    hasPrice,
-    hasBalance,
-    size,
-    percent,
-    side,
-    rules,
-    price,
-    baseAvailable,
-    quoteAvailable,
-  ]);
-
-  /**
    * Fills Price with the best price on the book the order would trade against, and only when the
    * user asks for it.
    *
@@ -570,7 +537,9 @@ function TradePanelBase({
 
       <PercentChips
         value={percent}
-        activeChip={getActiveChip()}
+        activeChip={
+          rules && hasPrice && hasBalance && size !== "" ? percent : null
+        }
         onChange={applyPercent}
         enabled={chipEnabled}
         side={side}
