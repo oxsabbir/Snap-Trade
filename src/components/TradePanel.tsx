@@ -13,8 +13,6 @@ import {
   Text,
   TextInput,
   View,
-  type GestureResponderEvent,
-  type LayoutChangeEvent,
 } from "react-native";
 
 import { CaretDownIcon, CaretUpIcon, PlusIcon } from "@/components/Icons";
@@ -30,7 +28,6 @@ import {
 import { validateLimitOrder } from "@/lib/kucoin/orderRules";
 import type { OrderSide } from "@/lib/kucoin/types";
 import {
-  FILL_STOPS,
   fillByPercent,
   isPositive,
   maxSize,
@@ -66,6 +63,70 @@ function sanitizeAmount(text: string): string {
   if (firstDot === -1) return cleaned;
   return `${cleaned.slice(0, firstDot + 1)}${cleaned.slice(firstDot + 1).replace(/\./g, "")}`;
 }
+
+// Percentage chip stops (0%, 25%, 50%, 75%, 100%)
+const PERCENT_CHIPS = [0, 25, 50, 75, 100] as const;
+
+interface PercentChipsProps {
+  value: FillPercent | null;
+  activeChip: number | null;
+  onChange: (value: FillPercent) => void;
+  enabled: boolean;
+  side: OrderSide;
+}
+
+function PercentChips({
+  value,
+  activeChip,
+  onChange,
+  enabled,
+  side,
+}: PercentChipsProps) {
+  if (!enabled) {
+    return (
+      <View style={styles.chipRow}>
+        {PERCENT_CHIPS.map((chip) => (
+          <Pressable
+            key={chip}
+            disabled
+            style={[styles.chip, styles.chipDisabled]}
+          >
+            <Text style={styles.chipTextDisabled}>{chip}%</Text>
+          </Pressable>
+        ))}
+      </View>
+    );
+  }
+
+  const accentColor = side === "buy" ? colors.up : colors.down;
+
+  return (
+    <View style={styles.chipRow}>
+      {PERCENT_CHIPS.map((chip) => {
+        const isActive = activeChip === chip;
+        return (
+          <Pressable
+            key={chip}
+            onPress={() => onChange(chip)}
+            style={[
+              styles.chip,
+              isActive ? styles.chipActive : styles.chipInactive,
+              isActive && { backgroundColor: accentColor },
+            ]}
+          >
+            <Text
+              style={[
+                styles.chipText,
+                isActive ? styles.chipTextActive : styles.chipTextInactive,
+              ]}
+            >
+              {chip}%
+            </Text>
+          </Pressable>
+        )})}
+      </View>
+    );
+  }
 
 function TradePanelBase({
   symbol,
@@ -103,9 +164,8 @@ function TradePanelBase({
   const [isFetchingBestPrice, setIsFetchingBestPrice] = useState(false);
   const [inlineError, setInlineError] = useState<string | null>(null);
   const [toast, setToast] = useState<Toast | null>(null);
-  const [trackWidth, setTrackWidth] = useState(0);
 
-  /** Drops the slider position, so the next touch on a stop recomputes even if it is the same stop. */
+  /** Drops the selected percentage, so the next tap on a chip recomputes even if it is the same chip. */
   const clearPercent = useCallback(() => {
     appliedStopRef.current = null;
     setPercent(null);
@@ -175,14 +235,14 @@ function TradePanelBase({
    */
   const hasPrice = isPositive(price);
   const hasBalance = isPositive(availableForSide);
-  const sliderBlocker = !rules
+  const chipBlocker = !rules
     ? "Loading pair rules"
     : !hasBalance
       ? `No ${availableCurrency} available to ${side === "buy" ? "buy" : "sell"}`
       : !hasPrice
         ? "Enter a price first"
         : null;
-  const sliderEnabled = sliderBlocker === null && !isSubmitting;
+  const chipEnabled = chipBlocker === null && !isSubmitting;
 
   const applyPercent = (next: FillPercent) => {
     // `price` and `symbol` and `side` are part of the key, so editing any of them, switching pairs or
@@ -200,18 +260,6 @@ function TradePanelBase({
     if (!filled) return;
     setSize(filled.size);
     setTotal(filled.total);
-  };
-
-  const onTrackLayout = (event: LayoutChangeEvent) =>
-    setTrackWidth(event.nativeEvent.layout.width);
-
-  const onTrackTouch = (event: GestureResponderEvent) => {
-    if (!sliderEnabled || trackWidth <= 0) return;
-    const ratio = Math.min(
-      1,
-      Math.max(0, event.nativeEvent.locationX / trackWidth),
-    );
-    applyPercent(FILL_STOPS[Math.round(ratio * (FILL_STOPS.length - 1))]!);
   };
 
   const onPriceChange = (text: string) => {
@@ -270,6 +318,28 @@ function TradePanelBase({
     clearPercent();
     setInlineError(null);
   };
+
+  /**
+   * Determines which chip (if any) should appear active based on the current Amount value.
+   * Returns the matching percentage or null if no chip matches exactly.
+   */
+  const getActiveChip = useCallback((): number | null => {
+    if (!rules || !hasPrice || !hasBalance || size === "") return null;
+    const filled = fillByPercent(side, percent!, rules, price, {
+      base: baseAvailable,
+      quote: quoteAvailable,
+    });
+    if (!filled) return null;
+    // Check if current size matches any chip's calculated size exactly
+    for (const chip of PERCENT_CHIPS) {
+      const chipFilled = fillByPercent(side, chip, rules, price, {
+        base: baseAvailable,
+        quote: quoteAvailable,
+      });
+      if (chipFilled && chipFilled.size === size) return chip;
+    }
+    return null;
+  }, [rules, hasPrice, hasBalance, size, percent, side, rules, price, baseAvailable, quoteAvailable]);
 
   /**
    * Fills Price with the best price on the book the order would trade against, and only when the
@@ -459,46 +529,13 @@ function TradePanelBase({
         onStepDown={() => onStep("size", -1)}
       />
 
-      <View style={styles.sliderWrapper}>
-        <View
-          style={[styles.slider, !sliderEnabled && styles.sliderDisabled]}
-          onLayout={onTrackLayout}
-          // Declining the gesture outright, rather than accepting it and ignoring it, lets the
-          // enclosing ScrollView pick the touch up and scroll instead of the drag feeling dead.
-          onStartShouldSetResponder={() => sliderEnabled}
-          onMoveShouldSetResponder={() => sliderEnabled}
-          onResponderGrant={onTrackTouch}
-          onResponderMove={onTrackTouch}
-          // The panel sits inside a ScrollView, which will otherwise ask to take the gesture over
-          // mid-drag. Refusing makes the drag predictable and stops the two from fighting, which
-          // read as lag. Only while the drag is live, so a disabled slider stays scrollable past.
-          onResponderTerminationRequest={() => sliderEnabled}
-          // Larger than the 8px track so the dots resting on the two ends, which hang half outside
-          // it, are still fully tappable. A touch out past either end reports a locationX below 0 or
-          // above the width, which `onTrackTouch` clamps to the two ends.
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          accessibilityRole="adjustable"
-          accessibilityLabel="Amount percentage of available balance"
-          accessibilityState={{ disabled: !sliderEnabled }}
-          accessibilityValue={{ min: 0, max: 100, now: percent ?? 0 }}
-        >
-          <View style={styles.sliderTrack} />
-          <View style={[styles.sliderFill, { width: `${percent ?? 0}%` }]} />
-          {FILL_STOPS.map((stop) => {
-            const active = percent !== null && stop <= percent;
-            return (
-              <View
-                key={stop}
-                style={[
-                  styles.dot,
-                  { left: `${stop}%` },
-                  active && styles.dotActive,
-                ]}
-              />
-            );
-          })}
-        </View>
-      </View>
+      <PercentChips
+        value={percent}
+        activeChip={getActiveChip()}
+        onChange={applyPercent}
+        enabled={chipEnabled}
+        side={side}
+      />
 
       <AmountField
         label="Total"
@@ -750,56 +787,42 @@ const styles = StyleSheet.create({
   stepper: {
     paddingHorizontal: 2,
   },
-  sliderWrapper: {
+  chipRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
     marginTop: 12,
     marginBottom: 12,
-    // The only inset. The track, the fill, the dots and the tap maths all share the width measured
-    // inside it, so a touch lands exactly on the dot that was pressed.
-    paddingHorizontal: 12,
+    gap: spacing.xs,
   },
-  slider: {
-    height: 12,
+  chip: {
+    flex: 1,
+    height: 36,
+    borderRadius: radius.sm,
+    alignItems: "center",
     justifyContent: "center",
   },
-  sliderDisabled: {
+  chipInactive: {
+    backgroundColor: colors.surfaceAlt,
+  },
+  chipActive: {
+    // backgroundColor set dynamically based on side (colors.up / colors.down)
+  },
+  chipDisabled: {
     opacity: 0.4,
   },
-  sliderHint: {
+  chipText: {
+    fontSize: 12,
+    fontWeight: "600",
+    fontVariant: ["tabular-nums"],
+  },
+  chipTextInactive: {
+    color: colors.textMuted,
+  },
+  chipTextActive: {
+    color: "#FFFFFF",
+  },
+  chipTextDisabled: {
     color: colors.textFaint,
-    fontSize: 10,
-    textAlign: "center",
-    paddingTop: 6,
-  },
-  sliderTrack: {
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: colors.surfaceAlt,
-  },
-  sliderFill: {
-    position: "absolute",
-    left: 0,
-    top: "50%",
-    marginTop: -4,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: colors.accent,
-  },
-  dot: {
-    position: "absolute",
-    width: 16,
-    height: 16,
-    // Centred on its own stop, so the dot's middle is the position the fill grows to.
-    top: "50%",
-    marginTop: -8,
-    marginLeft: -8,
-    borderRadius: 8,
-    backgroundColor: colors.surfaceAlt,
-    borderWidth: 1.5,
-    borderColor: colors.border,
-  },
-  dotActive: {
-    backgroundColor: colors.accent,
-    borderColor: colors.accent,
   },
   row: {
     flexDirection: "row",
