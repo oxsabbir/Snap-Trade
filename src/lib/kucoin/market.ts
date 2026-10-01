@@ -30,16 +30,29 @@ let currenciesCache: Promise<Currency[]> | null = null;
  */
 const REFERENCE_TIMEOUT_MS = 30_000;
 
+/**
+ * A failed reference request must not be remembered. Caching the rejected promise would pin the
+ * failure for the rest of the session and pair names would never hydrate, even though the rows
+ * kept re-fetching. Evicting on failure means the next attempt is a real retry.
+ */
 export function fetchSymbols(): Promise<SymbolInfo[]> {
   if (!symbolsCache) {
-    symbolsCache = request<SymbolInfo[]>('/symbols', { timeoutMs: REFERENCE_TIMEOUT_MS });
+    const pending = request<SymbolInfo[]>('/symbols', { timeoutMs: REFERENCE_TIMEOUT_MS });
+    symbolsCache = pending;
+    pending.catch(() => {
+      if (symbolsCache === pending) symbolsCache = null;
+    });
   }
   return symbolsCache;
 }
 
 export function fetchCurrencies(): Promise<Currency[]> {
   if (!currenciesCache) {
-    currenciesCache = request<Currency[]>('/currencies', { timeoutMs: REFERENCE_TIMEOUT_MS });
+    const pending = request<Currency[]>('/currencies', { timeoutMs: REFERENCE_TIMEOUT_MS });
+    currenciesCache = pending;
+    pending.catch(() => {
+      if (currenciesCache === pending) currenciesCache = null;
+    });
   }
   return currenciesCache;
 }

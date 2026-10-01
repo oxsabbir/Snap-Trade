@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
 
 import {
@@ -31,7 +31,6 @@ export function useSpotMarkets(enabled = true): SpotMarketsState {
   const mountedRef = useRef(true);
   const inFlightRef = useRef<Promise<void> | null>(null);
   const lastLoadedAtRef = useRef(0);
-  const initialRetryCountRef = useRef(0);
   const isInitialLoadRef = useRef(true);
 
   const [markets, setMarkets] = useState<SpotMarket[]>([]);
@@ -85,54 +84,49 @@ export function useSpotMarkets(enabled = true): SpotMarketsState {
    * which surfaced as a failed load with no rows at all. A load already in flight is joined instead
    * of repeated.
    */
-  const loadRef = useRef<() => Promise<void>>(null);
+  const load = useCallback(async () => {
+    const pending = inFlightRef.current;
+    if (pending) return pending;
 
-  useLayoutEffect(() => {
-    loadRef.current = async () => {
-      const pending = inFlightRef.current;
-      if (pending) return pending;
-
-      const run = (async () => {
-        try {
-          await applyTickers();
-        } catch (caught) {
-          if (mountedRef.current) {
-            const errorMessage = caught instanceof Error ? caught.message : 'Failed to load markets';
-            setError(errorMessage);
-
-            if (isInitialLoadRef.current && initialRetryCountRef.current < MAX_INITIAL_RETRIES) {
-              initialRetryCountRef.current += 1;
-              const delay = INITIAL_RETRY_DELAY_MS * Math.pow(2, initialRetryCountRef.current - 1);
-              setTimeout(() => {
-                if (mountedRef.current) {
-                  inFlightRef.current = null;
-                  void loadRef.current?.();
-                }
-              }, delay);
-              return;
-            }
-
-            isInitialLoadRef.current = false;
+    const run = (async () => {
+      let lastError: unknown;
+      try {
+        // A cold connection can sit idle long enough to trip the abort and then succeed at once on a
+        // second attempt, so the very first load gets one more go. Retrying in a loop keeps this
+        // inside the single in-flight promise, which a rescheduling timer could not.
+        const attempts = isInitialLoadRef.current ? MAX_INITIAL_RETRIES + 1 : 1;
+        for (let attempt = 1; attempt <= attempts; attempt += 1) {
+          try {
+            await applyTickers();
+            lastError = undefined;
+            break;
+          } catch (caught) {
+            lastError = caught;
+            if (attempt === attempts) break;
+            await new Promise((resolve) => setTimeout(resolve, INITIAL_RETRY_DELAY_MS));
+            if (!mountedRef.current) return;
           }
-        } finally {
-          lastLoadedAtRef.current = Date.now();
-          inFlightRef.current = null;
-          if (mountedRef.current) setIsLoading(false);
         }
-      })();
 
-      inFlightRef.current = run;
-      return run;
-    };
+        if (lastError !== undefined && mountedRef.current) {
+          setError(lastError instanceof Error ? lastError.message : 'Failed to load markets');
+        }
+        isInitialLoadRef.current = false;
+      } finally {
+        lastLoadedAtRef.current = Date.now();
+        inFlightRef.current = null;
+        if (mountedRef.current) setIsLoading(false);
+      }
+    })();
+
+    inFlightRef.current = run;
+    return run;
   }, [applyTickers]);
-
-  const load = useCallback(() => loadRef.current?.() ?? Promise.resolve(), []);
 
   // Load once on mount whether or not this screen currently has focus, so a tab the user has not
   // opened yet already holds data by the time they reach it.
   useEffect(() => {
     mountedRef.current = true;
-    initialRetryCountRef.current = 0;
     isInitialLoadRef.current = true;
     void load();
     return () => {
@@ -142,7 +136,7 @@ export function useSpotMarkets(enabled = true): SpotMarketsState {
 
   // The reference payloads only add pair names and exact price increments, so they are fetched once
   // behind the rows rather than in front of them, and a failure here degrades the list instead of
-  // emptying it.
+  // emptying it. A failure is not fatal: the poll below keeps trying until they land.
   useEffect(() => {
     void loadReference().catch(() => {});
   }, [loadReference]);
@@ -157,7 +151,11 @@ export function useSpotMarkets(enabled = true): SpotMarketsState {
     if (Date.now() - lastLoadedAtRef.current >= POLL_INTERVAL_MS) void load();
 
     const timer = setInterval(() => {
-      if (AppState.currentState === 'active') void load();
+      if (AppState.currentState !== 'active') return;
+      void load();
+      // Pair names and exact price increments still missing means the reference fetch failed or
+      // timed out. `loadReference` is a no-op once they land, so this costs nothing in steady state.
+      if (!symbolsRef.current || !baseNamesRef.current) void loadReference().catch(() => {});
     }, POLL_INTERVAL_MS);
 
     const subscription = AppState.addEventListener('change', (state: AppStateStatus) => {
@@ -168,7 +166,7 @@ export function useSpotMarkets(enabled = true): SpotMarketsState {
       clearInterval(timer);
       subscription.remove();
     };
-  }, [enabled, load]);
+  }, [enabled, load, loadReference]);
 
   /**
    * Only the tickers are re-requested. The reference payloads are deliberately cached for the whole

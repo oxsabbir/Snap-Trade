@@ -2,7 +2,10 @@ import { memo, useCallback, useState } from "react";
 import { StyleSheet, View } from "react-native";
 
 import { OrderBook } from "@/components/OrderBook";
-import { TradePanel, type ExternalPriceSelection } from "@/components/TradePanel";
+import {
+  TradePanel,
+  type ExternalPriceSelection,
+} from "@/components/TradePanel";
 import { colors, spacing } from "@/theme";
 
 type Props = {
@@ -30,7 +33,9 @@ type Props = {
  * list nested inside a list, competing for the same gesture.
  */
 export const TradeScreen = memo(function TradeScreen({ symbol }: Props) {
-  const [selection, setSelection] = useState<ExternalPriceSelection | null>(null);
+  const [selection, setSelection] = useState<ExternalPriceSelection | null>(
+    null,
+  );
 
   const handlePriceSelect = useCallback((value: string) => {
     // A fresh id each tap, so tapping the same row twice still refills the field.
@@ -69,12 +74,12 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: "row",
     alignItems: "stretch",
-    gap: spacing.sm,
+    gap: spacing.lg,
   },
   book: {
     flex: 4,
   },
   panel: {
-    flex: 6,
+    flex: 5,
   },
 });

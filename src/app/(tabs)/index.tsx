@@ -32,6 +32,16 @@ import { formatTime } from "@/utils/format";
 const POPULAR_COUNT = 10;
 /** Module level so the list always sees the same extractor and never rebuilds its key map. */
 const keyExtractor = (market: SpotMarket) => market.symbol;
+/** Stable fallback so an omitted `favorites` prop cannot hand the row callback a fresh Set each render. */
+const NO_FAVORITES: ReadonlySet<string> = new Set<string>();
+
+/**
+ * How much of the list is allowed to exist as real mounted rows at once. The array still holds
+ * every pair, because sorting and search need the full set, but only this much is handed to the
+ * native view hierarchy.
+ */
+const INITIAL_ROWS = 20;
+const ROWS_PER_BATCH = 20;
 
 const MarketsList = memo(function MarketsList({
   visibleMarkets,
@@ -45,7 +55,8 @@ const MarketsList = memo(function MarketsList({
   onTabChange,
   favoritesCount,
   popularSymbols,
-  favorites = new Set(),
+  onPopularSelect,
+  favorites = NO_FAVORITES,
   toggleFavorite,
 }: {
   visibleMarkets: SpotMarket[];
@@ -59,7 +70,8 @@ const MarketsList = memo(function MarketsList({
   onTabChange: (tab: TabValue) => void;
   favoritesCount: number;
   popularSymbols: string[];
-  favorites?: Set<string>;
+  onPopularSelect: (symbol: string) => void;
+  favorites?: ReadonlySet<string>;
   toggleFavorite: (symbol: string) => void;
 }) {
   // Stable renderItem with isFavorite computed from passed favorites Set
@@ -81,7 +93,7 @@ const MarketsList = memo(function MarketsList({
       </View>
 
       {activeQuery.length === 0 && !isLoading ? (
-        <PopularSearches symbols={popularSymbols} onSelect={() => {}} />
+        <PopularSearches symbols={popularSymbols} onSelect={onPopularSelect} />
       ) : null}
 
       <FlatList
@@ -109,14 +121,10 @@ const MarketsList = memo(function MarketsList({
           )
         }
         ListFooterComponent={<View style={styles.footer} />}
-        initialNumToRender={20}
-        maxToRenderPerBatch={16}
+        initialNumToRender={INITIAL_ROWS}
+        maxToRenderPerBatch={ROWS_PER_BATCH}
         windowSize={9}
-        getItemLayout={(data, index) => ({
-          length: 72,
-          offset: 72 * index,
-          index,
-        })}
+        updateCellsBatchingPeriod={40}
       />
     </>
   );
@@ -251,6 +259,7 @@ export default function MarketsScreen() {
           onTabChange={setTab}
           favoritesCount={favorites.size}
           popularSymbols={popularSymbols}
+          onPopularSelect={commitSearch}
           favorites={favorites}
           toggleFavorite={toggleFavorite}
         />

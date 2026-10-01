@@ -1,4 +1,4 @@
-import { memo, useEffect, useState, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import {
   ActivityIndicator,
   Pressable,
@@ -81,11 +81,27 @@ function TradePanelBase({
   const [size, setSize] = useState("");
   const [total, setTotal] = useState("");
   const [percent, setPercent] = useState<FillPercent | null>(null);
+  /**
+   * The stop last handed to the fill math, keyed by pair and side so a move to another market or to
+   * the other side of the book is never mistaken for one already applied.
+   *
+   * A drag emits a touch move per frame, but it only ever lands on one of five stops, so without
+   * this guard the decimal arithmetic below would run on every one of those frames and discard
+   * all but the last result. Kept in a ref because moves arrive faster than React commits, so
+   * `percent` state would still read stale and the guard would never trip.
+   */
+  const appliedStopRef = useRef<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isFetchingBestPrice, setIsFetchingBestPrice] = useState(false);
   const [inlineError, setInlineError] = useState<string | null>(null);
   const [toast, setToast] = useState<Toast | null>(null);
   const [trackWidth, setTrackWidth] = useState(0);
+
+  /** Drops the slider position, so the next touch on a stop recomputes even if it is the same stop. */
+  const clearPercent = useCallback(() => {
+    appliedStopRef.current = null;
+    setPercent(null);
+  }, []);
 
   // Reset on a pair change during render so the form never carries the previous pair's amounts.
   const [activeSymbol, setActiveSymbol] = useState(symbol);
@@ -142,6 +158,11 @@ function TradePanelBase({
   };
 
   const applyPercent = (next: FillPercent) => {
+    // `price` and `symbol` and `side` are part of the key, so editing any of them, switching pairs or
+    // flipping the side all count as a different fill and are never blocked by the guard below.
+    const key = `${symbol}|${side}|${price}|${next}`;
+    if (appliedStopRef.current === key) return;
+    appliedStopRef.current = key;
     setPercent(next);
     setInlineError(null);
     if (!rules) return;
@@ -169,7 +190,7 @@ function TradePanelBase({
   const onPriceChange = (text: string) => {
     const clean = sanitizeAmount(text);
     setPrice(clean);
-    setPercent(null);
+    clearPercent();
     setInlineError(null);
     syncTotal(clean, size);
   };
@@ -177,7 +198,7 @@ function TradePanelBase({
   const onSizeChange = (text: string) => {
     const clean = sanitizeAmount(text);
     setSize(clean);
-    setPercent(null);
+    clearPercent();
     setInlineError(null);
     syncTotal(price, clean);
   };
@@ -185,7 +206,7 @@ function TradePanelBase({
   const onTotalChange = (text: string) => {
     const clean = sanitizeAmount(text);
     setTotal(clean);
-    setPercent(null);
+    clearPercent();
     setInlineError(null);
     if (!clean) {
       setSize("");
@@ -197,7 +218,7 @@ function TradePanelBase({
 
   const onStep = (field: "price" | "size" | "total", direction: 1 | -1) => {
     if (!rules) return;
-    setPercent(null);
+    clearPercent();
     setInlineError(null);
     if (field === "price") {
       const next = stepAmount(price, rules.priceIncrement, direction);
@@ -219,7 +240,7 @@ function TradePanelBase({
 
   const switchSide = (next: OrderSide) => {
     setSide(next);
-    setPercent(null);
+    clearPercent();
     setInlineError(null);
   };
 
@@ -256,7 +277,7 @@ function TradePanelBase({
         return;
       }
       setPrice(next);
-      setPercent(null);
+      clearPercent();
       syncTotal(next, size);
     } catch (caught) {
       setInlineError(describeError(caught, "Could not load the best price."));
@@ -315,7 +336,7 @@ function TradePanelBase({
       });
       setSize("");
       setTotal("");
-      setPercent(null);
+      clearPercent();
     } catch (caught) {
       setToast({
         tone: "error",
@@ -419,27 +440,35 @@ function TradePanelBase({
           onMoveShouldSetResponder={() => true}
           onResponderGrant={onTrackTouch}
           onResponderMove={onTrackTouch}
+          // The panel sits inside a ScrollView, which will otherwise ask to take the gesture over
+          // mid-drag. Refusing makes the drag predictable and stops the two from fighting, which
+          // read as lag.
+          onResponderTerminationRequest={() => false}
+          // Larger than the 8px track so the dots resting on the two ends, which hang half outside
+          // it, are still fully tappable. A touch out past either end reports a locationX below 0 or
+          // above the width, which `onTrackTouch` clamps to the two ends.
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           accessibilityRole="adjustable"
           accessibilityLabel="Amount percentage of available balance"
           accessibilityValue={{ min: 0, max: 100, now: percent ?? 0 }}
         >
-          <View style={styles.sliderInner}>
-            <View style={styles.sliderTrack} />
-            <View style={[styles.sliderFill, { width: `${percent ?? 0}%` }]} />
-            {FILL_STOPS.map((stop) => {
-              const active = percent !== null && stop <= percent;
-              return (
-                <View
-                  key={stop}
-                  style={[
-                    styles.dot,
-                    { left: `${stop}%` },
-                    active && styles.dotActive,
-                  ]}
-                />
-              );
-            })}
-          </View>
+          <View style={styles.sliderTrack} />
+          <View
+            style={[styles.sliderFill, { width: `${percent ?? 0}%` }]}
+          />
+          {FILL_STOPS.map((stop) => {
+            const active = percent !== null && stop <= percent;
+            return (
+              <View
+                key={stop}
+                style={[
+                  styles.dot,
+                  { left: `${stop}%` },
+                  active && styles.dotActive,
+                ]}
+              />
+            );
+          })}
         </View>
       </View>
 
@@ -696,26 +725,24 @@ const styles = StyleSheet.create({
   sliderWrapper: {
     marginTop: 12,
     marginBottom: 12,
+    // The only inset. The track, the fill, the dots and the tap maths all share the width measured
+    // inside it, so a touch lands exactly on the dot that was pressed.
+    paddingHorizontal: 12,
   },
   slider: {
     height: 12,
     justifyContent: "center",
-    paddingHorizontal: 5,
-  },
-  sliderInner: {
-    ...StyleSheet.absoluteFill,
-    justifyContent: "center",
-    right: 12,
-    left: 12,
   },
   sliderTrack: {
-    height: 12,
+    height: 8,
     borderRadius: 4,
     backgroundColor: colors.surfaceAlt,
   },
   sliderFill: {
     position: "absolute",
     left: 0,
+    top: "50%",
+    marginTop: -4,
     height: 8,
     borderRadius: 4,
     backgroundColor: colors.accent,
@@ -724,9 +751,11 @@ const styles = StyleSheet.create({
     position: "absolute",
     width: 16,
     height: 16,
-    marginLeft: -6,
-    marginTop: -1,
-    borderRadius: 5,
+    // Centred on its own stop, so the dot's middle is the position the fill grows to.
+    top: "50%",
+    marginTop: -8,
+    marginLeft: -8,
+    borderRadius: 8,
     backgroundColor: colors.surfaceAlt,
     borderWidth: 1.5,
     borderColor: colors.border,
