@@ -13,7 +13,7 @@ const PAD_BOTTOM = 18;
 const AXIS_WIDTH = 54;
 const TIME_LABEL_WIDTH = 44;
 const BAND_STEPS = 4;
-const GRID_LINES = 7;
+const GRID_LINES = 8;
 const X_LABELS = 4;
 const MIN_VISIBLE = 20;
 const DEFAULT_SPAN = 35;
@@ -410,20 +410,27 @@ function PriceChartComponent({ candles, mode, height = 250, decimals, defaultSpa
       const down = Skia.Color(colors.down);
       bodyUp.setColor(up);
       bodyDown.setColor(down);
+      bodyUp.setAlphaf(1);
+      bodyDown.setAlphaf(1);
       wick.setStyle(PaintStyle.Stroke);
       wick.setStrokeWidth(1);
 
       const bodyWidth = Math.max(1, step * CANDLE_BODY_RATIO);
       for (let index = start; index < to; index++) {
         const base = index * 4;
-        const open = series[base];
         const high = series[base + 1];
         const low = series[base + 2];
+        const x = xOf(index);
+        wick.setColor(series[base + 3] >= series[base] ? up : down);
+        canvas.drawLine(x, yOf(high), x, yOf(low), wick);
+      }
+
+      for (let index = start; index < to; index++) {
+        const base = index * 4;
+        const open = series[base];
         const close = series[base + 3];
         const rising = close >= open;
         const x = xOf(index);
-        wick.setColor(rising ? up : down);
-        canvas.drawLine(x, yOf(high), x, yOf(low), wick);
         const top = Math.min(yOf(open), yOf(close));
         const bottom = Math.max(yOf(open), yOf(close));
         canvas.drawRect(Skia.XYWHRect(x - bodyWidth / 2, top, bodyWidth, Math.max(bottom - top, 1)), rising ? bodyUp : bodyDown);
