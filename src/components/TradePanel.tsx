@@ -2,6 +2,7 @@ import {
   memo,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
@@ -354,7 +355,8 @@ function TradePanelBase({
     setInlineError(null);
     try {
       // Use the live Level 2 WebSocket snapshot instead of REST
-      const best = side === "buy" ? level2Snapshot.asks[0] : level2Snapshot.bids[0];
+      const best =
+        side === "buy" ? level2Snapshot.asks[0] : level2Snapshot.bids[0];
       if (!best) {
         setInlineError(
           `No ${side === "buy" ? "sell" : "buy"} orders on the book for ${symbol}.`,
