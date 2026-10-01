@@ -12,7 +12,8 @@ const PAD_TOP = 8;
 const PAD_BOTTOM = 18;
 const AXIS_WIDTH = 54;
 const TIME_LABEL_WIDTH = 44;
-const GRID_LINES = 4;
+const BAND_STEPS = 4;
+const GRID_LINES = 7;
 const X_LABELS = 4;
 const MIN_VISIBLE = 20;
 const DEFAULT_SPAN = 35;
@@ -87,7 +88,7 @@ function resolveStart(count: number, start: number, span: number): number { 'wor
 function defaultSpanFor(count: number, isLine: boolean, defaultSpan?: number): number { return resolveSpan(count, defaultSpan ?? (isLine ? count : DEFAULT_SPAN)); }
 
 function niceStep(raw: number): number { 'worklet'; if (!(raw > 0)) return 1; const magnitude = Math.pow(10, Math.floor(Math.log10(raw))); const mantissa = raw / magnitude; return (mantissa <= 1 ? 1 : mantissa <= 2 ? 2 : mantissa <= 5 ? 5 : 10) * magnitude; }
-function niceBand(min: number, max: number): Domain { 'worklet'; const span = max > min ? max - min : Math.abs(max || 1) * 0.01; const gap = niceStep(span / GRID_LINES); const lower = Math.floor(min / gap) * gap; const upper = Math.ceil(max / gap) * gap; return upper > lower ? { lower, upper } : { lower: lower - gap, upper: upper + gap }; }
+function niceBand(min: number, max: number): Domain { 'worklet'; const span = max > min ? max - min : Math.abs(max || 1) * 0.01; const gap = niceStep(span / BAND_STEPS); const lower = Math.floor(min / gap) * gap; const upper = Math.ceil(max / gap) * gap; return upper > lower ? { lower, upper } : { lower: lower - gap, upper: upper + gap }; }
 
 /**
  * Price band for one window of the series, read from the packed array rather than from
@@ -233,6 +234,54 @@ function PriceChartComponent({ candles, mode, height = 250, decimals, defaultSpa
     return PAD_TOP + (1 - (value - domain.lower) / (domain.upper - domain.lower)) * priceHeight;
   }, [domain, priceHeight]);
 
+  // Static plot grid: depends on layout and the settled window only, never on live candle values.
+  const gridPicture = useMemo(() => {
+    const canvasHeight = priceHeight + PAD_TOP + PAD_BOTTOM;
+    const recorder = Skia.PictureRecorder();
+    const canvas = recorder.beginRecording(Skia.XYWHRect(0, 0, innerWidth, canvasHeight));
+    const grid = Skia.Paint();
+    const border = Skia.Paint();
+    grid.setStyle(PaintStyle.Stroke);
+    grid.setStrokeWidth(HAIRLINE);
+    grid.setColor(Skia.Color('#FFFFFF12'));
+    border.setStyle(PaintStyle.Stroke);
+    border.setStrokeWidth(HAIRLINE);
+    border.setColor(Skia.Color('#FFFFFF1F'));
+
+    for (let line = 1; line < GRID_LINES; line++) {
+      const y = PAD_TOP + (line / GRID_LINES) * priceHeight;
+      canvas.drawLine(0, y, innerWidth, y, grid);
+    }
+
+    const visibleCount = Math.max(0, Math.min(count, settledStart + settledSpan) - settledStart);
+    if (visibleCount > 0) {
+      const step = settledSpan <= 1 ? innerWidth : innerWidth / settledSpan;
+      for (let index = 0; index < X_LABELS; index++) {
+        const at = Math.round((index / (X_LABELS - 1)) * (visibleCount - 1));
+        const candleX = settledSpan <= 1 ? innerWidth / 2 : (at + 0.5) * step;
+        const labelLeft = Math.max(candleX - TIME_LABEL_WIDTH / 2, 0);
+        const x = labelLeft + TIME_LABEL_WIDTH / 2;
+        canvas.drawLine(x, PAD_TOP, x, PAD_TOP + priceHeight, grid);
+      }
+    }
+
+    const inset = HAIRLINE / 2;
+    canvas.drawRect(
+      Skia.XYWHRect(
+        inset,
+        PAD_TOP + inset,
+        Math.max(innerWidth - HAIRLINE, 0),
+        Math.max(priceHeight - HAIRLINE, 0),
+      ),
+      border,
+    );
+    grid.dispose();
+    border.dispose();
+    const picture = recorder.finishRecordingAsPicture();
+    recorder.dispose();
+    return picture;
+  }, [count, innerWidth, priceHeight, settledSpan, settledStart]);
+
   const onLayout = useCallback((event: LayoutChangeEvent) => setWidth(event.nativeEvent.layout.width), []);
 
   const commit = useCallback(() => {
@@ -310,16 +359,6 @@ function PriceChartComponent({ candles, mode, height = 250, decimals, defaultSpa
     const to = Math.min(total, start + span);
     const closeOf = (index: number) => series[index * 4 + 3];
 
-    const grid = Skia.Paint();
-    scratch.push(grid);
-    grid.setStyle(PaintStyle.Stroke);
-    grid.setStrokeWidth(HAIRLINE);
-    grid.setColor(Skia.Color(colors.border));
-    for (let line = 0; line <= GRID_LINES; line++) {
-      const y = PAD_TOP + (line / GRID_LINES) * heightValue;
-      canvas.drawLine(0, y, widthValue, y, grid);
-    }
-
     if (lineValue.get() === 1) {
       const firstOpen = series[start * 4];
       const lastClose = closeOf(to - 1);
@@ -370,7 +409,6 @@ function PriceChartComponent({ candles, mode, height = 250, decimals, defaultSpa
       const up = Skia.Color(colors.up);
       const down = Skia.Color(colors.down);
       bodyUp.setColor(up);
-      bodyUp.setAlphaf(0.85);
       bodyDown.setColor(down);
       wick.setStyle(PaintStyle.Stroke);
       wick.setStrokeWidth(1);
@@ -482,6 +520,7 @@ function PriceChartComponent({ candles, mode, height = 250, decimals, defaultSpa
     <GestureDetector gesture={gestures}>
       <View style={{ width: innerWidth, height }}>
         <Canvas style={styles.canvas}>
+          <Picture picture={gridPicture} />
           <Picture picture={chartPicture} />
           {active ? <><Line p1={vec(activeX, PAD_TOP)} p2={vec(activeX, PAD_TOP + priceHeight)} color={colors.textMuted} strokeWidth={1} /><Line p1={vec(0, activeY)} p2={vec(innerWidth, activeY)} color={colors.textMuted} strokeWidth={1} /></> : null}
         </Canvas>
