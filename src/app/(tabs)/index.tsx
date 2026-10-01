@@ -35,7 +35,6 @@ const keyExtractor = (market: SpotMarket) => market.symbol;
 
 const MarketsList = memo(function MarketsList({
   visibleMarkets,
-  renderRow,
   keyExtractor,
   isLoading,
   isRefreshing,
@@ -46,9 +45,10 @@ const MarketsList = memo(function MarketsList({
   onTabChange,
   favoritesCount,
   popularSymbols,
+  favorites = new Set(),
+  toggleFavorite,
 }: {
   visibleMarkets: SpotMarket[];
-  renderRow: ListRenderItem<SpotMarket>;
   keyExtractor: (item: SpotMarket) => string;
   isLoading: boolean;
   isRefreshing: boolean;
@@ -59,7 +59,21 @@ const MarketsList = memo(function MarketsList({
   onTabChange: (tab: TabValue) => void;
   favoritesCount: number;
   popularSymbols: string[];
+  favorites?: Set<string>;
+  toggleFavorite: (symbol: string) => void;
 }) {
+  // Stable renderItem with isFavorite computed from passed favorites Set
+  const renderRow = useCallback<ListRenderItem<SpotMarket>>(
+    ({ item }) => (
+      <SpotRow
+        market={item}
+        isFavorite={favorites.has(item.symbol)}
+        onToggleFavorite={toggleFavorite}
+      />
+    ),
+    [favorites, toggleFavorite],
+  );
+
   return (
     <>
       <View style={styles.tabs}>
@@ -98,6 +112,11 @@ const MarketsList = memo(function MarketsList({
         initialNumToRender={20}
         maxToRenderPerBatch={16}
         windowSize={9}
+        getItemLayout={(data, index) => ({
+          length: 72,
+          offset: 72 * index,
+          index,
+        })}
       />
     </>
   );
@@ -156,19 +175,6 @@ export default function MarketsScreen() {
     }
     return picked;
   }, [sortedMarkets]);
-
-  // A new `renderItem` on every render hands the list a fresh prop and forces every visible cell to
-  // re-render, which would undo the row memo even when the market objects themselves are unchanged.
-  const renderRow = useCallback<ListRenderItem<SpotMarket>>(
-    ({ item }) => (
-      <SpotRow
-        market={item}
-        isFavorite={favorites.has(item.symbol)}
-        onToggleFavorite={toggleFavorite}
-      />
-    ),
-    [favorites, toggleFavorite],
-  );
 
   /* dismissed with keyboardDismissMode="on-drag" */
 
@@ -235,7 +241,6 @@ export default function MarketsScreen() {
       ) : (
         <MarketsList
           visibleMarkets={visibleMarkets}
-          renderRow={renderRow}
           keyExtractor={keyExtractor}
           isLoading={isLoading}
           isRefreshing={isRefreshing}
@@ -246,6 +251,8 @@ export default function MarketsScreen() {
           onTabChange={setTab}
           favoritesCount={favorites.size}
           popularSymbols={popularSymbols}
+          favorites={favorites}
+          toggleFavorite={toggleFavorite}
         />
       )}
     </SafeAreaView>
