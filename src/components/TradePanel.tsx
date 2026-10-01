@@ -1,4 +1,11 @@
-import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import {
   ActivityIndicator,
   Pressable,
@@ -25,6 +32,7 @@ import type { OrderSide } from "@/lib/kucoin/types";
 import {
   FILL_STOPS,
   fillByPercent,
+  isPositive,
   maxSize,
   prefillPrice,
   sizeFromTotal,
@@ -157,6 +165,25 @@ function TradePanelBase({
     );
   };
 
+  /**
+   * The slider spends a percentage of the balance, so it is only meaningful once the two things that
+   * percentage is measured against both exist: a price to spend at, and a balance to spend from.
+   *
+   * Without them `fillByPercent` returns nothing, so the handle used to slide while Amount and Total
+   * stayed empty, which read as a broken control rather than an incomplete one. Naming the missing
+   * piece keeps the reason visible instead of leaving a dead slider to guess at.
+   */
+  const hasPrice = isPositive(price);
+  const hasBalance = isPositive(availableForSide);
+  const sliderBlocker = !rules
+    ? "Loading pair rules"
+    : !hasBalance
+      ? `No ${availableCurrency} available to ${side === "buy" ? "buy" : "sell"}`
+      : !hasPrice
+        ? "Enter a price first"
+        : null;
+  const sliderEnabled = sliderBlocker === null && !isSubmitting;
+
   const applyPercent = (next: FillPercent) => {
     // `price` and `symbol` and `side` are part of the key, so editing any of them, switching pairs or
     // flipping the side all count as a different fill and are never blocked by the guard below.
@@ -179,7 +206,7 @@ function TradePanelBase({
     setTrackWidth(event.nativeEvent.layout.width);
 
   const onTrackTouch = (event: GestureResponderEvent) => {
-    if (trackWidth <= 0) return;
+    if (!sliderEnabled || trackWidth <= 0) return;
     const ratio = Math.min(
       1,
       Math.max(0, event.nativeEvent.locationX / trackWidth),
@@ -434,28 +461,29 @@ function TradePanelBase({
 
       <View style={styles.sliderWrapper}>
         <View
-          style={styles.slider}
+          style={[styles.slider, !sliderEnabled && styles.sliderDisabled]}
           onLayout={onTrackLayout}
-          onStartShouldSetResponder={() => true}
-          onMoveShouldSetResponder={() => true}
+          // Declining the gesture outright, rather than accepting it and ignoring it, lets the
+          // enclosing ScrollView pick the touch up and scroll instead of the drag feeling dead.
+          onStartShouldSetResponder={() => sliderEnabled}
+          onMoveShouldSetResponder={() => sliderEnabled}
           onResponderGrant={onTrackTouch}
           onResponderMove={onTrackTouch}
           // The panel sits inside a ScrollView, which will otherwise ask to take the gesture over
           // mid-drag. Refusing makes the drag predictable and stops the two from fighting, which
-          // read as lag.
-          onResponderTerminationRequest={() => false}
+          // read as lag. Only while the drag is live, so a disabled slider stays scrollable past.
+          onResponderTerminationRequest={() => sliderEnabled}
           // Larger than the 8px track so the dots resting on the two ends, which hang half outside
           // it, are still fully tappable. A touch out past either end reports a locationX below 0 or
           // above the width, which `onTrackTouch` clamps to the two ends.
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           accessibilityRole="adjustable"
           accessibilityLabel="Amount percentage of available balance"
+          accessibilityState={{ disabled: !sliderEnabled }}
           accessibilityValue={{ min: 0, max: 100, now: percent ?? 0 }}
         >
           <View style={styles.sliderTrack} />
-          <View
-            style={[styles.sliderFill, { width: `${percent ?? 0}%` }]}
-          />
+          <View style={[styles.sliderFill, { width: `${percent ?? 0}%` }]} />
           {FILL_STOPS.map((stop) => {
             const active = percent !== null && stop <= percent;
             return (
@@ -732,6 +760,15 @@ const styles = StyleSheet.create({
   slider: {
     height: 12,
     justifyContent: "center",
+  },
+  sliderDisabled: {
+    opacity: 0.4,
+  },
+  sliderHint: {
+    color: colors.textFaint,
+    fontSize: 10,
+    textAlign: "center",
+    paddingTop: 6,
   },
   sliderTrack: {
     height: 8,

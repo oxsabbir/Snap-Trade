@@ -38,7 +38,8 @@ function sizeScale(rules: SymbolInfo): number {
   return decimalsFromIncrement(rules.baseIncrement);
 }
 
-function isPositive(value: string | null | undefined): value is string {
+/** Exported so the panel can gate its controls on exactly the test the fill maths itself uses. */
+export function isPositive(value: string | null | undefined): value is string {
   return value !== null && value !== undefined && compareDecimal(value, '0') === 1;
 }
 
