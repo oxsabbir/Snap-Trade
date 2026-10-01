@@ -50,7 +50,7 @@ jobs:
           $BT/apksigner sign \
             --ks $RUNNER_TEMP/release.p12 \
             --ks-type PKCS12 \
-            --ks-alias "$KEY_ALIAS" \
+            --ks-key-alias "$KEY_ALIAS" \
             --ks-pass env:KS_PASS \
             --key-pass env:KS_PASS \
             --out app-release.apk aligned.apk
