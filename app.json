@@ -1,27 +1,25 @@
 {
   "expo": {
-    "name": "kucoin",
-    "slug": "kucoin",
+    "name": "SnapTrade",
+    "slug": "snaptrade",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
+    "icon": "./assets/branding/app-icon.png",
     "userInterfaceStyle": "dark",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.oxsabbir.kucoin"
+      "bundleIdentifier": "com.oxsabbir.snaptrade"
     },
     "android": {
-      "package": "com.oxsabbir.kucoin",
+      "package": "com.oxsabbir.snaptrade",
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/android-icon-foreground.png",
-        "backgroundImage": "./assets/android-icon-background.png",
-        "monochromeImage": "./assets/android-icon-monochrome.png"
+        "backgroundColor": "#4782FF",
+        "foregroundImage": "./assets/branding/adaptive-foreground.png"
       },
       "predictiveBackGestureEnabled": false
     },
     "web": {
-      "favicon": "./assets/favicon.png"
+      "favicon": "./assets/branding/favicon.png"
     },
     "plugins": [
       "expo-router",
@@ -29,9 +27,9 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#0B0E11",
-          "image": "./assets/splash-icon.png",
-          "imageWidth": 180,
+          "backgroundColor": "#061950",
+          "image": "./assets/branding/app-icon.png",
+          "imageWidth": 240,
           "resizeMode": "contain"
         }
       ]

@@ -7,7 +7,7 @@ const base = appJson.expo as ExpoConfig;
 export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
   ...base,
-  scheme: 'kucoin',
+  scheme: 'snaptrade',
   experiments: {
     ...base.experiments,
     typedRoutes: true,
