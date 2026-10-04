@@ -112,6 +112,7 @@ const WS_STATUS: Record<string, OrderStatus> = {
   partfilled: 'partially_filled',
   partially_filled: 'partially_filled',
   filled: 'filled',
+  done: 'filled', // fallback; fromMessage wins for terminal `update` messages
   canceled: 'cancelled',
   cancelled: 'cancelled',
 };
@@ -125,16 +126,29 @@ const WS_STATUS: Record<string, OrderStatus> = {
  *
  * The message kind is only useful for `done`, because that is the one case where the status alone
  * cannot tell a fill from a cancellation.
+ *
+ * Critical: KuCoin also sends `type: "update"` with `status: "done"` when an order finishes.
+ * This must be handled to catch filled/cancelled orders that arrive via the update channel.
  */
 function statusFromWebSocketMessage(raw: Record<string, unknown>, fullyFilled: boolean): OrderStatus | null {
   const messageType = typeof raw.type === 'string' ? raw.type.toLowerCase() : '';
-  if (messageType !== 'filled' && messageType !== 'canceled' && messageType !== 'cancelled') {
-    return null;
-  }
+  const orderStatus = typeof raw.status === 'string' ? raw.status.toLowerCase() : '';
+
+  // Handle explicit terminal message types
   if (messageType === 'filled') return 'filled';
-  // "canceled" still reports the size that had already been dealt, so a part-filled order that
-  // was then cancelled ends up `filled: false` and is a cancellation, not a fill.
-  return fullyFilled ? 'filled' : 'cancelled';
+  if (messageType === 'canceled' || messageType === 'cancelled') {
+    // "canceled" still reports the size that had already been dealt, so a part-filled order that
+    // was then cancelled ends up `filled: false` and is a cancellation, not a fill.
+    return fullyFilled ? 'filled' : 'cancelled';
+  }
+
+  // KuCoin also sends `type: "update"` with `status: "done"` when an order finishes.
+  // This is the critical path for WebSocket updates that finish an order.
+  if (messageType === 'update' && orderStatus === 'done') {
+    return fullyFilled ? 'filled' : 'cancelled';
+  }
+
+  return null;
 }
 
 export function isTerminalStatus(status: OrderStatus): boolean {
@@ -195,12 +209,18 @@ export function normalizeOrder(
     status = filled > 0 && !fullyFilled ? 'partially_filled' : 'open';
   }
 
+  // Final safety net: if status is still 'open' but the order is actually fully filled,
+  // trust the filled amount over any status field.
+  if (status === 'open' && fullyFilled) {
+    status = 'filled';
+  }
+
   return {
     orderId,
     clientOid: raw.clientOid ? String(raw.clientOid) : undefined,
     symbol: String(raw.symbol ?? ''),
     side: (raw.side ?? 'buy') as OrderSide,
-    type: ((raw.orderType ?? raw.type ?? 'limit') as 'limit' | 'market'),
+    type: ((raw.orderType ?? 'limit') as 'limit' | 'market'),
     price: String(raw.price ?? '0'),
     size,
     filledSize,

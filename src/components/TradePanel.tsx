@@ -38,6 +38,7 @@ import {
   totalFromSize,
   type FillPercent,
 } from "@/lib/trade";
+import { fetchMarketStats } from "@/lib/kucoin/market";
 import { colors, radius, spacing } from "@/theme";
 import { trackPlacedOrder } from "@/state/openOrders";
 import { formatAmount } from "@/utils/format";
@@ -168,6 +169,8 @@ function TradePanelBase({
   const [isFetchingBestPrice, setIsFetchingBestPrice] = useState(false);
   const [inlineError, setInlineError] = useState<string | null>(null);
   const [toast, setToast] = useState<Toast | null>(null);
+  // Taker fee rate for the current symbol, fetched from market stats.
+  const [takerFeeRate, setTakerFeeRate] = useState<string | null>(null);
 
   /** Drops the selected percentage, so the next tap on a chip recomputes even if it is the same chip. */
   const clearPercent = useCallback(() => {
@@ -195,6 +198,15 @@ function TradePanelBase({
     return () => clearTimeout(timer);
   }, [toast]);
 
+  // Fetch taker fee rate from market stats when symbol changes.
+  useEffect(() => {
+    let cancelled = false;
+    fetchMarketStats(symbol).then((stats) => {
+      if (!cancelled && stats.takerFeeRate) setTakerFeeRate(stats.takerFeeRate);
+    });
+    return () => { cancelled = true; };
+  }, [symbol]);
+
   const baseAvailable = available[baseCurrency] ?? "0";
   const quoteAvailable = available[quoteCurrency] ?? "0";
   const availableForSide = side === "buy" ? quoteAvailable : baseAvailable;
@@ -217,7 +229,7 @@ function TradePanelBase({
       const filled = fillByPercent(side, percent, rules, priceSelection.value, {
         base: baseAvailable,
         quote: quoteAvailable,
-      });
+      }, takerFeeRate ?? undefined);
       if (filled) {
         setSize(filled.size);
         setTotal(filled.total);
@@ -233,7 +245,7 @@ function TradePanelBase({
     ? maxSize(side, rules, price, {
         base: baseAvailable,
         quote: quoteAvailable,
-      })
+      }, takerFeeRate ?? undefined)
     : null;
   const maxLabel = side === "buy" ? "Max Buy" : "Max Sell";
 
@@ -274,7 +286,7 @@ function TradePanelBase({
     const filled = fillByPercent(side, next, rules, price, {
       base: baseAvailable,
       quote: quoteAvailable,
-    });
+    }, takerFeeRate ?? undefined);
     if (!filled) return;
     setSize(filled.size);
     setTotal(filled.total);
@@ -338,6 +350,40 @@ function TradePanelBase({
   };
 
   /**
+   * Determines which chip (if any) should appear active based on the current Amount value.
+   * Returns the matching percentage or null if no chip matches exactly.
+   * Memoized so the 6 fillByPercent calls run only when deps change, not every render.
+   */
+  const activeChip = useMemo((): number | null => {
+    if (!rules || !hasPrice || !hasBalance || size === "") return null;
+    const filled = fillByPercent(side, percent!, rules, price, {
+      base: baseAvailable,
+      quote: quoteAvailable,
+    }, takerFeeRate ?? undefined);
+    if (!filled) return null;
+    // Check if current size matches any chip's calculated size exactly
+    for (const chip of PERCENT_CHIPS) {
+      const chipFilled = fillByPercent(side, chip, rules, price, {
+        base: baseAvailable,
+        quote: quoteAvailable,
+      }, takerFeeRate ?? undefined);
+      if (chipFilled && chipFilled.size === size) return chip;
+    }
+    return null;
+  }, [
+    rules,
+    hasPrice,
+    hasBalance,
+    size,
+    percent,
+    side,
+    price,
+    baseAvailable,
+    quoteAvailable,
+    takerFeeRate,
+  ]);
+
+  /**
    * Fills Price with the best price on the book the order would trade against, and only when the
    * user asks for it.
    *
@@ -374,7 +420,7 @@ function TradePanelBase({
         const filled = fillByPercent(side, percent, rules, next, {
           base: baseAvailable,
           quote: quoteAvailable,
-        });
+        }, takerFeeRate ?? undefined);
         if (filled) {
           setSize(filled.size);
           setTotal(filled.total);
@@ -526,7 +572,7 @@ function TradePanelBase({
         }
       />
 
-      <AmountField
+<AmountField
         label="Amount"
         value={size}
         placeholder={rules ? `Minimum: ${rules.baseMinSize}` : "0"}
@@ -535,16 +581,6 @@ function TradePanelBase({
         onChangeText={onSizeChange}
         onStepUp={() => onStep("size", 1)}
         onStepDown={() => onStep("size", -1)}
-      />
-
-      <PercentChips
-        value={percent}
-        activeChip={
-          rules && hasPrice && hasBalance && size !== "" ? percent : null
-        }
-        onChange={applyPercent}
-        enabled={chipEnabled}
-        side={side}
       />
 
       <AmountField
@@ -556,6 +592,14 @@ function TradePanelBase({
         onChangeText={onTotalChange}
         onStepUp={() => onStep("total", 1)}
         onStepDown={() => onStep("total", -1)}
+      />
+
+      <PercentChips
+        value={percent}
+        activeChip={activeChip}
+        onChange={applyPercent}
+        enabled={chipEnabled}
+        side={side}
       />
 
       <View style={styles.row}>

@@ -78,16 +78,28 @@ export function sizeFromTotal(total: string, price: string, rules: SymbolInfo): 
 /**
  * Largest order the balance supports, floored to the base increment so it can never exceed what
  * the user holds. A buy is priced first, because the balance is in the quote currency.
+ * Accounts for taker fees (passed explicitly or inferred from quote currency).
  */
 export function maxSize(
   side: OrderSide,
   rules: SymbolInfo,
   price: string,
-  balances: Balances
+  balances: Balances,
+  takerFeeRate?: string
 ): string | null {
   if (side === 'sell') return snapToIncrement(balances.base, rules.baseIncrement, 'floor');
   if (!isPositive(price)) return null;
-  const raw = divideDecimal(balances.quote, price, sizeScale(rules), 'floor');
+  
+  // Account for taker fee: effective balance = balance / (1 + fee)
+  const feeRate = takerFeeRate 
+    ? takerFeeRate
+    : rules.quoteCurrency === 'USDT' || rules.quoteCurrency === 'USDC' 
+      ? '0.001'  // 0.1% for USDT/USDC pairs
+      : '0.003'; // 0.3% for other pairs
+  const effectiveBalance = divideDecimal(balances.quote, addDecimal('1', feeRate) ?? '1', 12, 'floor');
+  if (effectiveBalance === null) return null;
+  
+  const raw = divideDecimal(effectiveBalance, price, sizeScale(rules), 'floor');
   return raw === null ? null : snapToIncrement(raw, rules.baseIncrement, 'floor');
 }
 
@@ -95,19 +107,35 @@ export function maxSize(
  * Fills the form from a percentage of the available balance: base for a sell, quote-then-price for
  * a buy. Always floored, so dragging to 100% yields an order that fits rather than one that trips
  * the balance check.
+ *
+ * Accounts for taker fees by reducing the effective balance: KuCoin charges 0.1% for USDT pairs
+ * and 0.3% for others as standard taker fees. The fee is baked into the max spendable amount.
  */
 export function fillByPercent(
   side: OrderSide,
   percent: FillPercent,
   rules: SymbolInfo,
   price: string,
-  balances: Balances
+  balances: Balances,
+  takerFeeRate?: string // e.g. "0.001" for 0.1%
 ): FilledAmount | null {
   if (side === 'buy' && !isPositive(price)) return null;
 
   const portionSource = side === 'sell' ? balances.base : balances.quote;
+  
+  // Determine taker fee rate: prefer explicit parameter, else infer from quote currency
+  const feeRate = takerFeeRate 
+    ? takerFeeRate 
+    : rules.quoteCurrency === 'USDT' || rules.quoteCurrency === 'USDC' 
+      ? '0.001'  // 0.1% for USDT/USDC pairs
+      : '0.003'; // 0.3% for other pairs
+  
+  // Adjust available balance for fees: effective_balance = balance / (1 + fee_rate)
+  const effectiveBalance = divideDecimal(portionSource, addDecimal('1', feeRate) ?? '1', 12, 'floor');
+  if (effectiveBalance === null) return null;
+  
   const portion = divideDecimal(
-    multiplyDecimal(portionSource, String(percent)) ?? '0',
+    multiplyDecimal(effectiveBalance, String(percent)) ?? '0',
     '100',
     12,
     'floor'

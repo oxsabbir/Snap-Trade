@@ -16,7 +16,7 @@ const BAND_STEPS = 4;
 const GRID_LINES = 8;
 const X_LABELS = 4;
 const MIN_VISIBLE = 20;
-const DEFAULT_SPAN = 35;
+const DEFAULT_SPAN = 50;
 const CANDLE_BODY_RATIO = 0.72;
 const HAIRLINE = StyleSheet.hairlineWidth;
 /** Horizontal travel before a drag starts moving the window. */
