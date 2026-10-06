@@ -115,10 +115,25 @@ export function fillByPercent(
 ): FilledAmount | null {
   if (side === 'buy' && !isPositive(price)) return null;
 
-  const portionSource = side === 'sell' ? balances.base : balances.quote;
-  
-  // Adjust available balance for fees: effective_balance = balance / (1 + fee_rate)
-  const effectiveBalance = divideDecimal(portionSource, addDecimal('1', takerFeeRate) ?? '1', 12, 'floor');
+  if (side === 'sell') {
+    // For SELL: fee is charged on proceeds (quote currency), not on base being sold.
+    // User can sell 100% of their base balance. Fee comes from the quote received.
+    const portion = divideDecimal(
+      multiplyDecimal(balances.base, String(percent)) ?? '0',
+      '100',
+      12,
+      'floor'
+    );
+    if (portion === null) return null;
+
+    const size = snapToIncrement(portion, rules.baseIncrement, 'floor');
+    if (size === null) return null;
+    const total = multiplyDecimal(price, size);
+    return { size, total: total ?? '0' };
+  }
+
+  // For BUY: fee is paid in quote currency, so reduce effective quote balance
+  const effectiveBalance = divideDecimal(balances.quote, addDecimal('1', takerFeeRate) ?? '1', 12, 'floor');
   if (effectiveBalance === null) return null;
   
   const portion = divideDecimal(
@@ -129,7 +144,7 @@ export function fillByPercent(
   );
   if (portion === null) return null;
 
-  const raw = side === 'sell' ? portion : divideDecimal(portion, price, sizeScale(rules), 'floor');
+  const raw = divideDecimal(portion, price, sizeScale(rules), 'floor');
   if (raw === null) return null;
 
   const size = snapToIncrement(raw, rules.baseIncrement, 'floor');
