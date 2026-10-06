@@ -16,7 +16,7 @@ import {
   View,
 } from "react-native";
 
-import { CaretDownIcon, CaretUpIcon, PlusIcon } from "@/components/Icons";
+import { PlusIcon } from "@/components/Icons";
 import { useAccountBalance } from "@/hooks/useAccountBalance";
 import { useSymbolRules } from "@/hooks/useSymbolRules";
 import { useUserTradeFees } from "@/hooks/useUserTradeFees";
@@ -84,45 +84,34 @@ function PercentChips({
   enabled,
   side,
 }: PercentChipsProps) {
-  if (!enabled) {
-    return (
-      <View style={styles.chipRow}>
-        {PERCENT_CHIPS.map((chip) => (
-          <Pressable
-            key={chip}
-            disabled
-            style={[styles.chip, styles.chipDisabled]}
-          >
-            <Text style={styles.chipTextDisabled}>{chip}%</Text>
-          </Pressable>
-        ))}
-      </View>
-    );
-  }
-
   const accentColor = side === "buy" ? colors.up : colors.down;
 
   return (
-    <View style={styles.chipRow}>
+    <View style={styles.chipContainer}>
       {PERCENT_CHIPS.map((chip) => {
         const isActive = activeChip === chip;
         return (
           <Pressable
             key={chip}
-            onPress={() => onChange(chip)}
+            onPress={() => enabled && onChange(chip)}
+            disabled={!enabled}
+            hitSlop={8}
             style={[
               styles.chip,
               isActive ? styles.chipActive : styles.chipInactive,
               isActive && { backgroundColor: accentColor },
             ]}
+            accessibilityRole="button"
+            accessibilityState={{ selected: isActive, disabled: !enabled }}
           >
             <Text
               style={[
                 styles.chipText,
                 isActive ? styles.chipTextActive : styles.chipTextInactive,
+                !enabled && styles.chipTextDisabled,
               ]}
             >
-              {chip}%
+              {chip === 100 ? "All" : `${chip}%`}
             </Text>
           </Pressable>
         );
@@ -205,7 +194,7 @@ function TradePanelBase({
 
   // User-specific fee rate (base class rate × VIP coefficient × KCS 20% discount)
   // Calculated in useUserTradeFees hook from market stats
-  const effectiveFeeRate = takerFeeRate ?? '0.001';
+  const effectiveFeeRate = takerFeeRate ?? "0.001";
 
   // A price tapped in the order book fills Price with the row's value, and re-runs the total when
   // an amount is already entered so the two stay in step as if Price had been typed. Applied
@@ -221,10 +210,17 @@ function TradePanelBase({
     // instead of clearing the percentage chip.
     setInlineError(null);
     if (percent !== null && rules) {
-      const filled = fillByPercent(side, percent, rules, priceSelection.value, {
-        base: baseAvailable,
-        quote: quoteAvailable,
-      }, effectiveFeeRate);
+      const filled = fillByPercent(
+        side,
+        percent,
+        rules,
+        priceSelection.value,
+        {
+          base: baseAvailable,
+          quote: quoteAvailable,
+        },
+        effectiveFeeRate,
+      );
       if (filled) {
         setSize(filled.size);
         setTotal(filled.total);
@@ -237,10 +233,16 @@ function TradePanelBase({
   }
 
   const max = rules
-    ? maxSize(side, rules, price, {
-        base: baseAvailable,
-        quote: quoteAvailable,
-      }, effectiveFeeRate)
+    ? maxSize(
+        side,
+        rules,
+        price,
+        {
+          base: baseAvailable,
+          quote: quoteAvailable,
+        },
+        effectiveFeeRate,
+      )
     : null;
   const maxLabel = side === "buy" ? "Max Buy" : "Max Sell";
 
@@ -278,10 +280,17 @@ function TradePanelBase({
     setPercent(next);
     setInlineError(null);
     if (!rules) return;
-    const filled = fillByPercent(side, next, rules, price, {
-      base: baseAvailable,
-      quote: quoteAvailable,
-    }, effectiveFeeRate);
+    const filled = fillByPercent(
+      side,
+      next,
+      rules,
+      price,
+      {
+        base: baseAvailable,
+        quote: quoteAvailable,
+      },
+      effectiveFeeRate,
+    );
     if (!filled) return;
     setSize(filled.size);
     setTotal(filled.total);
@@ -351,17 +360,31 @@ function TradePanelBase({
    */
   const activeChip = useMemo((): number | null => {
     if (!rules || !hasPrice || !hasBalance || size === "") return null;
-    const filled = fillByPercent(side, percent!, rules, price, {
-      base: baseAvailable,
-      quote: quoteAvailable,
-    }, effectiveFeeRate);
+    const filled = fillByPercent(
+      side,
+      percent!,
+      rules,
+      price,
+      {
+        base: baseAvailable,
+        quote: quoteAvailable,
+      },
+      effectiveFeeRate,
+    );
     if (!filled) return null;
     // Check if current size matches any chip's calculated size exactly
     for (const chip of PERCENT_CHIPS) {
-      const chipFilled = fillByPercent(side, chip, rules, price, {
-        base: baseAvailable,
-        quote: quoteAvailable,
-      }, effectiveFeeRate);
+      const chipFilled = fillByPercent(
+        side,
+        chip,
+        rules,
+        price,
+        {
+          base: baseAvailable,
+          quote: quoteAvailable,
+        },
+        effectiveFeeRate,
+      );
       if (chipFilled && chipFilled.size === size) return chip;
     }
     return null;
@@ -412,10 +435,17 @@ function TradePanelBase({
       setPrice(next);
       // Persist the selected percentage chip — recalculate size/total at the new price
       if (percent !== null) {
-        const filled = fillByPercent(side, percent, rules, next, {
-          base: baseAvailable,
-          quote: quoteAvailable,
-        }, effectiveFeeRate);
+        const filled = fillByPercent(
+          side,
+          percent,
+          rules,
+          next,
+          {
+            base: baseAvailable,
+            quote: quoteAvailable,
+          },
+          effectiveFeeRate,
+        );
         if (filled) {
           setSize(filled.size);
           setTotal(filled.total);
@@ -435,10 +465,15 @@ function TradePanelBase({
   const submit = async () => {
     if (!rules || isSubmitting) return;
     setInlineError(null);
-    const check = validateLimitOrder({ side, symbol, price, size }, rules, {
-      base: baseAvailable,
-      quote: quoteAvailable,
-    }, effectiveFeeRate);
+    const check = validateLimitOrder(
+      { side, symbol, price, size },
+      rules,
+      {
+        base: baseAvailable,
+        quote: quoteAvailable,
+      },
+      effectiveFeeRate,
+    );
     if (!check.valid || !check.normalized) {
       setInlineError(
         check.issues[0]?.message ?? "Enter a valid price and amount.",
@@ -567,7 +602,7 @@ function TradePanelBase({
         }
       />
 
-<AmountField
+      <AmountField
         label="Amount"
         value={size}
         placeholder={rules ? `Minimum: ${rules.baseMinSize}` : "0"}
@@ -576,6 +611,14 @@ function TradePanelBase({
         onChangeText={onSizeChange}
         onStepUp={() => onStep("size", 1)}
         onStepDown={() => onStep("size", -1)}
+      />
+
+      <PercentChips
+        value={percent}
+        activeChip={activeChip}
+        onChange={applyPercent}
+        enabled={chipEnabled}
+        side={side}
       />
 
       <AmountField
@@ -587,14 +630,6 @@ function TradePanelBase({
         onChangeText={onTotalChange}
         onStepUp={() => onStep("total", 1)}
         onStepDown={() => onStep("total", -1)}
-      />
-
-      <PercentChips
-        value={percent}
-        activeChip={activeChip}
-        onChange={applyPercent}
-        enabled={chipEnabled}
-        side={side}
       />
 
       <View style={styles.row}>
@@ -628,6 +663,7 @@ function TradePanelBase({
       <Pressable
         onPress={submit}
         disabled={!rules || isSubmitting}
+        hitSlop={12}
         style={[
           styles.action,
           side === "buy" ? styles.actionBuy : styles.actionSell,
@@ -698,27 +734,26 @@ function AmountField({
           spellCheck={false}
           accessibilityLabel={label}
         />
-        <Text style={styles.unit}>{unit}</Text>
-        <View style={styles.steppers}>
-          <Pressable
-            onPress={onStepUp}
-            disabled={!editable}
-            hitSlop={6}
-            style={styles.stepper}
-            accessibilityRole="button"
-            accessibilityLabel={`Increase ${label}`}
-          >
-            <CaretUpIcon size={12} color={colors.textMuted} />
-          </Pressable>
+        <View style={styles.stepperGroup}>
           <Pressable
             onPress={onStepDown}
             disabled={!editable}
-            hitSlop={6}
-            style={styles.stepper}
+            hitSlop={8}
+            style={styles.stepperButton}
             accessibilityRole="button"
             accessibilityLabel={`Decrease ${label}`}
           >
-            <CaretDownIcon size={12} color={colors.textMuted} />
+            <Text style={styles.stepperText}>−</Text>
+          </Pressable>
+          <Pressable
+            onPress={onStepUp}
+            disabled={!editable}
+            hitSlop={8}
+            style={styles.stepperButton}
+            accessibilityRole="button"
+            accessibilityLabel={`Increase ${label}`}
+          >
+            <Text style={styles.stepperText}>+</Text>
           </Pressable>
         </View>
       </View>
@@ -829,12 +864,22 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: "600",
   },
-  steppers: {
+  stepperButton: {
+    width: 24,
+    height: 36,
+    borderRadius: radius.sm,
+    alignItems: "center",
     justifyContent: "center",
+    backgroundColor: colors.surfaceAlt,
+  },
+  stepperGroup: {
+    flexDirection: "row",
     gap: 1,
   },
-  stepper: {
-    paddingHorizontal: 2,
+  stepperText: {
+    fontSize: 18,
+    fontWeight: "600",
+    color: colors.text,
   },
   chipRow: {
     flexDirection: "row",
@@ -843,15 +888,24 @@ const styles = StyleSheet.create({
     marginBottom: 4,
     gap: spacing.xs,
   },
+  chipContainer: {
+    flexDirection: "row",
+    backgroundColor: colors.surfaceAlt,
+    borderRadius: radius.pill,
+    padding: 4,
+    gap: 4,
+    width: "100%",
+  },
   chip: {
     flex: 1,
     height: 36,
-    borderRadius: radius.sm,
+    paddingHorizontal: 8,
     alignItems: "center",
     justifyContent: "center",
+    borderRadius: radius.pill,
   },
   chipInactive: {
-    backgroundColor: colors.surfaceAlt,
+    backgroundColor: "transparent",
   },
   chipActive: {
     // backgroundColor set dynamically based on side (colors.up / colors.down)
@@ -908,6 +962,7 @@ const styles = StyleSheet.create({
   },
   action: {
     height: 42,
+    width: "100%",
     alignItems: "center",
     justifyContent: "center",
     borderRadius: radius.pill,
