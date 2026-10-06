@@ -10,7 +10,7 @@
  * exchange will compare against.
  */
 import type { OrderSide, SymbolInfo } from './types';
-import { compareDecimal, isMultipleOf, multiplyDecimal, parseDecimal, snapToIncrement } from '@/utils/decimal';
+import { addDecimal, compareDecimal, divideDecimal, isMultipleOf, multiplyDecimal, parseDecimal, snapToIncrement } from '@/utils/decimal';
 
 export type { OrderSide };
 
@@ -65,7 +65,8 @@ function positive(value: string | null): boolean {
 export function validateLimitOrder(
   draft: LimitOrderDraft,
   symbolInfo: SymbolInfo,
-  balances: OrderBalances
+  balances: OrderBalances,
+  takerFeeRate: string
 ): OrderValidation {
   const issues: OrderIssue[] = [];
 
@@ -142,14 +143,29 @@ export function validateLimitOrder(
     }
 
     const spendable = draft.side === 'buy' ? balances.quote : balances.base;
-    const required = draft.side === 'buy' ? total : draft.size;
-    if (compareDecimal(required, spendable) === 1) {
-      const currency = draft.side === 'buy' ? symbolInfo.quoteCurrency : symbolInfo.baseCurrency;
-      issues.push({
-        code: 'insufficient-balance',
-        field: 'balance',
-        message: `Not enough ${currency}. Available ${spendable}, required ${required}.`,
-      });
+    
+    // For buy orders, account for taker fees: effective balance = balance / (1 + fee)
+    let required: string;
+    if (draft.side === 'buy') {
+      const effectiveBalance = divideDecimal(spendable, addDecimal('1', takerFeeRate) ?? '1', 12, 'floor');
+      required = total;
+      // Check if the required total (including fees) exceeds effective balance
+      if (effectiveBalance !== null && compareDecimal(required, effectiveBalance) === 1) {
+        issues.push({
+          code: 'insufficient-balance',
+          field: 'balance',
+          message: `Not enough ${symbolInfo.quoteCurrency}. Available ${spendable}, required ${required} (incl. ${Number(takerFeeRate) * 100}% fee).`,
+        });
+      }
+    } else {
+      required = draft.size;
+      if (compareDecimal(required, spendable) === 1) {
+        issues.push({
+          code: 'insufficient-balance',
+          field: 'balance',
+          message: `Not enough ${symbolInfo.baseCurrency}. Available ${spendable}, required ${required}.`,
+        });
+      }
     }
   }
 

@@ -19,6 +19,7 @@ import {
 import { CaretDownIcon, CaretUpIcon, PlusIcon } from "@/components/Icons";
 import { useAccountBalance } from "@/hooks/useAccountBalance";
 import { useSymbolRules } from "@/hooks/useSymbolRules";
+import { useUserTradeFees } from "@/hooks/useUserTradeFees";
 import { describeError } from "@/lib/kucoin/errors";
 import { useLevel2Book } from "@/hooks/useLevel2Book";
 import {
@@ -38,7 +39,6 @@ import {
   totalFromSize,
   type FillPercent,
 } from "@/lib/trade";
-import { fetchMarketStats } from "@/lib/kucoin/market";
 import { colors, radius, spacing } from "@/theme";
 import { trackPlacedOrder } from "@/state/openOrders";
 import { formatAmount } from "@/utils/format";
@@ -149,6 +149,8 @@ function TradePanelBase({
   // number here instead of leaving a second, independently fetched copy behind. The same store is
   // written by `/account/balance`, so a change made on the desktop moves this too.
   const { available } = useAccountBalance();
+  // User-specific trade fees (VIP level + KCS discount + pair class)
+  const { takerFeeRate } = useUserTradeFees(symbol);
 
   const [side, setSide] = useState<OrderSide>("buy");
   const [price, setPrice] = useState("");
@@ -169,8 +171,6 @@ function TradePanelBase({
   const [isFetchingBestPrice, setIsFetchingBestPrice] = useState(false);
   const [inlineError, setInlineError] = useState<string | null>(null);
   const [toast, setToast] = useState<Toast | null>(null);
-  // Taker fee rate for the current symbol, fetched from market stats.
-  const [takerFeeRate, setTakerFeeRate] = useState<string | null>(null);
 
   /** Drops the selected percentage, so the next tap on a chip recomputes even if it is the same chip. */
   const clearPercent = useCallback(() => {
@@ -198,19 +198,14 @@ function TradePanelBase({
     return () => clearTimeout(timer);
   }, [toast]);
 
-  // Fetch taker fee rate from market stats when symbol changes.
-  useEffect(() => {
-    let cancelled = false;
-    fetchMarketStats(symbol).then((stats) => {
-      if (!cancelled && stats.takerFeeRate) setTakerFeeRate(stats.takerFeeRate);
-    });
-    return () => { cancelled = true; };
-  }, [symbol]);
-
   const baseAvailable = available[baseCurrency] ?? "0";
   const quoteAvailable = available[quoteCurrency] ?? "0";
   const availableForSide = side === "buy" ? quoteAvailable : baseAvailable;
   const availableCurrency = side === "buy" ? quoteCurrency : baseCurrency;
+
+  // User-specific fee rate (base class rate × VIP coefficient × KCS 20% discount)
+  // Calculated in useUserTradeFees hook from market stats
+  const effectiveFeeRate = takerFeeRate ?? '0.001';
 
   // A price tapped in the order book fills Price with the row's value, and re-runs the total when
   // an amount is already entered so the two stay in step as if Price had been typed. Applied
@@ -229,7 +224,7 @@ function TradePanelBase({
       const filled = fillByPercent(side, percent, rules, priceSelection.value, {
         base: baseAvailable,
         quote: quoteAvailable,
-      }, takerFeeRate ?? undefined);
+      }, effectiveFeeRate);
       if (filled) {
         setSize(filled.size);
         setTotal(filled.total);
@@ -245,7 +240,7 @@ function TradePanelBase({
     ? maxSize(side, rules, price, {
         base: baseAvailable,
         quote: quoteAvailable,
-      }, takerFeeRate ?? undefined)
+      }, effectiveFeeRate)
     : null;
   const maxLabel = side === "buy" ? "Max Buy" : "Max Sell";
 
@@ -286,7 +281,7 @@ function TradePanelBase({
     const filled = fillByPercent(side, next, rules, price, {
       base: baseAvailable,
       quote: quoteAvailable,
-    }, takerFeeRate ?? undefined);
+    }, effectiveFeeRate);
     if (!filled) return;
     setSize(filled.size);
     setTotal(filled.total);
@@ -359,14 +354,14 @@ function TradePanelBase({
     const filled = fillByPercent(side, percent!, rules, price, {
       base: baseAvailable,
       quote: quoteAvailable,
-    }, takerFeeRate ?? undefined);
+    }, effectiveFeeRate);
     if (!filled) return null;
     // Check if current size matches any chip's calculated size exactly
     for (const chip of PERCENT_CHIPS) {
       const chipFilled = fillByPercent(side, chip, rules, price, {
         base: baseAvailable,
         quote: quoteAvailable,
-      }, takerFeeRate ?? undefined);
+      }, effectiveFeeRate);
       if (chipFilled && chipFilled.size === size) return chip;
     }
     return null;
@@ -380,7 +375,7 @@ function TradePanelBase({
     price,
     baseAvailable,
     quoteAvailable,
-    takerFeeRate,
+    effectiveFeeRate,
   ]);
 
   /**
@@ -420,7 +415,7 @@ function TradePanelBase({
         const filled = fillByPercent(side, percent, rules, next, {
           base: baseAvailable,
           quote: quoteAvailable,
-        }, takerFeeRate ?? undefined);
+        }, effectiveFeeRate);
         if (filled) {
           setSize(filled.size);
           setTotal(filled.total);
@@ -443,7 +438,7 @@ function TradePanelBase({
     const check = validateLimitOrder({ side, symbol, price, size }, rules, {
       base: baseAvailable,
       quote: quoteAvailable,
-    });
+    }, effectiveFeeRate);
     if (!check.valid || !check.normalized) {
       setInlineError(
         check.issues[0]?.message ?? "Enter a valid price and amount.",
