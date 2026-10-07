@@ -7,6 +7,7 @@ import { usePrivateFeed } from '@/hooks/usePrivateFeed';
 
 import { ActiveCoinProvider } from '@/state/activeCoin';
 import { ApiCredentialsProvider, useApiCredentials } from '@/state/apiCredentials';
+import { NotificationListenerProvider } from '@/components/NotificationListenerProvider';
 import { colors } from '@/theme';
 
 export default function RootLayout() {
@@ -15,7 +16,9 @@ export default function RootLayout() {
       <SafeAreaProvider initialMetrics={initialWindowMetrics}>
         <ActiveCoinProvider>
           <ApiCredentialsProvider>
-            <RootNavigator />
+            <NotificationListenerProvider>
+              <RootNavigator />
+            </NotificationListenerProvider>
           </ApiCredentialsProvider>
         </ActiveCoinProvider>
       </SafeAreaProvider>
