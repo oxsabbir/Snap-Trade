@@ -4,6 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { AssetList } from '@/components/AssetList';
 import { AccountIcon } from '@/components/Icons';
 import { ProfileCard } from '@/components/ProfileCard';
+import { NotificationListenerDemo } from '@/components/NotificationListenerDemo';
 import { useAccount } from '@/hooks/useAccount';
 import { useProfile } from '@/hooks/useProfile';
 import { useApiCredentials, type OnboardingEntry } from '@/state/apiCredentials';
@@ -160,6 +161,8 @@ export default function AccountScreen() {
           </View>
 
           <AssetList holdings={portfolio.holdings} />
+          
+          <NotificationListenerDemo />
         </ScrollView>
       )}
     </SafeAreaView>
