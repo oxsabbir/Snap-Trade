@@ -3,15 +3,22 @@ import { useNotificationListener } from '@/hooks/useNotificationListener';
 import { checkForSignal, type XNotification } from '@/lib/signalDetection';
 import { fetchSymbols } from '@/lib/kucoin/market';
 import { useSetActiveCoin } from '@/state/activeCoin';
+import { useSignalSource } from '@/hooks/useSignalSource';
 
 export function NotificationListenerProvider({ children }: { children: React.ReactNode }) {
   const setActiveCoin = useSetActiveCoin();
+  const { isEnabled, isLoading } = useSignalSource();
 
   // Initialize notification listener at app startup - only for X/Twitter app
   useNotificationListener(
     async (notification: { id: number; text: string; bigText: string; postTime: number; title: string; subText: string; packageName: string }) => {
       // Only process notifications from X/Twitter app
       if (notification.packageName === 'com.twitter.android') {
+        // Gate: master signal detection toggle
+        if (!isEnabled || isLoading) {
+          return;
+        }
+
         const xNotif: XNotification = {
           id: notification.id,
           text: notification.text || '',

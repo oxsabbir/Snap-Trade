@@ -1,11 +1,11 @@
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AssetList } from '@/components/AssetList';
 import { AccountIcon } from '@/components/Icons';
 import { ProfileCard } from '@/components/ProfileCard';
 import { useAccount } from '@/hooks/useAccount';
-import { useProfile } from '@/hooks/useProfile';
+import { useSignalSource } from '@/hooks/useSignalSource';
 import { useApiCredentials, type OnboardingEntry } from '@/state/apiCredentials';
 import { getKcsDiscountEnabled, setKcsDiscountEnabled } from '@/state/kcsDiscount';
 import { colors, radius, spacing } from '@/theme';
@@ -18,11 +18,17 @@ function maskApiKey(apiKey: string | null): string {
 
 export default function AccountScreen() {
   const { status, portfolio, accountInfo, lastUpdated, error, refresh } = useAccount();
-  const { displayName, setDisplayName } = useProfile();
+  const { displayName, setDisplayName, isEnabled, setIsEnabled, isLoading: signalLoading } = useSignalSource();
   const { apiKey, disconnect } = useApiCredentials();
   const [accountAction, setAccountAction] = useState<OnboardingEntry | null>(null);
   const [accountActionError, setAccountActionError] = useState<string | null>(null);
   const [kcsEnabled, setKcsEnabled] = useState(false);
+  const [signalNameInput, setSignalNameInput] = useState(displayName);
+
+  // Sync local input state with hook's displayName when it loads from AsyncStorage
+  useEffect(() => {
+    setSignalNameInput(displayName);
+  }, [displayName]);
 
   useEffect(() => {
     getKcsDiscountEnabled().then(setKcsEnabled);
@@ -89,7 +95,12 @@ export default function AccountScreen() {
           </View>
         </View>
       ) : (
-        <ScrollView contentContainerStyle={styles.list} showsVerticalScrollIndicator={false}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={styles.keyboardAvoidingView}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 100 : 0}
+        >
+          <ScrollView contentContainerStyle={styles.list} showsVerticalScrollIndicator={false}>
           <ProfileCard
             displayName={displayName}
             onRename={setDisplayName}
@@ -125,11 +136,62 @@ export default function AccountScreen() {
                 {accountAction === 'welcome' ? 'Logging out…' : 'Log out'}
               </Text>
             </Pressable>
-            {accountActionError ? (
+{accountActionError ? (
               <Text style={styles.actionError} accessibilityRole="alert">
                 {accountActionError}
               </Text>
             ) : null}
+          </View>
+
+          <View style={styles.signalSection}>
+            <Text style={styles.signalTitle}>Signal Source</Text>
+            <View style={styles.signalRow}>
+              <View style={styles.signalInfo}>
+                <Text style={styles.signalTitle}>Detect Signals from Notifications</Text>
+                <Text style={styles.signalDesc}>
+                  When on, the app reads notifications from the X app to detect trading signals from your configured source.
+                </Text>
+              </View>
+              <Switch
+                value={isEnabled}
+                onValueChange={setIsEnabled}
+                disabled={signalLoading}
+                trackColor={{ false: colors.surfaceAlt, true: colors.up }}
+                thumbColor={isEnabled ? '#FFFFFF' : colors.text}
+              />
+            </View>
+            <View style={styles.signalNameRow}>
+              <Text style={styles.signalNameLabel}>Display Name</Text>
+              <View style={styles.signalNameInputWrapper}>
+                <TextInput
+                  value={signalNameInput}
+                  onChangeText={(text) => setSignalNameInput(text)}
+                  editable={isEnabled}
+                  style={[styles.signalNameInput, styles.signalNameInputFlex, !isEnabled && styles.signalNameInputDisabled]}
+                  maxLength={24}
+                  autoCapitalize="words"
+                  autoCorrect={false}
+                  autoComplete="off"
+                  placeholder={signalLoading ? 'Loading...' : 'Enter display name'}
+                  accessibilityLabel="Signal source display name"
+                />
+                <Pressable
+                  onPress={() => {
+                    const trimmed = signalNameInput.trim().slice(0, 24);
+                    setSignalNameInput(trimmed);
+                    setDisplayName(trimmed);
+                  }}
+                  disabled={!isEnabled || signalNameInput.trim() === ''}
+                  style={[
+                    styles.signalSaveButton,
+                    (!isEnabled || signalNameInput.trim() === '') && styles.signalSaveButtonDisabled,
+                  ]}
+                  accessibilityLabel="Save display name"
+                >
+                  <Text style={styles.signalSaveButtonText}>Save</Text>
+                </Pressable>
+              </View>
+            </View>
           </View>
 
           <View style={styles.kcsSection}>
@@ -161,6 +223,7 @@ export default function AccountScreen() {
 
           <AssetList holdings={portfolio.holdings} />
         </ScrollView>
+      </KeyboardAvoidingView>
       )}
     </SafeAreaView>
   );
@@ -349,5 +412,85 @@ const styles = StyleSheet.create({
   kcsToggleThumbOn: {
     marginLeft: 20,
     backgroundColor: '#FFFFFF',
+  },
+  signalSection: {
+    marginTop: spacing.lg,
+    marginBottom: spacing.xl,
+    paddingTop: spacing.md,
+    borderTopColor: colors.border,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  signalTitle: {
+    color: colors.text,
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: spacing.sm,
+  },
+  signalRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: spacing.xs,
+  },
+  signalInfo: {
+    flex: 1,
+  },
+  signalDesc: {
+    color: colors.textMuted,
+    fontSize: 12,
+    marginTop: 2,
+  },
+  signalNameRow: {
+    marginTop: spacing.sm,
+    gap: spacing.sm,
+  },
+  signalNameLabel: {
+    color: colors.textFaint,
+    fontSize: 10,
+    fontWeight: '700',
+    marginBottom: 4,
+  },
+  signalNameInput: {
+    flex: 1,
+    backgroundColor: colors.surfaceAlt,
+    borderRadius: radius.sm,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    color: colors.text,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  signalNameInputWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  signalNameInputFlex: {
+    flex: 3,
+  },
+  signalSaveButton: {
+    flex: 1,
+    height: 36,
+    borderRadius: radius.sm,
+    backgroundColor: colors.up,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.xs,
+  },
+  signalSaveButtonDisabled: {
+    opacity: 0.4,
+    backgroundColor: colors.surfaceAlt,
+  },
+  signalSaveButtonText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  signalNameInputDisabled: {
+    opacity: 0.4,
+    backgroundColor: colors.surfaceAlt,
+  },
+  keyboardAvoidingView: {
+    flex: 1,
   },
 });
