@@ -1,4 +1,4 @@
-import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, KeyboardAvoidingView, Linking, PermissionsAndroid, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AssetList } from '@/components/AssetList';
@@ -16,6 +16,8 @@ function maskApiKey(apiKey: string | null): string {
   return `${apiKey.slice(0, 4)}••••••${apiKey.slice(-4)}`;
 }
 
+const OVERLAY_PERMISSION = 'android.permission.SYSTEM_ALERT_WINDOW' as const;
+
 export default function AccountScreen() {
   const { status, portfolio, accountInfo, lastUpdated, error, refresh } = useAccount();
   const { displayName, setDisplayName, isEnabled, setIsEnabled, isLoading: signalLoading } = useSignalSource();
@@ -24,6 +26,72 @@ export default function AccountScreen() {
   const [accountActionError, setAccountActionError] = useState<string | null>(null);
   const [kcsEnabled, setKcsEnabled] = useState(false);
   const [signalNameInput, setSignalNameInput] = useState(displayName);
+  const [overlayPermissionGranted, setOverlayPermissionGranted] = useState(true);
+
+  const requestOverlayPermission = async () => {
+    if (Platform.OS !== 'android') {
+      setOverlayPermissionGranted(true);
+      return;
+    }
+
+    try {
+      const status = await PermissionsAndroid.check(OVERLAY_PERMISSION);
+      if (status) {
+        setOverlayPermissionGranted(true);
+        return;
+      }
+
+      const result = await PermissionsAndroid.request(OVERLAY_PERMISSION);
+      const granted = result === PermissionsAndroid.RESULTS.GRANTED;
+      setOverlayPermissionGranted(granted);
+
+      if (!granted) {
+        Alert.alert(
+          'Display over other apps is required',
+          'SnapTrade must be allowed to draw over other apps so it can launch the trade screen immediately from a detected signal, even after the app was swiped away.',
+          [
+            {
+              text: 'Open settings',
+              onPress: () => {
+                void Linking.openURL('android.settings.APPLICATION_DETAILS_SETTINGS');
+              },
+            },
+            { text: 'Not now', style: 'cancel' },
+          ]
+        );
+      }
+    } catch {
+      setOverlayPermissionGranted(false);
+    }
+  };
+
+  const openSystemSetting = async (target: 'battery' | 'autostart') => {
+    if (Platform.OS !== 'android') return;
+
+    const destinations = {
+      battery: 'android.settings.IGNORE_BATTERY_OPTIMIZATION_SETTINGS',
+      autostart: 'android.settings.APPLICATION_DETAILS_SETTINGS',
+    } as const;
+
+    try {
+      await Linking.openURL(destinations[target]);
+    } catch {
+      console.warn('Unable to open Android settings for', target);
+    }
+  };
+
+  useEffect(() => {
+    if (Platform.OS !== 'android') {
+      setOverlayPermissionGranted(true);
+      return;
+    }
+
+    void PermissionsAndroid.check(OVERLAY_PERMISSION)
+      .then((status) => {
+        setOverlayPermissionGranted(status);
+      })
+      .catch(() => setOverlayPermissionGranted(false));
+  }, []);
 
   // Sync local input state with hook's displayName when it loads from AsyncStorage
   useEffect(() => {
@@ -151,15 +219,40 @@ export default function AccountScreen() {
                 <Text style={styles.signalDesc}>
                   When on, the app reads notifications from the X app to detect trading signals from your configured source.
                 </Text>
+                <Text style={styles.signalStatusText}>
+                  Overlay: {overlayPermissionGranted ? 'enabled' : 'required'}
+                </Text>
               </View>
               <Switch
-                value={isEnabled}
-                onValueChange={setIsEnabled}
-                disabled={signalLoading}
+                value={isEnabled && overlayPermissionGranted}
+                onValueChange={(next) => {
+                  if (next && !overlayPermissionGranted) {
+                    void requestOverlayPermission();
+                    return;
+                  }
+                  setIsEnabled(next);
+                }}
+                disabled={signalLoading || !overlayPermissionGranted}
                 trackColor={{ false: colors.surfaceAlt, true: colors.up }}
-                thumbColor={isEnabled ? '#FFFFFF' : colors.text}
+                thumbColor={isEnabled && overlayPermissionGranted ? '#FFFFFF' : colors.text}
               />
             </View>
+            {!overlayPermissionGranted ? (
+              <View style={styles.overlayPanel}>
+                <Text style={styles.overlayPanelTitle}>Background launch permission required</Text>
+                <Text style={styles.overlayPanelBody}>
+                  Allow “Display over other apps” so SnapTrade can open the detected trade screen immediately, even after the app was closed from recents.
+                </Text>
+                <Pressable
+                  onPress={() => void requestOverlayPermission()}
+                  style={styles.overlayButton}
+                  accessibilityRole="button"
+                  accessibilityLabel="Request display over other apps permission"
+                >
+                  <Text style={styles.overlayButtonText}>Enable overlay</Text>
+                </Pressable>
+              </View>
+            ) : null}
             <View style={styles.signalNameRow}>
               <Text style={styles.signalNameLabel}>Display Name</Text>
               <View style={styles.signalNameInputWrapper}>
@@ -192,6 +285,24 @@ export default function AccountScreen() {
                 </Pressable>
               </View>
             </View>
+          </View>
+
+          <View style={styles.systemSettingsSection}>
+            <Text style={styles.signalTitle}>System Settings</Text>
+            <Pressable
+              onPress={() => void openSystemSetting('battery')}
+              style={styles.settingsLink}
+              accessibilityRole="button"
+            >
+              <Text style={styles.settingsLinkText}>Battery optimization</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => void openSystemSetting('autostart')}
+              style={styles.settingsLink}
+              accessibilityRole="button"
+            >
+              <Text style={styles.settingsLinkText}>Autostart / app details</Text>
+            </Pressable>
           </View>
 
           <View style={styles.kcsSection}>
@@ -440,6 +551,46 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginTop: 2,
   },
+  signalStatusText: {
+    color: colors.accent,
+    fontSize: 10,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    marginTop: spacing.xs,
+    letterSpacing: 0.5,
+  },
+  overlayPanel: {
+    marginTop: spacing.sm,
+    padding: spacing.md,
+    borderRadius: radius.md,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  overlayPanelTitle: {
+    color: colors.text,
+    fontSize: 13,
+    fontWeight: '700',
+    marginBottom: spacing.xs,
+  },
+  overlayPanelBody: {
+    color: colors.textMuted,
+    fontSize: 12,
+    lineHeight: 18,
+    marginBottom: spacing.sm,
+  },
+  overlayButton: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.pill,
+    backgroundColor: colors.accent,
+  },
+  overlayButtonText: {
+    color: '#071D12',
+    fontSize: 12,
+    fontWeight: '700',
+  },
   signalNameRow: {
     marginTop: spacing.sm,
     gap: spacing.sm,
@@ -489,6 +640,21 @@ const styles = StyleSheet.create({
   signalNameInputDisabled: {
     opacity: 0.4,
     backgroundColor: colors.surfaceAlt,
+  },
+  systemSettingsSection: {
+    marginTop: spacing.lg,
+    marginBottom: spacing.xl,
+    paddingTop: spacing.md,
+    borderTopColor: colors.border,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  settingsLink: {
+    paddingVertical: spacing.sm,
+  },
+  settingsLinkText: {
+    color: colors.accent,
+    fontSize: 13,
+    fontWeight: '600',
   },
   keyboardAvoidingView: {
     flex: 1,
