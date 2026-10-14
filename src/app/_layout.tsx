@@ -1,7 +1,8 @@
+import { useEffect, useState } from 'react';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { ActivityIndicator, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, InteractionManager, StyleSheet, View } from 'react-native';
 import { initialWindowMetrics, SafeAreaProvider } from 'react-native-safe-area-context';
 import { usePrivateFeed } from '@/hooks/usePrivateFeed';
 
@@ -74,8 +75,23 @@ function PrivateFeedRuntime() {
 /**
  * Mounted once so the signal settings hydrate and mirror into the native listener's
  * SharedPreferences on every launch, not only when the Account tab happens to be opened.
+ *
+ * Deferred past the first interactions so its two AsyncStorage reads and the native
+ * `syncSignalSettings` round-trip do not compete with the first paint. Nothing depends on the
+ * hydrated values until the user opens the signal settings screen.
  */
 function SignalSettingsRuntime() {
+  const [shouldHydrate, setShouldHydrate] = useState(false);
+
+  useEffect(() => {
+    const task = InteractionManager.runAfterInteractions(() => setShouldHydrate(true));
+    return () => task.cancel();
+  }, []);
+
+  return shouldHydrate ? <SignalSettingsHydrator /> : null;
+}
+
+function SignalSettingsHydrator() {
   useSignalSource();
   return null;
 }
