@@ -95,6 +95,20 @@ export function formatTime(timestamp: number | null): string {
   return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
 }
 
+/**
+ * `YYYY-MM-DD HH:MM` for a history row. Local time, since the user reads it against their own day,
+ * and a fixed-width layout so the column of timestamps lines up down the list.
+ */
+export function formatDateTime(timestamp: number | null): string {
+  if (!timestamp) return '--';
+  const date = new Date(timestamp);
+  const pad = (n: number) => n.toString().padStart(2, '0');
+  return (
+    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ` +
+    `${pad(date.getHours())}:${pad(date.getMinutes())}`
+  );
+}
+
 /** Deterministic hue so a coin keeps the same avatar colour across renders. */
 export function hashToHue(value: string): number {
   let hash = 0;

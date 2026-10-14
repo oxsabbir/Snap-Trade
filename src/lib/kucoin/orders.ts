@@ -152,3 +152,40 @@ export async function fetchClassicOpenOrders(): Promise<unknown[]> {
   });
   return asOrderList(data);
 }
+
+/**
+ * How many historized orders one page asks for. Both books cap a page at 100, and 50 is enough to
+ * fill the tab's first screen without paying for rows the user has not scrolled to.
+ */
+export const ORDER_HISTORY_PAGE_SIZE = 50;
+
+/**
+ * Historized (filled or cancelled) classic orders, across every pair.
+ *
+ * The classic list is account-wide, so, unlike the HF book, one request covers the whole account.
+ * KuCoin only keeps this data for a bounded window — roughly the last 7 days for fills and the last
+ * 2 days for pure cancellations — and silently clamps a wider range, so no explicit time filter is
+ * sent and the default window is accepted.
+ */
+export async function fetchClassicOrderHistory(): Promise<unknown[]> {
+  const data = await request<unknown>('/orders', {
+    signed: true,
+    query: { status: 'done', pageSize: ORDER_HISTORY_PAGE_SIZE },
+  });
+  return asOrderList(data);
+}
+
+/**
+ * Historized HF orders for one pair.
+ *
+ * The HF book has no account-wide completed listing: `GET /hf/orders/done` requires a `symbol`, so
+ * the history view asks for the pair it is showing. The traded pair is what the user is looking at,
+ * which is also the only scope this endpoint can answer.
+ */
+export async function fetchHighFrequencyOrderHistory(symbol: string): Promise<unknown[]> {
+  const data = await request<unknown>('/hf/orders/done', {
+    signed: true,
+    query: { symbol, limit: ORDER_HISTORY_PAGE_SIZE },
+  });
+  return asOrderList(data);
+}
