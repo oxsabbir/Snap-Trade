@@ -21,6 +21,11 @@ import { addDecimal } from '@/utils/decimal';
 export type BalanceState = {
   /** Free balance per currency in the `trade` wallet, as decimal strings. Absent means zero. */
   available: Record<string, string>;
+  /**
+   * Frozen balance per currency in the `trade` wallet, as decimal strings. This is money committed
+   * to an open order or a pending withdrawal, so `total = available + holds`. Absent means zero.
+   */
+  holds: Record<string, string>;
   /** True only for the first load, when there is nothing to show yet. */
   isLoading: boolean;
   /** True while a refresh runs over an already-populated balance, which must not blank the row. */
@@ -52,6 +57,7 @@ const DISPLAYED_BOOK = 'trade.';
 
 let state: BalanceState = {
   available: EMPTY,
+  holds: EMPTY,
   isLoading: true,
   isRefreshing: false,
   error: null,
@@ -94,7 +100,7 @@ export function subscribeBalance(listener: () => void): () => void {
   };
 }
 
-function sumAvailable(current: string | undefined, next: string): string {
+function sumDecimal(current: string | undefined, next: string): string {
   if (!current) return next;
   return addDecimal(current, next) ?? next;
 }
@@ -105,11 +111,15 @@ async function load(): Promise<void> {
     // cannot fund an order and must not be shown as if it could.
     const accounts = await fetchAccounts('trade');
     const next: Record<string, string> = {};
+    const holds: Record<string, string> = {};
     for (const account of accounts) {
       if (account.type !== 'trade') continue;
-      next[account.currency] = sumAvailable(next[account.currency], account.available);
+      next[account.currency] = sumDecimal(next[account.currency], account.available);
+      // A currency can appear as more than one `trade` row, so the frozen figures are summed the
+      // same way the free ones are.
+      holds[account.currency] = sumDecimal(holds[account.currency], account.holds);
     }
-    emit({ available: next, error: null });
+    emit({ available: next, holds, error: null });
   } catch (caught) {
     emit({ error: describeError(caught, 'Failed to load balance.') });
   } finally {
@@ -173,10 +183,17 @@ export function applyBalanceEvent(message: PrivateBalanceMessage): void {
   const available = typeof message.available === 'string' ? message.available : '';
   if (!currency || !available || !Number.isFinite(Number(available))) return;
 
-  emit({
+  const patch: Partial<BalanceState> = {
     available: { ...state.available, [currency]: available },
     error: null,
-  });
+  };
+  // The same frame also carries the frozen amount, so the total moves with it. Absent on some
+  // events, in which case the previous figure is kept rather than blanked.
+  const hold = typeof message.hold === 'string' ? message.hold : '';
+  if (hold && Number.isFinite(Number(hold))) {
+    patch.holds = { ...state.holds, [currency]: hold };
+  }
+  emit(patch);
 }
 
 /**

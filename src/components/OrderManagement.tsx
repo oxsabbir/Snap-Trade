@@ -1,6 +1,7 @@
 import { memo, useCallback, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { AssetsPanel } from '@/components/AssetsPanel';
 import { TrayIcon } from '@/components/Icons';
 import { useOpenOrders, type OpenOrder } from '@/hooks/useOpenOrders';
 import { formatAmount } from '@/utils/format';
@@ -183,11 +184,7 @@ export const OrderManagement = memo(function OrderManagement({
           activeIndex={activeTab}
           onPress={setActiveTab}
         />
-        <View style={styles.inactiveContent}>
-          <Text style={styles.inactiveText}>
-            {TABS[activeTab]} — coming soon
-          </Text>
-        </View>
+        <AssetsPanel symbol={symbol} />
       </View>
     );
   }
@@ -269,27 +266,26 @@ function TabBar({
         <Pressable
           key={tab}
           onPress={() => onPress(i)}
-          style={[
-            styles.tab,
-            i === activeIndex && styles.tabActive,
-          ]}
+          style={styles.tab}
           accessibilityRole="tab"
           accessibilityState={{ selected: i === activeIndex }}
         >
-          <Text
-            style={[
-              styles.tabText,
-              i === activeIndex && styles.tabTextActive,
-            ]}
-          >
-            {tab}
-          </Text>
-          <View
-            style={[
-              styles.tabIndicator,
-              i === activeIndex && styles.tabIndicatorActive,
-            ]}
-          />
+          <View style={styles.tabLabel}>
+            <Text
+              style={[
+                styles.tabText,
+                i === activeIndex && styles.tabTextActive,
+              ]}
+            >
+              {tab}
+            </Text>
+            <View
+              style={[
+                styles.tabIndicator,
+                i === activeIndex && styles.tabIndicatorActive,
+              ]}
+            />
+          </View>
         </Pressable>
       ))}
     </View>
@@ -377,6 +373,9 @@ const styles = StyleSheet.create({
   container: {
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.border,
+    // Separates this section from the order form above it, which otherwise sits right on the
+    // divider once the book and the form finish at the same line.
+    marginTop: spacing.md,
     paddingTop: spacing.md,
     paddingHorizontal: spacing.md,
     paddingBottom: spacing.lg,
@@ -385,31 +384,49 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: spacing.xs,
     marginBottom: spacing.sm,
+    // The bar needs a fill of its own for the drop shadow to render on Android; it is the screen
+    // colour, so the only things that show are the hairline and the soft shadow beneath it.
+    backgroundColor: colors.bg,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.25,
+    shadowRadius: 6,
+    elevation: 4,
   },
   tab: {
     flex: 1,
-    flexDirection: 'column',
-    alignItems: 'center',
-    paddingVertical: spacing.xs,
-    minHeight: 40,
+    // Stretch so the label group fills the tab's half of the bar, giving the underline the full
+    // tab width rather than only the text width.
+    alignItems: 'stretch',
+    // Pushes the label down so its underline lands on the bar's bottom edge.
+    justifyContent: 'flex-end',
+    height: 40,
   },
-  tabActive: {},
+  tabLabel: {
+    alignItems: 'center',
+  },
   tabText: {
     color: colors.textMuted,
     fontSize: 13,
     fontWeight: '600',
+    textAlign: 'center',
+    marginBottom: 8,
   },
   tabTextActive: {
-    color: colors.text,
+    color: '#FFFFFF',
   },
   tabIndicator: {
+    // Stretches across the full tab, so the underline marks the tab's half of the bar. Always
+    // rendered, transparent when inactive, so switching tabs cannot shift the layout.
+    alignSelf: 'stretch',
     height: 2,
     borderRadius: 1,
-    marginTop: 2,
     backgroundColor: 'transparent',
   },
   tabIndicatorActive: {
-    backgroundColor: colors.accent,
+    backgroundColor: '#FFFFFF',
   },
   subTabBar: {
     flexDirection: 'row',
@@ -626,14 +643,5 @@ const styles = StyleSheet.create({
     color: colors.textFaint,
     fontSize: 11,
     fontWeight: '600',
-  },
-  inactiveContent: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: spacing.xl,
-  },
-  inactiveText: {
-    color: colors.textFaint,
-    fontSize: 13,
   },
 });

@@ -89,6 +89,14 @@ export function BackIcon({ size = 20, color = colors.text }: IconProps) {
   );
 }
 
+export function ChevronRightIcon({ size = 18, color = colors.textMuted }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path d="M9 5l7 7-7 7" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+    </Svg>
+  );
+}
+
 export function StarIcon({ size = 16, color = colors.textFaint, filled = false }: IconProps & { filled?: boolean }) {
   const d = 'M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8L3.5 9.7l5.9-.9L12 3.5z';
   return (
