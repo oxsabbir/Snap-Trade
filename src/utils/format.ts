@@ -96,16 +96,16 @@ export function formatTime(timestamp: number | null): string {
 }
 
 /**
- * `YYYY-MM-DD HH:MM` for a history row. Local time, since the user reads it against their own day,
- * and a fixed-width layout so the column of timestamps lines up down the list.
+ * `MM/DD/YYYY HH:mm:ss`, 24-hour, for a history row. Local time, since the user reads it against
+ * their own day, and a fixed-width layout so the column of timestamps lines up down the list.
  */
 export function formatDateTime(timestamp: number | null): string {
   if (!timestamp) return '--';
   const date = new Date(timestamp);
   const pad = (n: number) => n.toString().padStart(2, '0');
   return (
-    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ` +
-    `${pad(date.getHours())}:${pad(date.getMinutes())}`
+    `${pad(date.getMonth() + 1)}/${pad(date.getDate())}/${date.getFullYear()} ` +
+    `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
   );
 }
 

@@ -16,7 +16,7 @@ type Props = {
   available?: Record<string, string>;
 };
 
-const TABS = ["Open Orders", "Order History", "Assets"] as const;
+const TABS = ["Open Orders", "Assets", "Order History"] as const;
 
 /** Floor for a tab's width, so all of them stay legible and the bar scrolls instead of squeezing. */
 const TAB_MIN_WIDTH = 96;
@@ -190,9 +190,9 @@ export const OrderManagement = memo(function OrderManagement({
 
   let content: ReactNode;
   if (activeTab === 1) {
-    content = <OrderHistoryPanel symbol={symbol} />;
-  } else if (activeTab === 2) {
     content = <AssetsPanel symbol={symbol} />;
+  } else if (activeTab === 2) {
+    content = <OrderHistoryPanel symbol={symbol} />;
   } else {
     content = (
       <>
@@ -267,21 +267,17 @@ function TabBar({
             accessibilityRole="tab"
             accessibilityState={{ selected: active }}
           >
-            <View style={styles.tabLabel}>
-              {/* A shrink-wrapped column so the underline is only as wide as the label's text,
-                  which is what "aligned to the tab's text area" means here. */}
-              <View style={styles.tabUnderlineWrap}>
-                <Text style={[styles.tabText, active && styles.tabTextActive]}>
-                  {tab}
-                </Text>
-                <View
-                  style={[
-                    styles.tabIndicator,
-                    active && styles.tabIndicatorActive,
-                  ]}
-                />
-              </View>
-            </View>
+            <Text style={[styles.tabText, active && styles.tabTextActive]} numberOfLines={1}>
+              {tab}
+            </Text>
+            {/* Pinned to the tab's bottom and stretched across it, so the active underline is the
+                full width of the tab rather than only the label. */}
+            <View
+              style={[
+                styles.tabIndicator,
+                active && styles.tabIndicatorActive,
+              ]}
+            />
           </Pressable>
         );
       })}
@@ -325,16 +321,10 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     flexBasis: 0,
     minWidth: TAB_MIN_WIDTH,
-    height: 40,
-  },
-  tabLabel: {
-    // Fills the tab so the label and its underline centre as one group.
-    flex: 1,
+    // Tall enough to give the label even space above and below, with the underline at the edge.
+    height: 44,
     alignItems: "center",
     justifyContent: "center",
-  },
-  tabUnderlineWrap: {
-    alignItems: "center",
   },
   tabText: {
     color: colors.textMuted,
@@ -350,10 +340,12 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
   },
   tabIndicator: {
-    // Always rendered, transparent when inactive, so switching tabs cannot shift the layout. It
-    // stretches to the wrap around the text, so the underline is exactly as wide as the label.
-    marginTop: 3,
-    alignSelf: "stretch",
+    // Always rendered, transparent when inactive, so switching tabs cannot shift the layout. Pinned
+    // to the bottom and stretched across the tab, so the underline spans the tab's full width.
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
     height: 2,
     backgroundColor: "transparent",
   },

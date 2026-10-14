@@ -154,11 +154,11 @@ export async function fetchClassicOpenOrders(): Promise<unknown[]> {
 }
 
 /**
- * How many historized orders one page asks for. Both books cap a page at 100, and 20 is about a
- * screen of rows: the History tab shows this page first and unfurls older pages as the user scrolls,
- * rather than paying for rows nobody has looked at yet.
+ * How many historized orders one page asks for. The History tab shows this first page and unfurls
+ * older pages as the user scrolls, rather than paying for rows nobody has looked at yet. 10 is the
+ * classic book's minimum `pageSize` and roughly a screen of rows.
  */
-export const ORDER_HISTORY_PAGE_SIZE = 20;
+export const ORDER_HISTORY_PAGE_SIZE = 10;
 
 /** One page of a completed-order listing, shared shape for both books. */
 export type OrderHistoryPage = {

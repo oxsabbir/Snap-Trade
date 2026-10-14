@@ -7,10 +7,12 @@ import {
   View,
 } from "react-native";
 
+import { OrderHistoryCard } from "@/components/OrderHistoryCard";
 import { TrayIcon } from "@/components/Icons";
-import { useOrderHistory, type OrderHistoryEntry } from "@/hooks/useOrderHistory";
+import { useOrderHistory } from "@/hooks/useOrderHistory";
+import { useSymbolRules } from "@/hooks/useSymbolRules";
 import { colors, radius, spacing } from "@/theme";
-import { formatAmount, formatDateTime, formatPrice } from "@/utils/format";
+import { decimalsFromIncrement } from "@/utils/format";
 
 type Props = {
   /** The pair being traded; the HF leg of the history is scoped to it. */
@@ -19,70 +21,6 @@ type Props = {
 
 const EMPTY_TRAY_SIZE = 48;
 
-/** Average execution price, or a dash when the order never filled. */
-function averageDisplay(entry: OrderHistoryEntry): string {
-  if (entry.avgPrice === null) return "—";
-  const value = Number(entry.avgPrice);
-  return Number.isFinite(value) ? formatPrice(value) : "—";
-}
-
-function statusColor(status: OrderHistoryEntry["status"]): string {
-  if (status === "filled") return colors.up;
-  if (status === "cancelled") return colors.down;
-  return colors.textMuted;
-}
-
-function statusLabel(status: OrderHistoryEntry["status"]): string {
-  if (status === "filled") return "Filled";
-  if (status === "cancelled") return "Cancelled";
-  return "Open";
-}
-
-/**
- * One finished order. Same compact shape as the open-orders row — a side accent bar, the pair on
- * top with its side and type, and the numbers beneath — so the two tabs read as one list.
- */
-function HistoryRow({ entry }: { entry: OrderHistoryEntry }) {
-  const isBuy = entry.side === "buy";
-  const sideColor = isBuy ? colors.up : colors.down;
-
-  return (
-    <View style={styles.row}>
-      <View style={[styles.sideIndicator, { backgroundColor: sideColor }]} />
-      <View style={styles.rowMain}>
-        <View style={styles.rowTop}>
-          <Text style={[styles.symbol, { color: sideColor }]} numberOfLines={1}>
-            {entry.symbol.replace("-", "/")}
-          </Text>
-          <Text style={styles.side}>{isBuy ? "Buy" : "Sell"}</Text>
-          <Text style={styles.type}>
-            {entry.type === "limit" ? "Limit" : "Market"}
-          </Text>
-          <View style={styles.spacer} />
-          <Text style={[styles.status, { color: statusColor(entry.status) }]}>
-            {statusLabel(entry.status)}
-          </Text>
-        </View>
-
-        <View style={styles.rowBottom}>
-          <View style={styles.stats}>
-            <Text style={styles.detail} numberOfLines={1}>
-              Avg {averageDisplay(entry)}
-            </Text>
-            <Text style={styles.detail} numberOfLines={1}>
-              Exec {formatAmount(Number(entry.filledSize) || 0)} /{" "}
-              {formatAmount(Number(entry.size) || 0)}
-            </Text>
-          </View>
-          <Text style={styles.time} numberOfLines={1}>
-            {formatDateTime(entry.createdAt)}
-          </Text>
-        </View>
-      </View>
-    </View>
-  );
-}
-
 /**
  * The Order History tab. Finished orders only — filled or cancelled — which the exchange keeps for
  * a bounded window, unlike the live rows Open Orders shows. The data comes from the same signed
@@ -90,6 +28,11 @@ function HistoryRow({ entry }: { entry: OrderHistoryEntry }) {
  */
 function OrderHistoryPanelComponent({ symbol }: Props) {
   const { orders, isLoading, isLoadingMore, error, refresh } = useOrderHistory(symbol);
+  // The card prints the numbers at the pair's own precision, using the same `/symbols` increments
+  // the order book and trade panel already read, rather than a hardcoded decimal count.
+  const { rules } = useSymbolRules(symbol);
+  const priceDecimals = rules ? decimalsFromIncrement(rules.priceIncrement) : undefined;
+  const sizeDecimals = rules ? decimalsFromIncrement(rules.baseIncrement) : undefined;
 
   const handleRetry = useCallback(() => {
     refresh();
@@ -129,9 +72,15 @@ function OrderHistoryPanelComponent({ symbol }: Props) {
           </View>
         )
       ) : (
-        <View style={styles.list}>
+        <View>
           {orders.map((entry) => (
-            <HistoryRow key={entry.orderId} entry={entry} />
+            <OrderHistoryCard
+              key={entry.orderId}
+              entry={entry}
+              symbol={symbol}
+              priceDecimals={priceDecimals}
+              sizeDecimals={sizeDecimals}
+            />
           ))}
           {/* Older pages are paged in as the screen nears its bottom; this is the only place the
               append is visible while it is in flight. */}
@@ -183,83 +132,8 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     fontSize: 13,
   },
-  list: {
-    gap: spacing.xs,
-  },
   footer: {
     alignItems: "center",
     paddingVertical: spacing.sm,
-  },
-  row: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.xs,
-    paddingVertical: spacing.xs,
-    paddingHorizontal: spacing.sm,
-    backgroundColor: colors.surface,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.border,
-    borderRadius: radius.sm,
-  },
-  sideIndicator: {
-    width: 3,
-    alignSelf: "stretch",
-    borderRadius: 1.5,
-    minHeight: 30,
-  },
-  rowMain: {
-    flex: 1,
-    gap: 2,
-  },
-  rowTop: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.xs,
-  },
-  symbol: {
-    fontSize: 12,
-    fontWeight: "700",
-    fontVariant: ["tabular-nums"],
-  },
-  side: {
-    fontSize: 10,
-    fontWeight: "600",
-    color: colors.textMuted,
-  },
-  type: {
-    color: colors.textFaint,
-    fontSize: 9,
-    fontWeight: "600",
-    textTransform: "uppercase",
-    letterSpacing: 0.3,
-  },
-  spacer: {
-    flex: 1,
-  },
-  status: {
-    fontSize: 10,
-    fontWeight: "700",
-  },
-  rowBottom: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: spacing.sm,
-  },
-  stats: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.sm,
-    flexShrink: 1,
-  },
-  detail: {
-    color: colors.textMuted,
-    fontSize: 10,
-    fontVariant: ["tabular-nums"],
-  },
-  time: {
-    color: colors.textFaint,
-    fontSize: 10,
-    fontVariant: ["tabular-nums"],
   },
 });
