@@ -1,5 +1,13 @@
-import { useEffect } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useEffect } from 'react';
+import {
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { CoinDetail } from '@/components/CoinDetail';
@@ -7,6 +15,7 @@ import { OrderManagement } from '@/components/OrderManagement';
 import { TradeScreen } from '@/components/TradeScreen';
 import { useAccountBalance } from '@/hooks/useAccountBalance';
 import { snapLog } from '@/lib/snapLog';
+import { loadMoreOrderHistory } from '@/state/orderHistory';
 import { colors, radius, spacing } from '@/theme';
 
 type Props = {
@@ -16,6 +25,12 @@ type Props = {
   /** Shown only when the screen is a pushed route rather than a tab. */
   onBack?: () => void;
 };
+
+/**
+ * How close to the bottom of the page, in points, the History tab asks for its next page. Wide
+ * enough that the rows land before the user reaches the end, without firing pages they never see.
+ */
+const HISTORY_LOAD_MORE_THRESHOLD = 320;
 
 /**
  * The trade screen's content, shared by the tab route and the signal deep-link route. The two
@@ -30,6 +45,21 @@ export function TradeRouteView({ symbol, name, decimals, onBack }: Props) {
   useEffect(() => {
     snapLog('TradeScreenFirstRender', symbol);
   }, [symbol]);
+
+  // The route owns the screen's only scroll view, so the History tab cannot detect its own end:
+  // this polls how far the page has scrolled and pokes the history store, which ignores the signal
+  // unless History is open with an older page to fetch.
+  const handleScroll = useCallback(
+    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const { layoutMeasurement, contentOffset, contentSize } = event.nativeEvent;
+      const distanceFromBottom =
+        contentSize.height - contentOffset.y - layoutMeasurement.height;
+      if (distanceFromBottom <= HISTORY_LOAD_MORE_THRESHOLD) {
+        void loadMoreOrderHistory(symbol);
+      }
+    },
+    [symbol],
+  );
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
@@ -58,6 +88,8 @@ export function TradeRouteView({ symbol, name, decimals, onBack }: Props) {
         // gives the same gesture to the scroll view and page-zooms the layout underneath it.
         maximumZoomScale={1}
         showsVerticalScrollIndicator={false}
+        onScroll={handleScroll}
+        scrollEventThrottle={16}
       >
         <CoinDetail symbol={symbol} name={name} decimals={decimals} />
         <TradeScreen symbol={symbol} />

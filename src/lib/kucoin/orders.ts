@@ -154,38 +154,79 @@ export async function fetchClassicOpenOrders(): Promise<unknown[]> {
 }
 
 /**
- * How many historized orders one page asks for. Both books cap a page at 100, and 50 is enough to
- * fill the tab's first screen without paying for rows the user has not scrolled to.
+ * How many historized orders one page asks for. Both books cap a page at 100, and 20 is about a
+ * screen of rows: the History tab shows this page first and unfurls older pages as the user scrolls,
+ * rather than paying for rows nobody has looked at yet.
  */
-export const ORDER_HISTORY_PAGE_SIZE = 50;
+export const ORDER_HISTORY_PAGE_SIZE = 20;
+
+/** One page of a completed-order listing, shared shape for both books. */
+export type OrderHistoryPage = {
+  items: unknown[];
+  /** False when this was the last page, so the caller knows to stop asking. */
+  hasMore: boolean;
+};
+
+export type ClassicOrderHistoryPage = OrderHistoryPage & {
+  /** The 1-based page number this result represents; `+1` requests the next one. */
+  page: number;
+};
+
+export type HighFrequencyOrderHistoryPage = OrderHistoryPage & {
+  /** The `lastId` to pass back for the next page, or `null` once the book is exhausted. */
+  lastId: string | null;
+};
 
 /**
- * Historized (filled or cancelled) classic orders, across every pair.
+ * Historized (filled or cancelled) classic orders, across every pair, one page at a time.
  *
- * The classic list is account-wide, so, unlike the HF book, one request covers the whole account.
- * KuCoin only keeps this data for a bounded window — roughly the last 7 days for fills and the last
- * 2 days for pure cancellations — and silently clamps a wider range, so no explicit time filter is
- * sent and the default window is accepted.
+ * The listing is account-wide and page-based — `currentPage`/`pageSize` — and the response carries
+ * `totalPage`, which is what tells us when to stop. KuCoin only keeps this data for a bounded
+ * window — roughly the last 7 days for fills and the last 2 days for pure cancellations — and
+ * silently clamps a wider range, so no explicit time filter is sent and the default window is
+ * accepted.
  */
-export async function fetchClassicOrderHistory(): Promise<unknown[]> {
+export async function fetchClassicOrderHistory(page = 1): Promise<ClassicOrderHistoryPage> {
   const data = await request<unknown>('/orders', {
     signed: true,
-    query: { status: 'done', pageSize: ORDER_HISTORY_PAGE_SIZE },
+    query: { status: 'done', pageSize: ORDER_HISTORY_PAGE_SIZE, currentPage: page },
   });
-  return asOrderList(data);
+  const items = asOrderList(data);
+  const totalPage = (data as { totalPage?: unknown } | null)?.totalPage;
+  const hasMore =
+    typeof totalPage === 'number' && totalPage > 0
+      ? page < totalPage
+      : items.length >= ORDER_HISTORY_PAGE_SIZE;
+  return { items, hasMore, page };
 }
 
 /**
- * Historized HF orders for one pair.
+ * Historized HF orders for one pair, one page at a time.
  *
  * The HF book has no account-wide completed listing: `GET /hf/orders/done` requires a `symbol`, so
- * the history view asks for the pair it is showing. The traded pair is what the user is looking at,
- * which is also the only scope this endpoint can answer.
+ * the history view asks for the pair it is showing. It pages by cursor rather than by page number —
+ * the response's `lastId` is fed back as the `lastId` query for the next page — and it hands back a
+ * short page once there is nothing older left.
  */
-export async function fetchHighFrequencyOrderHistory(symbol: string): Promise<unknown[]> {
+export async function fetchHighFrequencyOrderHistory(
+  symbol: string,
+  lastId?: string | null
+): Promise<HighFrequencyOrderHistoryPage> {
   const data = await request<unknown>('/hf/orders/done', {
     signed: true,
-    query: { symbol, limit: ORDER_HISTORY_PAGE_SIZE },
+    query: {
+      symbol,
+      limit: ORDER_HISTORY_PAGE_SIZE,
+      ...(lastId ? { lastId } : {}),
+    },
   });
-  return asOrderList(data);
+  const items = asOrderList(data);
+  const next = (data as { lastId?: unknown } | null)?.lastId;
+  const nextLastId =
+    typeof next === 'string' || (typeof next === 'number' && Number.isFinite(next))
+      ? String(next)
+      : null;
+  // No cursor to continue from, or a short page, means the book has no older rows to hand back.
+  const hasMore = nextLastId !== null && items.length >= ORDER_HISTORY_PAGE_SIZE;
+  return { items, hasMore, lastId: nextLastId };
 }

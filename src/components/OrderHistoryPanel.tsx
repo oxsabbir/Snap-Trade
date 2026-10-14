@@ -89,7 +89,7 @@ function HistoryRow({ entry }: { entry: OrderHistoryEntry }) {
  * endpoints the rest of the screen uses; nothing here is mocked.
  */
 function OrderHistoryPanelComponent({ symbol }: Props) {
-  const { orders, isLoading, error, refresh } = useOrderHistory(symbol);
+  const { orders, isLoading, isLoadingMore, error, refresh } = useOrderHistory(symbol);
 
   const handleRetry = useCallback(() => {
     refresh();
@@ -133,6 +133,13 @@ function OrderHistoryPanelComponent({ symbol }: Props) {
           {orders.map((entry) => (
             <HistoryRow key={entry.orderId} entry={entry} />
           ))}
+          {/* Older pages are paged in as the screen nears its bottom; this is the only place the
+              append is visible while it is in flight. */}
+          {isLoadingMore ? (
+            <View style={styles.footer}>
+              <ActivityIndicator color={colors.accent} size="small" />
+            </View>
+          ) : null}
         </View>
       )}
     </View>
@@ -178,6 +185,10 @@ const styles = StyleSheet.create({
   },
   list: {
     gap: spacing.xs,
+  },
+  footer: {
+    alignItems: "center",
+    paddingVertical: spacing.sm,
   },
   row: {
     flexDirection: "row",
