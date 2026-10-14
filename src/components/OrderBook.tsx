@@ -11,7 +11,7 @@ import { MidPrice } from "@/components/MidPrice";
 import { useLevel2Book } from "@/hooks/useLevel2Book";
 import { useOrderBook } from "@/hooks/useOrderBook";
 import { useSymbolRules } from "@/hooks/useSymbolRules";
-import { aggregationOptions, type DepthRow } from "@/lib/kucoin/orderbook";
+import { aggregationOptions, VISIBLE_LEVELS, type DepthRow } from "@/lib/kucoin/orderbook";
 import { colors, radius, spacing } from "@/theme";
 import { decimalsFromIncrement, formatCompactSize, formatPrice } from "@/utils/format";
 
@@ -23,6 +23,9 @@ type Props = {
 };
 
 const ROW_HEIGHT = 26;
+
+/** A single-sided view fills the whole column, so it shows roughly twice the split view's depth. */
+const SINGLE_SIDE_LEVELS = 10;
 
 const VIEW_MODES: OrderBookViewMode[] = ["split", "bids", "asks"];
 
@@ -110,7 +113,11 @@ function OrderBookBase({ symbol, onPriceSelect }: Props) {
     setAggregation(tickSize);
   }
 
-  const depth = useOrderBook(snapshot, aggregation);
+  const depth = useOrderBook(
+    snapshot,
+    aggregation,
+    viewMode === "split" ? VISIBLE_LEVELS : SINGLE_SIDE_LEVELS,
+  );
   const options = useMemo(() => aggregationOptions(tickSize), [tickSize]);
   const priceDecimals = decimalsFromIncrement(tickSize);
   const sizeDecimals = decimalsFromIncrement(baseIncrement);

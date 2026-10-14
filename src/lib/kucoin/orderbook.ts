@@ -44,11 +44,13 @@ export type Level2Snapshot = {
 export const EMPTY_DEPTH: OrderBookDepth = { asks: [], bids: [], bidPercent: 50, askPercent: 50 };
 
 /**
- * Levels shown per side. Five is what fits beside the order form without turning the book into a
- * wall of rows. It is applied *before* the cumulative walk rather than by slicing the finished
- * rows, so the totals, the bar widths and the bid/ask balance all describe exactly the levels on
- * screen. Slicing afterwards would scale the bars against a hundred levels that are not drawn, and
- * the five nearest the middle would all read as nearly empty.
+ * Default levels shown per side — the split view's share, the five that fit beside the order form
+ * without turning the book into a wall of rows. A single-sided view fills the whole column and
+ * passes a larger count (see `SINGLE_SIDE_LEVELS`). The count is applied *before* the cumulative
+ * walk rather than by slicing the finished rows, so the totals, the bar widths and the bid/ask
+ * balance all describe exactly the levels on screen. Slicing afterwards would scale the bars
+ * against a hundred levels that are not drawn, and the nearest levels would all read as nearly
+ * empty.
  */
 export const VISIBLE_LEVELS = 5;
 
