@@ -1,4 +1,4 @@
-import { StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text } from 'react-native';
 
 import { useTicker } from '@/state/ticker';
 import { colors, spacing } from '@/theme';
@@ -12,6 +12,12 @@ type Props = {
   /** Display precision for the pair's price step. */
   priceDecimals: number;
   quoteCurrency: string;
+  /**
+   * Fills the trade form's Price field with the live mid when the band is tapped, the same way a
+   * tap on a depth row does. The value is a plain decimal at the pair's tick precision, so it drops
+   * straight into the form's numeric field without the thousands separators `formatPrice` adds.
+   */
+  onPriceSelect?: (price: string) => void;
 };
 
 /**
@@ -26,14 +32,21 @@ type Props = {
  * label, and the since-open reading belongs to the header, which has the bucket and derives
  * it there.
  */
-export function MidPrice({ symbol, priceDecimals, quoteCurrency }: Props) {
+export function MidPrice({ symbol, priceDecimals, quoteCurrency, onPriceSelect }: Props) {
   const { update, direction } = useTicker(symbol);
   const hasPrice = update !== null && Number.isFinite(update.price);
   const price = hasPrice ? update.price : null;
   const fiat = price !== null && USD_STABLES.has(quoteCurrency) ? price : null;
+  const tappable = price !== null && onPriceSelect !== undefined;
 
   return (
-    <View style={styles.middle}>
+    <Pressable
+      onPress={tappable ? () => onPriceSelect(price.toFixed(priceDecimals)) : undefined}
+      disabled={!tappable}
+      style={styles.middle}
+      accessibilityRole={tappable ? 'button' : undefined}
+      accessibilityLabel={tappable ? `Use price ${formatPrice(price, priceDecimals)}` : undefined}
+    >
       <Text
         style={[
           styles.price,
@@ -43,7 +56,7 @@ export function MidPrice({ symbol, priceDecimals, quoteCurrency }: Props) {
         {price === null ? '—' : formatPrice(price, priceDecimals)}
       </Text>
       {fiat !== null ? <Text style={styles.fiat}>≈${formatPrice(fiat, 2)}</Text> : null}
-    </View>
+    </Pressable>
   );
 }
 

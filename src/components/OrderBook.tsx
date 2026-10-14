@@ -13,7 +13,7 @@ import { useOrderBook } from "@/hooks/useOrderBook";
 import { useSymbolRules } from "@/hooks/useSymbolRules";
 import { aggregationOptions, type DepthRow } from "@/lib/kucoin/orderbook";
 import { colors, radius, spacing } from "@/theme";
-import { decimalsFromIncrement, formatPrice } from "@/utils/format";
+import { decimalsFromIncrement, formatCompactSize, formatPrice } from "@/utils/format";
 
 export type OrderBookViewMode = "split" | "bids" | "asks";
 
@@ -69,7 +69,7 @@ const DepthRowView = memo(function DepthRowView({
         {formatPrice(Number(row.price), priceDecimals)}
       </Text>
       <Text style={styles.totalText} numberOfLines={1}>
-        {formatPrice(Number(row.total), sizeDecimals)}
+        {formatCompactSize(Number(row.total), sizeDecimals)}
       </Text>
     </Pressable>
   );
@@ -150,6 +150,7 @@ function OrderBookBase({ symbol, onPriceSelect }: Props) {
         symbol={symbol}
         priceDecimals={priceDecimals}
         quoteCurrency={quoteCurrency}
+        onPriceSelect={onPriceSelect}
       />
 
       {viewMode !== "asks" ? (
@@ -308,8 +309,8 @@ const styles = StyleSheet.create({
     fontVariant: ["tabular-nums"],
   },
   totalText: {
-    color: colors.textMuted,
-    fontSize: 10,
+    color: colors.text,
+    fontSize: 12,
     paddingRight: 2,
     fontVariant: ["tabular-nums"],
   },

@@ -88,6 +88,33 @@ export function formatCompact(value: number, maxDecimals = 2): string {
   return value.toFixed(abs >= 1 ? 0 : 2);
 }
 
+const SIZE_UNITS = [
+  { threshold: 1_000_000_000, suffix: 'B' },
+  { threshold: 1_000_000, suffix: 'M' },
+  { threshold: 1_000, suffix: 'k' },
+] as const;
+
+/**
+ * Order-book cumulative size, drawn as the exchange writes it: `680`, `2.7k`, `124.3k`. Below a
+ * thousand it keeps `decimals` places so small crypto sizes stay readable and trims trailing zeros;
+ * at and above a thousand it folds to one decimal with a lower-case `k`/`M`/`B` suffix.
+ */
+export function formatCompactSize(value: number, decimals: number): string {
+  if (!Number.isFinite(value)) return '-';
+  const abs = Math.abs(value);
+  const sign = value < 0 ? '-' : '';
+
+  for (const unit of SIZE_UNITS) {
+    if (abs >= unit.threshold) {
+      const scaled = (abs / unit.threshold).toFixed(1).replace(/\.0$/, '');
+      return `${sign}${scaled}${unit.suffix}`;
+    }
+  }
+
+  const fixed = abs.toFixed(decimals);
+  return `${sign}${fixed.includes('.') ? fixed.replace(/\.?0+$/, '') : fixed}`;
+}
+
 export function formatTime(timestamp: number | null): string {
   if (!timestamp) return '--:--:--';
   const date = new Date(timestamp);
