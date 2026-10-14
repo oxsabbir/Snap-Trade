@@ -1,19 +1,12 @@
 import { router } from "expo-router";
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 
-import { CoinDetail } from "@/components/CoinDetail";
-import { OrderManagement } from "@/components/OrderManagement";
-import { TradeScreen } from "@/components/TradeScreen";
-import { useAccountBalance } from "@/hooks/useAccountBalance";
+import { TradeRouteView } from "@/components/TradeRouteView";
 import { useActiveCoin } from "@/state/activeCoin";
 import { colors, radius, spacing } from "@/theme";
 
 export default function TradeScreenRoute() {
   const coin = useActiveCoin();
-  // The order form reads this from the shared store too, so this is one `/accounts` request
-  // shared by both consumers rather than one each.
-  const { available } = useAccountBalance();
 
   if (!coin) {
     return (
@@ -35,51 +28,15 @@ export default function TradeScreenRoute() {
   }
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={["top"]}>
-      {/* One scroll view for the whole screen, so the sections below the chart are added as
-          siblings here rather than each bringing its own scrolling. Nothing below may nest a
-          scroll view of its own; a section that outgrows the screen grows this one instead. */}
-      <ScrollView
-        style={styles.scroll}
-        contentContainerStyle={styles.content}
-        keyboardShouldPersistTaps="handled"
-        automaticallyAdjustKeyboardInsets
-        // The chart handles its own two-finger pinch to zoom the candles. Left enabled, iOS
-        // gives the same gesture to the scroll view and page-zooms the layout underneath it.
-        maximumZoomScale={1}
-        showsVerticalScrollIndicator={false}
-      >
-        <CoinDetail
-          symbol={coin.symbol}
-          name={coin.name}
-          decimals={coin.decimals}
-        />
-        <TradeScreen symbol={coin.symbol} />
-        <OrderManagement
-          symbol={coin.symbol}
-          onDeposit={() => {}}
-          onTutorial={() => {}}
-          available={available}
-        />
-      </ScrollView>
-    </SafeAreaView>
+    <TradeRouteView
+      symbol={coin.symbol}
+      name={coin.name}
+      decimals={coin.decimals}
+    />
   );
 }
 
 const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: colors.bg,
-  },
-  scroll: {
-    flex: 1,
-  },
-  content: {
-    // A section that fills the screen has to be allowed to grow past it, so the container is
-    // not height-capped: this is what lets the order view scroll under the tab bar.
-    flexGrow: 1,
-    paddingBottom: spacing.lg,
-  },
   empty: {
     flex: 1,
     alignItems: "center",
