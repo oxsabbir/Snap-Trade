@@ -16,7 +16,6 @@ type Props = {
 };
 
 const TABS = ["Open Orders", "Assets"] as const;
-const SUB_TABS = ["Open Orders", "Advanced Orders"] as const;
 
 const EMPTY_TRAY_SIZE = 64;
 
@@ -166,22 +165,12 @@ export const OrderManagement = memo(function OrderManagement({
   available = {},
 }: Props) {
   const [activeTab, setActiveTab] = useState(0);
-  const [activeSubTab, setActiveSubTab] = useState(0);
-  const [hideOtherPairs, setHideOtherPairs] = useState(false);
 
-  const { orders, openCount, isLoading, error, cancelling, cancelOrder } =
-    useOpenOrders();
+  const { orders, isLoading, error, cancelling, cancelOrder } = useOpenOrders();
 
   const usdtBalance = available["USDT"] ?? "0";
 
-  // Filtering is presentational only, so toggling it never re-requests the list.
-  const visibleOrders = useMemo(
-    () =>
-      hideOtherPairs
-        ? orders.filter((order) => order.symbol === symbol)
-        : orders,
-    [orders, hideOtherPairs, symbol],
-  );
+  const visibleOrders = useMemo(() => orders, [orders]);
 
   const handleCancel = useCallback(
     (orderId: string) => {
@@ -207,18 +196,6 @@ export const OrderManagement = memo(function OrderManagement({
   return (
     <View style={styles.container}>
       <TabBar tabs={TABS} activeIndex={activeTab} onPress={setActiveTab} />
-
-      <SubTabBar
-        tabs={SUB_TABS}
-        activeIndex={activeSubTab}
-        counts={[openCount, 0]}
-        onPress={setActiveSubTab}
-        // Stop-loss and OCO are not implemented, so the tab stays visible for layout but refuses to
-        // be opened rather than presenting a placeholder as if it were a working screen.
-        disabledFrom={1}
-      />
-
-      <FilterRow hideOtherPairs={hideOtherPairs} onToggle={setHideOtherPairs} />
 
       {error ? (
         <View style={styles.errorBanner}>
@@ -295,209 +272,7 @@ function TabBar({
   );
 }
 
-function SubTabBar({
-  tabs,
-  activeIndex,
-  counts,
-  onPress,
-  disabledFrom = tabs.length,
-}: {
-  tabs: readonly string[];
-  activeIndex: number;
-  counts: readonly number[];
-  onPress: (index: number) => void;
-  /** Tabs at or past this index are not built yet and must not be selectable. */
-  disabledFrom?: number;
-}) {
-  return (
-    <View style={styles.subTabBar}>
-      {tabs.map((tab, i) => {
-        const disabled = i >= disabledFrom;
-        return (
-          <Pressable
-            key={tab}
-            onPress={() => {
-              // Nothing to show, so the tap is refused rather than opening an empty screen that
-              // looks like the app lost the orders.
-              if (disabled) return;
-              onPress(i);
-            }}
-            style={[styles.subTab, i === activeIndex && styles.subTabActive]}
-            accessibilityRole="tab"
-            accessibilityState={{ selected: i === activeIndex, disabled }}
-          >
-            <Text
-              style={[
-                styles.subTabText,
-                i === activeIndex && styles.subTabTextActive,
-                disabled && styles.subTabTextDisabled,
-              ]}
-            >
-              {tab} ({counts[i] ?? 0})
-            </Text>
-          </Pressable>
-        );
-      })}
-    </View>
-  );
-}
 
-function FilterRow({
-  hideOtherPairs,
-  onToggle,
-}: {
-  hideOtherPairs: boolean;
-  onToggle: (value: boolean) => void;
-}) {
-  return (
-    <View style={styles.filterRow}>
-      <Pressable
-        onPress={() => onToggle(!hideOtherPairs)}
-        style={styles.filterBtn}
-        accessibilityRole="checkbox"
-        accessibilityState={{ checked: hideOtherPairs }}
-        hitSlop={8}
-      >
-        <View
-          style={[styles.checkbox, hideOtherPairs && styles.checkboxChecked]}
-        >
-          {hideOtherPairs && <View style={styles.checkboxInner} />}
-        </View>
-        <Text style={styles.filterLabel}>Hide other pairs</Text>
-      </Pressable>
-    </View>
-  );
-}
-
-const styles = StyleSheet.create({
-  container: {
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.border,
-    // Separates this section from the order form above it, which otherwise sits right on the
-    // divider once the book and the form finish at the same line.
-    marginTop: spacing.md,
-    paddingHorizontal: spacing.md,
-    paddingBottom: spacing.sm,
-  },
-  tabBar: {
-    flexDirection: "row",
-    gap: spacing.xl,
-    marginBottom: spacing.md,
-    // The bar needs a fill of its own for the drop shadow to render on Android; it is the screen
-    // colour, so the only things that show are the hairline and the soft shadow beneath it.
-    backgroundColor: colors.bg,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.border,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.25,
-    shadowRadius: 6,
-    elevation: 4,
-  },
-  tab: {
-    flex: 1,
-    height: 40,
-  },
-  tabLabel: {
-    // Fills the tab so the text centres with equal space above and below, while the underline sits
-    // on its own at the very bottom edge.
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  tabText: {
-    color: colors.textMuted,
-    fontSize: 13,
-    // Android reserves ascent/descent padding around glyphs, which pushes the label low even when
-    // its box is centred. Dropping it plus a tight lineHeight lets the text sit optically centred.
-    includeFontPadding: false,
-    lineHeight: 16,
-    fontWeight: "600",
-    textAlign: "center",
-  },
-  tabTextActive: {
-    color: "#FFFFFF",
-  },
-  tabIndicator: {
-    // Pinned to the bottom and stretched across the full tab, so the underline marks the tab's half
-    // of the bar without affecting the text's vertical centring. Always rendered, transparent when
-    // inactive, so switching tabs cannot shift the layout.
-    position: "absolute",
-    left: 0,
-    right: 0,
-    bottom: 0,
-    height: 2,
-    borderRadius: 1,
-    backgroundColor: "transparent",
-  },
-  tabIndicatorActive: {
-    backgroundColor: "#19a07c",
-  },
-  subTabBar: {
-    flexDirection: "row",
-    gap: spacing.sm,
-    marginBottom: spacing.sm,
-    paddingHorizontal: 2,
-  },
-  subTab: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: spacing.xs,
-    paddingHorizontal: spacing.sm,
-    backgroundColor: colors.surfaceAlt,
-    borderRadius: radius.sm,
-  },
-  subTabActive: {
-    backgroundColor: colors.accent,
-  },
-  subTabText: {
-    color: colors.textMuted,
-    fontSize: 10,
-    fontWeight: "600",
-  },
-  subTabTextActive: {
-    color: "#06231C",
-  },
-  subTabTextDisabled: {
-    color: colors.textFaint,
-  },
-  filterRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingVertical: spacing.xs,
-    marginBottom: spacing.sm,
-  },
-  filterBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.xs,
-  },
-  checkbox: {
-    width: 20,
-    height: 20,
-    borderWidth: 1.5,
-    borderColor: colors.border,
-    borderRadius: radius.sm,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  checkboxChecked: {
-    borderColor: colors.accent,
-    backgroundColor: colors.accent,
-  },
-  checkboxInner: {
-    width: 10,
-    height: 10,
-    borderRadius: 2,
-    backgroundColor: "#06231C",
-  },
-  filterLabel: {
-    color: colors.text,
-    fontSize: 12,
-    fontWeight: "500",
-  },
   errorBanner: {
     marginBottom: spacing.sm,
     padding: spacing.sm,
