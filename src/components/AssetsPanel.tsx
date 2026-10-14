@@ -1,12 +1,18 @@
-import { memo } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { memo } from "react";
+import {
+  ActivityIndicator,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
 
-import { CoinAvatar } from '@/components/CoinAvatar';
-import { ChevronRightIcon } from '@/components/Icons';
-import { useAccountBalance } from '@/hooks/useAccountBalance';
-import { useTicker } from '@/state/ticker';
-import { colors, radius, spacing } from '@/theme';
-import { formatAmount, formatPrice } from '@/utils/format';
+import { CoinAvatar } from "@/components/CoinAvatar";
+import { ChevronRightIcon } from "@/components/Icons";
+import { useAccountBalance } from "@/hooks/useAccountBalance";
+import { useTicker } from "@/state/ticker";
+import { colors, radius, spacing } from "@/theme";
+import { formatAmount, formatPrice } from "@/utils/format";
 
 type Props = {
   /** The pair being traded, e.g. `BTC-USDT`. Splits into the token and its quote on the dash. */
@@ -14,7 +20,15 @@ type Props = {
 };
 
 /** Quotes worth about a dollar, so a value in them can carry a `$` without a rates source. */
-const USD_STABLES = new Set(['USD', 'USDT', 'USDC', 'DAI', 'BUSD', 'TUSD', 'USDD']);
+const USD_STABLES = new Set([
+  "USD",
+  "USDT",
+  "USDC",
+  "DAI",
+  "BUSD",
+  "TUSD",
+  "USDD",
+]);
 
 function toNumber(value: string | undefined): number {
   const parsed = Number(value);
@@ -34,7 +48,13 @@ type SectionProps = {
  * One asset, laid directly on the screen background rather than inside a floating card. The two
  * assets on this tab share this exact structure so only the symbol and the numbers change.
  */
-function AssetSection({ currency, total, available, locked, usdValue }: SectionProps) {
+function AssetSection({
+  currency,
+  total,
+  available,
+  locked,
+  usdValue,
+}: SectionProps) {
   return (
     <View style={styles.section}>
       <View style={styles.header}>
@@ -77,7 +97,10 @@ function AssetSection({ currency, total, available, locked, usdValue }: SectionP
         <View style={styles.row}>
           <Text style={styles.label}>Avg. Cost Price</Text>
           {/* No cost basis is tracked, so this stays a dash rather than a fabricated figure. */}
-          <Text style={[styles.value, styles.valueUnavailable]} numberOfLines={1}>
+          <Text
+            style={[styles.value, styles.valueUnavailable]}
+            numberOfLines={1}
+          >
             —
           </Text>
         </View>
@@ -97,12 +120,12 @@ function AssetsPanelComponent({ symbol }: Props) {
   const { available, holds, isLoading, error, refresh } = useAccountBalance();
   const { update } = useTicker(symbol);
 
-  const [base, quote = ''] = symbol.split('-');
+  const [base, quote = ""] = symbol.split("-");
   const price = update && Number.isFinite(update.price) ? update.price : null;
   const quoteIsUsd = USD_STABLES.has(quote);
 
-  const usdtAvailable = toNumber(available['USDT']);
-  const usdtLocked = toNumber(holds['USDT']);
+  const usdtAvailable = toNumber(available["USDT"]);
+  const usdtLocked = toNumber(holds["USDT"]);
   const usdtTotal = usdtAvailable + usdtLocked;
 
   const baseAvailable = toNumber(available[base]);
@@ -169,38 +192,38 @@ const styles = StyleSheet.create({
     marginHorizontal: -spacing.md,
   },
   loading: {
-    alignItems: 'center',
+    alignItems: "center",
     paddingVertical: spacing.xl,
   },
   errorRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
     gap: spacing.sm,
     marginHorizontal: SECTION_PADDING,
     marginBottom: spacing.sm,
     padding: spacing.sm,
-    backgroundColor: 'rgba(246,70,93,0.16)',
+    backgroundColor: "rgba(246,70,93,0.16)",
     borderRadius: radius.sm,
   },
   errorText: {
     flex: 1,
     color: colors.down,
     fontSize: 12,
-    fontWeight: '600',
+    fontWeight: "600",
   },
   retryText: {
     color: colors.down,
     fontSize: 12,
-    fontWeight: '700',
+    fontWeight: "700",
   },
   section: {
     paddingHorizontal: SECTION_PADDING,
     paddingVertical: 16,
   },
   header: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: spacing.sm,
     marginBottom: 16,
   },
@@ -208,46 +231,46 @@ const styles = StyleSheet.create({
     flex: 1,
     color: colors.text,
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: "600",
   },
   balance: {
     gap: 10,
   },
   row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
     gap: spacing.md,
   },
   rowTop: {
-    alignItems: 'flex-start',
+    alignItems: "flex-start",
   },
   label: {
     color: colors.textMuted,
-    fontSize: 13,
+    fontSize: 12,
   },
   valueCol: {
-    alignItems: 'flex-end',
+    alignItems: "flex-end",
     gap: 1,
     flexShrink: 1,
   },
   value: {
     color: colors.text,
-    fontSize: 13,
-    fontWeight: '600',
-    fontVariant: ['tabular-nums'],
-    textAlign: 'right',
+    fontSize: 12,
+    fontWeight: "600",
+    fontVariant: ["tabular-nums"],
+    textAlign: "right",
     flexShrink: 1,
   },
   subValue: {
     color: colors.textMuted,
-    fontSize: 11,
-    fontVariant: ['tabular-nums'],
-    textAlign: 'right',
+    fontSize: 10,
+    fontVariant: ["tabular-nums"],
+    textAlign: "right",
   },
   valueUnavailable: {
     color: colors.textFaint,
-    fontWeight: '500',
+    fontWeight: "500",
   },
   divider: {
     height: StyleSheet.hairlineWidth,

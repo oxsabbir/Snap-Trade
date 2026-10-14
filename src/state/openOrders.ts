@@ -12,8 +12,11 @@
  * performed on the desktop appear here too. Same store-and-subscribe shape `state/ticker.ts` uses
  * for prices, so the list survives the list component unmounting and neither sibling has to
  * re-render the other.
+ *
+ * The frame parsing and merge rules live in `state/orderUpdates`, kept free of React Native and the
+ * network so they can be unit-tested directly.
  */
-import { describeError } from '@/lib/kucoin/errors';
+import { describeError, isOrderGoneError } from '@/lib/kucoin/errors';
 import {
   cancelOrder,
   fetchClassicOpenOrders,
@@ -24,23 +27,16 @@ import {
 import type { OrderSide } from '@/lib/kucoin/types';
 import { refreshBalance, reconcileBalanceAfterChange } from '@/state/balance';
 
-export type OrderStatus = 'open' | 'partially_filled' | 'filled' | 'cancelled';
+import {
+  isTerminalStatus,
+  mergeOrderUpdate,
+  mergeRestSnapshot,
+  normalizeOrder,
+  type OpenOrder,
+} from './orderUpdates';
 
-export type OpenOrder = {
-  orderId: string;
-  clientOid?: string;
-  symbol: string;
-  side: OrderSide;
-  type: 'limit' | 'market';
-  price: string;
-  size: string;
-  filledSize: string;
-  status: OrderStatus;
-  /** Which spot book funds it, so a cancel is sent back to the endpoint that owns the order. */
-  wallet: SpotOrderWallet;
-  createdAt: number;
-  updatedAt: number;
-};
+export { isTerminalStatus, normalizeOrder } from './orderUpdates';
+export type { OpenOrder, OrderStatus } from './orderUpdates';
 
 export type OpenOrdersState = {
   orders: OpenOrder[];
@@ -92,142 +88,6 @@ export function subscribeOpenOrders(listener: () => void): () => void {
   listeners.add(listener);
   return () => {
     listeners.delete(listener);
-  };
-}
-
-/**
- * KuCoin's WebSocket `status` vocabulary, which does not match the REST shape. `match` is
- * reported for every fill event including the one that completes the order, so it only means
- * "partially filled" while some size is still outstanding.
- *
- * `done` is the WebSocket's word for "the matching system is finished with this order" and covers
- * both a complete fill and a cancellation. Which one it was has to be inferred from how much size
- * is still outstanding, because the status itself does not say.
- */
-const WS_STATUS: Record<string, OrderStatus> = {
-  open: 'open',
-  new: 'open',
-  active: 'open',
-  match: 'partially_filled',
-  partfilled: 'partially_filled',
-  partially_filled: 'partially_filled',
-  filled: 'filled',
-  done: 'filled', // fallback; fromMessage wins for terminal `update` messages
-  canceled: 'cancelled',
-  cancelled: 'cancelled',
-};
-
-/**
- * `/spotMarket/tradeOrdersV2` frames carry two separate fields that are easy to confuse: `type` is
- * the *message* kind (`received`, `open`, `match`, `update`, `filled`, `canceled`) and `status` is
- * the order's state in the matching system (`new`, `open`, `match`, `done`). Reading `type` as the
- * order kind is the trap — it makes every live row look like it was placed with an order type
- * called "match".
- *
- * The message kind is only useful for `done`, because that is the one case where the status alone
- * cannot tell a fill from a cancellation.
- *
- * Critical: KuCoin also sends `type: "update"` with `status: "done"` when an order finishes.
- * This must be handled to catch filled/cancelled orders that arrive via the update channel.
- */
-function statusFromWebSocketMessage(raw: Record<string, unknown>, fullyFilled: boolean): OrderStatus | null {
-  const messageType = typeof raw.type === 'string' ? raw.type.toLowerCase() : '';
-  const orderStatus = typeof raw.status === 'string' ? raw.status.toLowerCase() : '';
-
-  // Handle explicit terminal message types
-  if (messageType === 'filled') return 'filled';
-  if (messageType === 'canceled' || messageType === 'cancelled') {
-    // "canceled" still reports the size that had already been dealt, so a part-filled order that
-    // was then cancelled ends up `filled: false` and is a cancellation, not a fill.
-    return fullyFilled ? 'filled' : 'cancelled';
-  }
-
-  // KuCoin also sends `type: "update"` with `status: "done"` when an order finishes.
-  // This is the critical path for WebSocket updates that finish an order.
-  if (messageType === 'update' && orderStatus === 'done') {
-    return fullyFilled ? 'filled' : 'cancelled';
-  }
-
-  return null;
-}
-
-export function isTerminalStatus(status: OrderStatus): boolean {
-  return status === 'filled' || status === 'cancelled';
-}
-
-/**
- * Accepts both order shapes KuCoin sends, because they disagree about how to say "finished":
- * the REST list carries `isActive` and no status, while a WebSocket update carries `status` and
- * no `isActive`. Reading only `isActive` marks every WebSocket message terminal, since a missing
- * boolean is not `true`.
- */
-export function normalizeOrder(
-  raw: Record<string, unknown>,
-  fallbackWallet: SpotOrderWallet = 'trade'
-): OpenOrder | null {
-  const orderId = String(raw.orderId ?? raw.id ?? '');
-  if (!orderId) return null;
-
-  const size = String(raw.size ?? '0');
-  const filledSize = String(raw.dealSize ?? raw.filledSize ?? '0');
-  const filled = Number(filledSize);
-  const total = Number(size);
-  const fullyFilled = total > 0 && filled >= total;
-
-  const rawStatus = typeof raw.status === 'string' ? raw.status.toLowerCase() : '';
-  const mapped = WS_STATUS[rawStatus];
-
-  let status: OrderStatus;
-  // The message kind wins when it says the order finished, because it distinguishes a fill from a
-  // cancellation that `status: "done"` alone cannot.
-  const fromMessage = statusFromWebSocketMessage(raw, fullyFilled);
-  if (fromMessage) {
-    status = fromMessage;
-  } else if (mapped) {
-    status = mapped === 'partially_filled' && fullyFilled ? 'filled' : mapped;
-  } else if (
-    typeof raw.isActive === 'boolean' ||
-    typeof raw.isActive === 'string' ||
-    // The HF book spells it `active` where the classic book spells it `isActive`.
-    typeof raw.active === 'boolean' ||
-    typeof raw.active === 'string'
-  ) {
-    const flag = raw.isActive ?? raw.active;
-    const isActive = flag === true || flag === 'true';
-    if (!isActive) {
-      status = fullyFilled ? 'filled' : 'cancelled';
-    } else if (fullyFilled) {
-      // A book can still report an order as active for the moment between the last fill landing
-      // and the matching engine retiring it. Its size is all dealt, so calling it "partially
-      // filled" would be wrong and would leave the row showing a bar that never reaches the end.
-      status = 'filled';
-    } else {
-      status = filled > 0 ? 'partially_filled' : 'open';
-    }
-  } else {
-    // Neither field present: fall back to how much of the size is already dealt.
-    status = filled > 0 && !fullyFilled ? 'partially_filled' : 'open';
-  }
-
-  // Final safety net: if status is still 'open' but the order is actually fully filled,
-  // trust the filled amount over any status field.
-  if (status === 'open' && fullyFilled) {
-    status = 'filled';
-  }
-
-  return {
-    orderId,
-    clientOid: raw.clientOid ? String(raw.clientOid) : undefined,
-    symbol: String(raw.symbol ?? ''),
-    side: (raw.side ?? 'buy') as OrderSide,
-    type: ((raw.orderType ?? 'limit') as 'limit' | 'market'),
-    price: String(raw.price ?? '0'),
-    size,
-    filledSize,
-    status,
-    wallet: (raw.wallet as SpotOrderWallet) ?? fallbackWallet,
-    createdAt: Number(raw.createdAt ?? raw.ts ?? Date.now()),
-    updatedAt: Number(raw.updatedAt ?? raw.lastUpdatedAt ?? raw.ts ?? Date.now()),
   };
 }
 
@@ -313,7 +173,15 @@ export function loadOpenOrders(force = false): Promise<void> {
         )
         .filter((order): order is OpenOrder => order !== null);
 
-      emit({ orders: [...rest, ...reconcileUnconfirmed(rest)], error: null });
+      // A snapshot can predate a fill that arrived over the socket while the request was in
+      // flight, so an order already on screen keeps whichever value is further along.
+      const known = new Map(state.orders.map((order) => [order.orderId, order]));
+      const merged = rest.map((order) => {
+        const previous = known.get(order.orderId);
+        return previous ? mergeRestSnapshot(previous, order) : order;
+      });
+
+      emit({ orders: [...merged, ...reconcileUnconfirmed(merged)], error: null });
     } catch (caught) {
       emit({ error: describeError(caught, 'Failed to load open orders.') });
     } finally {
@@ -385,14 +253,21 @@ function scheduleRemoval(orderId: string): void {
  * Merges one private-WebSocket order message. Feed it raw frames from the account feed; unknown
  * orders are adopted while live and ignored once terminal, so a fill that arrives without a
  * preceding "opened" still shows up.
+ *
+ * The frame's own fields are never trusted blindly — `state/orderUpdates` owns the rules that keep
+ * a cumulative fill from shrinking and a finished row from coming back to life.
  */
 export function applyOrderUpdate(message: unknown): void {
   if (!message || typeof message !== 'object') return;
-  const incoming = normalizeOrder(message as Record<string, unknown>);
+  const raw = message as Record<string, unknown>;
+
+  const incoming = normalizeOrder(raw);
   if (!incoming) return;
 
   const index = state.orders.findIndex((o) => o.orderId === incoming.orderId);
   if (index === -1) {
+    // Adopt an order the app did not place only while it is live: a terminal frame for an unknown
+    // order has nothing to update and would add a row that lingers and then disappears.
     if (!isTerminalStatus(incoming.status)) {
       emit({ orders: [incoming, ...state.orders] });
     }
@@ -400,20 +275,7 @@ export function applyOrderUpdate(message: unknown): void {
   }
 
   const existing = state.orders[index]!;
-  const merged: OpenOrder = {
-    ...existing,
-    ...incoming,
-    // An update frame carries only what changed, so anything it omits or sends as zero keeps the
-    // value the row already had. `wallet` never comes from a feed message.
-    clientOid: incoming.clientOid ?? existing.clientOid,
-    symbol: incoming.symbol || existing.symbol,
-    price: incoming.price !== '0' ? incoming.price : existing.price,
-    size: incoming.size !== '0' ? incoming.size : existing.size,
-    filledSize: incoming.filledSize,
-    wallet: existing.wallet,
-    status: incoming.status,
-    updatedAt: Math.max(existing.updatedAt, incoming.updatedAt),
-  };
+  const { order: merged, filledChanged } = mergeOrderUpdate(existing, raw);
 
   const orders = [...state.orders];
   orders[index] = merged;
@@ -430,7 +292,7 @@ export function applyOrderUpdate(message: unknown): void {
   // Any fill moves money — a partial one just as much as a complete one — and a cancellation or
   // modification releases or re-freezes part of it. The balance feed reports the new figure, so
   // this only schedules the REST safety net for the case where the socket was not connected.
-  if (incoming.filledSize !== existing.filledSize || isTerminalStatus(merged.status)) {
+  if (filledChanged || isTerminalStatus(merged.status)) {
     reconcileBalanceAfterChange();
   }
 }
@@ -467,6 +329,16 @@ export async function cancelOpenOrder(orderId: string): Promise<boolean> {
     reconcileBalanceAfterChange();
     return true;
   } catch (caught) {
+    // Cancelling an order that already filled or was cancelled elsewhere comes back as
+    // `order_not_exist_or_not_allow_to_cancel`. That is not a failure to show the user — the order
+    // is simply no longer open, so retire the row and re-read instead of surfacing an error.
+    if (isOrderGoneError(caught)) {
+      unconfirmed.delete(orderId);
+      emit({ orders: state.orders.filter((o) => o.orderId !== orderId), error: null });
+      void loadOpenOrders();
+      reconcileBalanceAfterChange();
+      return true;
+    }
     emit({ error: describeError(caught, 'Cancel failed.') });
     return false;
   } finally {

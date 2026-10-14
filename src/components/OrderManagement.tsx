@@ -1,11 +1,11 @@
-import { memo, useCallback, useMemo, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { memo, useCallback, useMemo, useState } from "react";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 
-import { AssetsPanel } from '@/components/AssetsPanel';
-import { TrayIcon } from '@/components/Icons';
-import { useOpenOrders, type OpenOrder } from '@/hooks/useOpenOrders';
-import { formatAmount } from '@/utils/format';
-import { colors, radius, spacing } from '@/theme';
+import { AssetsPanel } from "@/components/AssetsPanel";
+import { TrayIcon } from "@/components/Icons";
+import { useOpenOrders, type OpenOrder } from "@/hooks/useOpenOrders";
+import { formatAmount } from "@/utils/format";
+import { colors, radius, spacing } from "@/theme";
 
 type Props = {
   symbol: string;
@@ -15,8 +15,8 @@ type Props = {
   available?: Record<string, string>;
 };
 
-const TABS = ['Open Orders', 'Assets'] as const;
-const SUB_TABS = ['Open Orders', 'Advanced Orders'] as const;
+const TABS = ["Open Orders", "Assets"] as const;
+const SUB_TABS = ["Open Orders", "Advanced Orders"] as const;
 
 const EMPTY_TRAY_SIZE = 64;
 
@@ -47,20 +47,20 @@ function OrderRow({
   onCancel: () => void;
   isCancelling: boolean;
 }) {
-  const isBuy = order.side === 'buy';
+  const isBuy = order.side === "buy";
   const sideColor = isBuy ? colors.up : colors.down;
   const statusColor =
-    order.status === 'filled'
+    order.status === "filled"
       ? colors.up
-      : order.status === 'cancelled'
-      ? colors.down
-      : order.status === 'partially_filled'
-      ? colors.warning
-      : colors.textMuted;
+      : order.status === "cancelled"
+        ? colors.down
+        : order.status === "partially_filled"
+          ? colors.warning
+          : colors.textMuted;
 
   const progress = filledFraction(order);
   const hasProgress = progress > 0;
-  const isDone = order.status === 'filled' || order.status === 'cancelled';
+  const isDone = order.status === "filled" || order.status === "cancelled";
 
   return (
     <View
@@ -74,12 +74,16 @@ function OrderRow({
       <View style={styles.rowLeft}>
         <View style={styles.rowTop}>
           <Text style={[styles.symbol, { color: sideColor }]}>
-            {order.symbol.replace('-', '/')}
+            {order.symbol.replace("-", "/")}
           </Text>
-          <Text style={styles.type}>{order.type === 'limit' ? 'Limit' : 'Market'}</Text>
+          <Text style={styles.type}>
+            {order.type === "limit" ? "Limit" : "Market"}
+          </Text>
         </View>
         <View style={styles.rowBottom}>
-          <Text style={styles.price}>Price: {formatAmount(Number(order.price))}</Text>
+          <Text style={styles.price}>
+            Price: {formatAmount(Number(order.price))}
+          </Text>
           <Text style={styles.filled}>{formatFilledDisplay(order)}</Text>
         </View>
         {hasProgress ? (
@@ -87,7 +91,10 @@ function OrderRow({
             <View
               style={[
                 styles.progressFill,
-                { width: `${Math.round(progress * 100)}%`, backgroundColor: sideColor },
+                {
+                  width: `${Math.round(progress * 100)}%`,
+                  backgroundColor: sideColor,
+                },
               ]}
             />
           </View>
@@ -95,12 +102,15 @@ function OrderRow({
       </View>
       <View style={styles.rowRight}>
         <Text style={[styles.status, { color: statusColor }]}>
-          {order.status.replace('_', ' ')}
+          {order.status.replace("_", " ")}
         </Text>
         <Pressable
           onPress={onCancel}
           disabled={isCancelling || isDone}
-          style={[styles.cancelBtn, (isCancelling || isDone) && styles.cancelBtnDisabled]}
+          style={[
+            styles.cancelBtn,
+            (isCancelling || isDone) && styles.cancelBtnDisabled,
+          ]}
           accessibilityRole="button"
           accessibilityLabel={`Cancel order ${order.orderId.slice(0, 8)}`}
           hitSlop={8}
@@ -159,31 +169,31 @@ export const OrderManagement = memo(function OrderManagement({
   const [activeSubTab, setActiveSubTab] = useState(0);
   const [hideOtherPairs, setHideOtherPairs] = useState(false);
 
-  const { orders, openCount, isLoading, error, cancelling, cancelOrder } = useOpenOrders();
+  const { orders, openCount, isLoading, error, cancelling, cancelOrder } =
+    useOpenOrders();
 
-  const usdtBalance = available['USDT'] ?? '0';
+  const usdtBalance = available["USDT"] ?? "0";
 
   // Filtering is presentational only, so toggling it never re-requests the list.
   const visibleOrders = useMemo(
-    () => (hideOtherPairs ? orders.filter((order) => order.symbol === symbol) : orders),
-    [orders, hideOtherPairs, symbol]
+    () =>
+      hideOtherPairs
+        ? orders.filter((order) => order.symbol === symbol)
+        : orders,
+    [orders, hideOtherPairs, symbol],
   );
 
   const handleCancel = useCallback(
     (orderId: string) => {
       void cancelOrder(orderId);
     },
-    [cancelOrder]
+    [cancelOrder],
   );
 
   if (activeTab !== 0) {
     return (
       <View style={styles.container}>
-        <TabBar
-          tabs={TABS}
-          activeIndex={activeTab}
-          onPress={setActiveTab}
-        />
+        <TabBar tabs={TABS} activeIndex={activeTab} onPress={setActiveTab} />
         <AssetsPanel symbol={symbol} />
       </View>
     );
@@ -196,11 +206,7 @@ export const OrderManagement = memo(function OrderManagement({
 
   return (
     <View style={styles.container}>
-      <TabBar
-        tabs={TABS}
-        activeIndex={activeTab}
-        onPress={setActiveTab}
-      />
+      <TabBar tabs={TABS} activeIndex={activeTab} onPress={setActiveTab} />
 
       <SubTabBar
         tabs={SUB_TABS}
@@ -212,10 +218,7 @@ export const OrderManagement = memo(function OrderManagement({
         disabledFrom={1}
       />
 
-      <FilterRow
-        hideOtherPairs={hideOtherPairs}
-        onToggle={setHideOtherPairs}
-      />
+      <FilterRow hideOtherPairs={hideOtherPairs} onToggle={setHideOtherPairs} />
 
       {error ? (
         <View style={styles.errorBanner}>
@@ -356,10 +359,7 @@ function FilterRow({
         hitSlop={8}
       >
         <View
-          style={[
-            styles.checkbox,
-            hideOtherPairs && styles.checkboxChecked,
-          ]}
+          style={[styles.checkbox, hideOtherPairs && styles.checkboxChecked]}
         >
           {hideOtherPairs && <View style={styles.checkboxInner} />}
         </View>
@@ -376,20 +376,19 @@ const styles = StyleSheet.create({
     // Separates this section from the order form above it, which otherwise sits right on the
     // divider once the book and the form finish at the same line.
     marginTop: spacing.md,
-    paddingTop: spacing.md,
     paddingHorizontal: spacing.md,
-    paddingBottom: spacing.lg,
+    paddingBottom: spacing.sm,
   },
   tabBar: {
-    flexDirection: 'row',
-    gap: spacing.xs,
-    marginBottom: spacing.sm,
+    flexDirection: "row",
+    gap: spacing.xl,
+    marginBottom: spacing.md,
     // The bar needs a fill of its own for the drop shadow to render on Android; it is the screen
     // colour, so the only things that show are the hairline and the soft shadow beneath it.
     backgroundColor: colors.bg,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.border,
-    shadowColor: '#000',
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: 3 },
     shadowOpacity: 0.25,
     shadowRadius: 6,
@@ -397,48 +396,54 @@ const styles = StyleSheet.create({
   },
   tab: {
     flex: 1,
-    // Stretch so the label group fills the tab's half of the bar, giving the underline the full
-    // tab width rather than only the text width.
-    alignItems: 'stretch',
-    // Pushes the label down so its underline lands on the bar's bottom edge.
-    justifyContent: 'flex-end',
     height: 40,
   },
   tabLabel: {
-    alignItems: 'center',
+    // Fills the tab so the text centres with equal space above and below, while the underline sits
+    // on its own at the very bottom edge.
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
   },
   tabText: {
     color: colors.textMuted,
     fontSize: 13,
-    fontWeight: '600',
-    textAlign: 'center',
-    marginBottom: 8,
+    // Android reserves ascent/descent padding around glyphs, which pushes the label low even when
+    // its box is centred. Dropping it plus a tight lineHeight lets the text sit optically centred.
+    includeFontPadding: false,
+    lineHeight: 16,
+    fontWeight: "600",
+    textAlign: "center",
   },
   tabTextActive: {
-    color: '#FFFFFF',
+    color: "#FFFFFF",
   },
   tabIndicator: {
-    // Stretches across the full tab, so the underline marks the tab's half of the bar. Always
-    // rendered, transparent when inactive, so switching tabs cannot shift the layout.
-    alignSelf: 'stretch',
+    // Pinned to the bottom and stretched across the full tab, so the underline marks the tab's half
+    // of the bar without affecting the text's vertical centring. Always rendered, transparent when
+    // inactive, so switching tabs cannot shift the layout.
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
     height: 2,
     borderRadius: 1,
-    backgroundColor: 'transparent',
+    backgroundColor: "transparent",
   },
   tabIndicatorActive: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: "#19a07c",
   },
   subTabBar: {
-    flexDirection: 'row',
+    flexDirection: "row",
     gap: spacing.sm,
     marginBottom: spacing.sm,
     paddingHorizontal: 2,
   },
   subTab: {
     flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
     paddingVertical: spacing.xs,
     paddingHorizontal: spacing.sm,
     backgroundColor: colors.surfaceAlt,
@@ -449,24 +454,24 @@ const styles = StyleSheet.create({
   },
   subTabText: {
     color: colors.textMuted,
-    fontSize: 11,
-    fontWeight: '600',
+    fontSize: 10,
+    fontWeight: "600",
   },
   subTabTextActive: {
-    color: '#06231C',
+    color: "#06231C",
   },
   subTabTextDisabled: {
     color: colors.textFaint,
   },
   filterRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     paddingVertical: spacing.xs,
     marginBottom: spacing.sm,
   },
   filterBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: spacing.xs,
   },
   checkbox: {
@@ -475,8 +480,8 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: colors.border,
     borderRadius: radius.sm,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
   },
   checkboxChecked: {
     borderColor: colors.accent,
@@ -486,26 +491,26 @@ const styles = StyleSheet.create({
     width: 10,
     height: 10,
     borderRadius: 2,
-    backgroundColor: '#06231C',
+    backgroundColor: "#06231C",
   },
   filterLabel: {
     color: colors.text,
     fontSize: 12,
-    fontWeight: '500',
+    fontWeight: "500",
   },
   errorBanner: {
     marginBottom: spacing.sm,
     padding: spacing.sm,
-    backgroundColor: 'rgba(246,70,93,0.16)',
+    backgroundColor: "rgba(246,70,93,0.16)",
     borderRadius: radius.sm,
   },
   errorText: {
     color: colors.down,
     fontSize: 12,
-    fontWeight: '600',
+    fontWeight: "600",
   },
   loadingContainer: {
-    alignItems: 'center',
+    alignItems: "center",
     paddingVertical: spacing.xl,
   },
   loadingText: {
@@ -513,7 +518,7 @@ const styles = StyleSheet.create({
     fontSize: 13,
   },
   emptyContainer: {
-    alignItems: 'center',
+    alignItems: "center",
     paddingVertical: spacing.xl,
     gap: spacing.md,
   },
@@ -522,7 +527,7 @@ const styles = StyleSheet.create({
     fontSize: 13,
   },
   emptyButtons: {
-    flexDirection: 'row',
+    flexDirection: "row",
     gap: spacing.sm,
     marginTop: spacing.xs,
   },
@@ -535,14 +540,14 @@ const styles = StyleSheet.create({
   emptyBtnText: {
     color: colors.text,
     fontSize: 12,
-    fontWeight: '600',
+    fontWeight: "600",
   },
   list: {
     gap: spacing.xs,
   },
   row: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: spacing.sm,
     padding: spacing.sm,
     backgroundColor: colors.surface,
@@ -562,7 +567,7 @@ const styles = StyleSheet.create({
   },
   sideIndicator: {
     width: 3,
-    alignSelf: 'stretch',
+    alignSelf: "stretch",
     borderRadius: 1.5,
     minHeight: 44,
   },
@@ -571,65 +576,65 @@ const styles = StyleSheet.create({
     gap: spacing.xs,
   },
   rowTop: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: spacing.xs,
   },
   symbol: {
     color: colors.text,
     fontSize: 13,
-    fontWeight: '700',
-    fontVariant: ['tabular-nums'],
+    fontWeight: "700",
+    fontVariant: ["tabular-nums"],
   },
   type: {
     color: colors.textFaint,
     fontSize: 10,
-    fontWeight: '600',
-    textTransform: 'uppercase',
+    fontWeight: "600",
+    textTransform: "uppercase",
     letterSpacing: 0.3,
   },
   rowBottom: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: spacing.sm,
   },
   price: {
     color: colors.text,
     fontSize: 12,
-    fontWeight: '600',
-    fontVariant: ['tabular-nums'],
+    fontWeight: "600",
+    fontVariant: ["tabular-nums"],
   },
   filled: {
     color: colors.textMuted,
     fontSize: 11,
-    fontVariant: ['tabular-nums'],
+    fontVariant: ["tabular-nums"],
   },
   progressTrack: {
     height: 3,
     borderRadius: 1.5,
     backgroundColor: colors.surfaceAlt,
-    overflow: 'hidden',
+    overflow: "hidden",
   },
   progressFill: {
     height: 3,
     borderRadius: 1.5,
   },
   rowRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: spacing.sm,
   },
   status: {
     fontSize: 11,
-    fontWeight: '600',
+    fontWeight: "600",
   },
   cancelBtn: {
     paddingHorizontal: spacing.sm,
     paddingVertical: spacing.xs,
-    backgroundColor: 'rgba(246,70,93,0.12)',
+    backgroundColor: "rgba(246,70,93,0.12)",
     borderRadius: radius.sm,
     minWidth: 64,
-    alignItems: 'center',
+    alignItems: "center",
   },
   cancelBtnDisabled: {
     opacity: 0.5,
@@ -637,11 +642,11 @@ const styles = StyleSheet.create({
   cancelBtnText: {
     color: colors.down,
     fontSize: 11,
-    fontWeight: '700',
+    fontWeight: "700",
   },
   cancelBtnTextLoading: {
     color: colors.textFaint,
     fontSize: 11,
-    fontWeight: '600',
+    fontWeight: "600",
   },
 });

@@ -65,6 +65,17 @@ let cachedBullet: CachedBullet | null = null;
 let bulletPromise: Promise<BulletServer> | null = null;
 
 /**
+ * Monotonic message id. Two frames sent in the same millisecond — the pair of subscriptions, or a
+ * subscription that lands on the same tick as a ping — would otherwise share a `Date.now()` id, and
+ * the exchange uses the id to match its responses.
+ */
+let messageCounter = 0;
+function nextMessageId(): string {
+  messageCounter += 1;
+  return `${Date.now()}-${messageCounter}`;
+}
+
+/**
  * Asks for a signed connection token. Unlike the public one this cannot be cached across a
  * signed-out session, so it is only ever fetched once a caller confirms credentials exist.
  */
@@ -149,7 +160,7 @@ export class PrivateSocket {
     for (const topic of [ORDER_TOPIC, BALANCE_TOPIC]) {
       socket.send(
         JSON.stringify({
-          id: Date.now().toString(),
+          id: nextMessageId(),
           type: 'subscribe',
           topic,
           response: true,
@@ -194,7 +205,7 @@ export class PrivateSocket {
       this.subscribe(socket);
       this.pingTimer = setInterval(() => {
         if (socket.readyState === WebSocket.OPEN) {
-          socket.send(JSON.stringify({ id: Date.now().toString(), type: 'ping' }));
+          socket.send(JSON.stringify({ id: nextMessageId(), type: 'ping' }));
         }
       }, Math.max(server.pingInterval / 2, 5_000));
       this.listener.onStatus('live');
