@@ -62,6 +62,7 @@ src/hooks/
   useLiveCandles.ts    chart data — REST history + WebSocket live price
   useLifetimeSeries.ts lifetime line series — paged 1week walk, symbol cache, live endpoint
   useCoinInfo.ts       coin info sheet data, fetched only while the sheet is open
+  useCoinDescription.ts CoinPaprika project summary for the sheet's About section
   useProfile.ts        local display name, AsyncStorage-backed, never transmitted
   useAccount.ts        balances — signed REST, 30s poll, connect/disconnect
 src/state/
@@ -406,8 +407,14 @@ rate-limit budget, and `market.ts` memoises `/symbols`, `/currencies` and per-sy
 the session. That cache also removes pre-existing waste: the market list and the account
 valuation each used to re-fetch the same two large reference sets independently.
 
-**KuCoin's public REST API has no market cap, circulating supply, or coin rank**, so the sheet
-omits them rather than inventing numbers. A third-party source would be required to add those.
+**KuCoin's public REST API has no market cap, circulating supply, coin rank — or description**, so
+none of those are on the sheet. To fill the last gap, an **About** section shows the project
+summary from **CoinPaprika** (`lib/coinInfo.ts`): a keyless symbol search resolves the ticker to a
+CoinPaprika id, then `/coins/{id}` supplies the prose. Like `useCoinInfo`, it runs **only while the
+sheet is open**, caches each result for the session, and falls back to hiding the section when a
+coin has no summary. CoinPaprika's free tier asks for attribution, so the paragraph carries a
+"Source: CoinPaprika" link. This is the app's one outbound request that is not KuCoin, and it
+reveals only the ticker being viewed.
 
 ## Home and Trade use different transports
 

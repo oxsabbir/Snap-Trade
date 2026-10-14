@@ -1,6 +1,7 @@
-import { memo } from 'react';
+import { memo, useState } from 'react';
 import {
   ActivityIndicator,
+  Linking,
   Modal,
   Pressable,
   ScrollView,
@@ -12,9 +13,13 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { CloseIcon } from '@/components/Icons';
 import { Stat } from '@/components/Stat';
+import { useCoinDescription, type CoinDescriptionState } from '@/hooks/useCoinDescription';
 import { useCoinInfo } from '@/hooks/useCoinInfo';
 import { colors, radius, spacing } from '@/theme';
 import { formatCompact, formatPrice, formatRate, parseNumber } from '@/utils/format';
+
+/** Past this length the paragraph collapses behind a "Read more" toggle. */
+const DESCRIPTION_COLLAPSE_LENGTH = 240;
 
 type Props = {
   symbol: string;
@@ -31,6 +36,7 @@ function flag(enabled: boolean | undefined): { label: string; tone: 'up' | 'down
 function CoinInfoSheetComponent({ symbol, visible, onClose, decimals }: Props) {
   const insets = useSafeAreaInsets();
   const { stats, symbolInfo, currency, isLoading, error, refresh } = useCoinInfo(symbol, visible);
+  const description = useCoinDescription(symbol, visible);
 
   const [base, quote] = symbol.split('-');
   const high = parseNumber(stats?.high);
@@ -194,6 +200,8 @@ function CoinInfoSheetComponent({ symbol, visible, onClose, decimals }: Props) {
               ) : null}
             </Section>
 
+            <AboutSection key={base} base={base} state={description} />
+
             <Text style={styles.disclaimer}>
               Public market data only. This panel does not query your account and is not investment advice.
             </Text>
@@ -216,6 +224,52 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 function formatAmount2(value: string | undefined): string {
   const parsed = parseNumber(value);
   return parsed === null ? '—' : formatCompact(parsed, 4);
+}
+
+/**
+ * The "what is this coin" paragraph, sourced from CoinPaprika. Renders nothing when the coin has
+ * no summary, so pairs without one do not get an empty heading. Long text collapses behind a
+ * toggle and the attribution link opens the source page.
+ */
+function AboutSection({ base, state }: { base?: string; state: CoinDescriptionState }) {
+  const [expanded, setExpanded] = useState(false);
+  const { description, isLoading, isLoaded, error, refresh } = state;
+
+  if (!isLoading && isLoaded && !description && !error) return null;
+
+  return (
+    <Section title={`About ${base ?? ''}`.trim()}>
+      {isLoading ? (
+        <ActivityIndicator style={styles.aboutLoader} color={colors.accent} />
+      ) : error ? (
+        <Pressable style={styles.aboutError} onPress={refresh}>
+          <Text style={styles.errorBody}>Could not load the description.</Text>
+          <Text style={styles.errorHint}>Tap to retry.</Text>
+        </Pressable>
+      ) : description ? (
+        <>
+          <Text
+            style={styles.aboutText}
+            numberOfLines={expanded ? undefined : 5}
+          >
+            {description.text}
+          </Text>
+          {description.text.length > DESCRIPTION_COLLAPSE_LENGTH ? (
+            <Pressable onPress={() => setExpanded((value) => !value)} hitSlop={8}>
+              <Text style={styles.aboutMore}>{expanded ? 'Show less' : 'Read more'}</Text>
+            </Pressable>
+          ) : null}
+          <Pressable
+            onPress={() => Linking.openURL(description.url)}
+            hitSlop={8}
+            accessibilityRole="link"
+          >
+            <Text style={styles.aboutSource}>Source: {description.source}</Text>
+          </Pressable>
+        </>
+      ) : null}
+    </Section>
+  );
 }
 
 export const CoinInfoSheet = memo(CoinInfoSheetComponent);
@@ -337,6 +391,35 @@ const styles = StyleSheet.create({
     lineHeight: 14,
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.sm,
+  },
+  aboutLoader: {
+    paddingVertical: spacing.lg,
+  },
+  aboutError: {
+    alignItems: 'center',
+    gap: spacing.xs,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+  },
+  aboutText: {
+    color: colors.textMuted,
+    fontSize: 13,
+    lineHeight: 20,
+    paddingHorizontal: spacing.lg,
+  },
+  aboutMore: {
+    color: colors.accent,
+    fontSize: 12,
+    fontWeight: '600',
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.sm,
+  },
+  aboutSource: {
+    color: colors.textFaint,
+    fontSize: 11,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.sm,
+    textDecorationLine: 'underline',
   },
   disclaimer: {
     color: colors.textFaint,

@@ -162,13 +162,6 @@ function AssetsPanelComponent({ symbol }: Props) {
         </View>
       ) : null}
 
-      <AssetSection
-        currency="USDT"
-        total={usdtTotal}
-        available={usdtAvailable}
-        locked={usdtLocked}
-        usdValue={usdtTotal}
-      />
       <View style={styles.divider} />
       <AssetSection
         currency={base}
@@ -176,6 +169,13 @@ function AssetsPanelComponent({ symbol }: Props) {
         available={baseAvailable}
         locked={baseLocked}
         usdValue={baseUsd}
+      />
+      <AssetSection
+        currency="USDT"
+        total={usdtTotal}
+        available={usdtAvailable}
+        locked={usdtLocked}
+        usdValue={usdtTotal}
       />
     </View>
   );
