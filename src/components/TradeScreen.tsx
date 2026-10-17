@@ -62,26 +62,28 @@ export const TradeScreen = memo(function TradeScreen({ symbol }: Props) {
   );
 });
 
-const useStyles = createThemedStyles((colors) => StyleSheet.create({
-  container: {
-    // A hairline separates the ordering UI from the chart above it. It is drawn on this section
-    // rather than on either column, so it spans the full width and reads as one boundary.
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.border,
-    marginTop: spacing.sm,
-    paddingTop: spacing.sm,
-    paddingBottom: spacing.md,
-    paddingHorizontal: spacing.md,
-  },
-  row: {
-    flexDirection: "row",
-    alignItems: "stretch",
-    gap: spacing.lg,
-  },
-  book: {
-    flex: 4,
-  },
-  panel: {
-    flex: 5,
-  },
-}));
+const useStyles = createThemedStyles((colors) =>
+  StyleSheet.create({
+    container: {
+      // A hairline separates the ordering UI from the chart above it. It is drawn on this section
+      // rather than on either column, so it spans the full width and reads as one boundary.
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: colors.border,
+      marginTop: spacing.sm,
+      paddingTop: spacing.sm,
+      paddingBottom: spacing.md,
+      paddingHorizontal: spacing.md,
+    },
+    row: {
+      flexDirection: "row",
+      alignItems: "stretch",
+      gap: spacing.md,
+    },
+    book: {
+      flex: 4,
+    },
+    panel: {
+      flex: 6,
+    },
+  }),
+);
