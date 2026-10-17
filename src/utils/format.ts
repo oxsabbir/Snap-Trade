@@ -136,6 +136,14 @@ export function formatDateTime(timestamp: number | null): string {
   );
 }
 
+/**
+ * KuCoin's wire symbol is `BASE-QUOTE` (`BTC-USDT`), but a pair reads more naturally with a slash.
+ * Kept in one place so every surface — search history cards included — uses the same separator.
+ */
+export function formatPairSymbol(symbol: string): string {
+  return symbol.replace(/-/g, '/');
+}
+
 /** Deterministic hue so a coin keeps the same avatar colour across renders. */
 export function hashToHue(value: string): number {
   let hash = 0;

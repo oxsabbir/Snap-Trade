@@ -228,6 +228,29 @@ export function RowsIcon({ size = 14, color = colors.textMuted }: IconProps) {
   );
 }
 
+export function TrashIcon({ size = 16, color = colors.textMuted }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path d="M4 7h16" stroke={color} strokeWidth={1.8} strokeLinecap="round" />
+      <Path
+        d="M9 7V5.5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1V7"
+        stroke={color}
+        strokeWidth={1.8}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <Path
+        d="M6 7l.9 12.1a1 1 0 0 0 1 .9h8.2a1 1 0 0 0 1-.9L18 7"
+        stroke={color}
+        strokeWidth={1.8}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <Path d="M10 11.5v5M14 11.5v5" stroke={color} strokeWidth={1.6} strokeLinecap="round" />
+    </Svg>
+  );
+}
+
 export function TrayIcon({ size = 24, color = colors.textMuted }: IconProps) {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">

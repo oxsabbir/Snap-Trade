@@ -14,9 +14,11 @@ type Props = {
   market: SpotMarket;
   isFavorite: boolean;
   onToggleFavorite: (symbol: string) => void;
+  /** Fires when the user actually opens the pair, so the screen above can remember it. */
+  onOpen?: (symbol: string) => void;
 };
 
-function SpotRowComponent({ market, isFavorite, onToggleFavorite }: Props) {
+function SpotRowComponent({ market, isFavorite, onToggleFavorite, onOpen }: Props) {
   const isUp = market.changePercent >= 0;
   const changeColor = isUp ? colors.up : colors.down;
   const volume = `Vol ${formatCompact(market.quoteVolume)} ${market.quote}`;
@@ -24,13 +26,14 @@ function SpotRowComponent({ market, isFavorite, onToggleFavorite }: Props) {
   const setActiveCoin = useSetActiveCoin();
 
   const openTrade = useCallback(() => {
+    onOpen?.(market.symbol);
     setActiveCoin({
       symbol: market.symbol,
       name: market.baseName,
       decimals: market.priceDecimals,
     });
     router.navigate('/(tabs)/trade');
-  }, [market.symbol, market.priceDecimals, market.baseName, setActiveCoin]);
+  }, [market.symbol, market.priceDecimals, market.baseName, setActiveCoin, onOpen]);
 
   return (
     <Pressable

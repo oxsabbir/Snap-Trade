@@ -1,12 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const STORAGE_KEY = 'search:recent';
-const MAX_RECENTS = 8;
+import { MAX_RECENT_PAIRS, parseStoredPairs, recordPair, removePair } from '@/lib/recentPairs';
 
-function normalize(query: string): string {
-  return query.trim().replace(/\s+/g, ' ');
-}
+const STORAGE_KEY = 'search:recent';
 
 export type RecentSearchesState = {
   recents: string[];
@@ -27,9 +24,7 @@ export function useRecentSearches(): RecentSearchesState {
       .then((raw) => {
         if (cancelled) return;
         const parsed: unknown = raw ? JSON.parse(raw) : [];
-        if (Array.isArray(parsed)) {
-          setRecents(parsed.filter((v): v is string => typeof v === 'string').slice(0, MAX_RECENTS));
-        }
+        setRecents(parseStoredPairs(parsed, MAX_RECENT_PAIRS));
       })
       .catch(() => undefined)
       .finally(() => {
@@ -48,13 +43,11 @@ export function useRecentSearches(): RecentSearchesState {
   }, [recents]);
 
   const add = useCallback((query: string) => {
-    const value = normalize(query);
-    if (!value) return;
-    setRecents((previous) => [value, ...previous.filter((v) => v !== value)].slice(0, MAX_RECENTS));
+    setRecents((previous) => recordPair(previous, query, MAX_RECENT_PAIRS));
   }, []);
 
   const remove = useCallback((query: string) => {
-    setRecents((previous) => previous.filter((v) => v !== query));
+    setRecents((previous) => removePair(previous, query));
   }, []);
 
   const clear = useCallback(() => setRecents([]), []);

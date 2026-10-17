@@ -9,7 +9,7 @@ import {
   Text,
   View,
 } from "react-native";
-import { useIsFocused } from "expo-router";
+import { router, useIsFocused } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import {
@@ -18,7 +18,7 @@ import {
   type TabValue,
 } from "@/components/QuoteTabs";
 import { PopularSearches } from "@/components/PopularSearches";
-import { RecentSearches } from "@/components/RecentSearches";
+import { RecentSearches, type RecentCoin } from "@/components/RecentSearches";
 import { SearchBar } from "@/components/SearchBar";
 import { SpotRow } from "@/components/SpotRow";
 import { useRecentSearches } from "@/hooks/useRecentSearches";
@@ -26,8 +26,9 @@ import { useSpotMarkets } from "@/hooks/useSpotMarkets";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { searchMarkets, type QuoteFilter } from "@/lib/kucoin/market";
 import type { SpotMarket } from "@/lib/kucoin/types";
+import { useSetActiveCoin } from "@/state/activeCoin";
 import { colors, spacing } from "@/theme";
-import { formatTime } from "@/utils/format";
+import { formatPairSymbol, formatTime } from "@/utils/format";
 
 const POPULAR_COUNT = 10;
 /** Module level so the list always sees the same extractor and never rebuilds its key map. */
@@ -42,6 +43,12 @@ const NO_FAVORITES: ReadonlySet<string> = new Set<string>();
  */
 const INITIAL_ROWS = 20;
 const ROWS_PER_BATCH = 20;
+
+/** Resolves a stored pair back to its loaded market, tolerant of case differences. */
+function findMarketBySymbol(markets: SpotMarket[], symbol: string): SpotMarket | undefined {
+  const target = symbol.toUpperCase();
+  return markets.find((market) => market.symbol.toUpperCase() === target);
+}
 
 const MarketsList = memo(function MarketsList({
   visibleMarkets,
@@ -58,6 +65,7 @@ const MarketsList = memo(function MarketsList({
   onPopularSelect,
   favorites = NO_FAVORITES,
   toggleFavorite,
+  onOpenMarket,
 }: {
   visibleMarkets: SpotMarket[];
   keyExtractor: (item: SpotMarket) => string;
@@ -73,6 +81,7 @@ const MarketsList = memo(function MarketsList({
   onPopularSelect: (symbol: string) => void;
   favorites?: ReadonlySet<string>;
   toggleFavorite: (symbol: string) => void;
+  onOpenMarket: (symbol: string) => void;
 }) {
   // Stable renderItem with isFavorite computed from passed favorites Set
   const renderRow = useCallback<ListRenderItem<SpotMarket>>(
@@ -81,9 +90,10 @@ const MarketsList = memo(function MarketsList({
         market={item}
         isFavorite={favorites.has(item.symbol)}
         onToggleFavorite={toggleFavorite}
+        onOpen={onOpenMarket}
       />
     ),
-    [favorites, toggleFavorite],
+    [favorites, toggleFavorite, onOpenMarket],
   );
 
   return (
@@ -136,14 +146,20 @@ export default function MarketsScreen() {
   const {
     recents,
     add: addRecent,
-    remove: removeRecent,
     clear: clearRecents,
   } = useRecentSearches();
+  const setActiveCoin = useSetActiveCoin();
   const [search, setSearch] = useState("");
   const [tab, setTab] = useState<TabValue>("All");
   const [favorites, setFavorites] = useState<Set<string>>(() => new Set());
   const [isSearchFocused, setIsSearchFocused] = useState(false);
   const interactingRef = useRef(false);
+
+  /** Stored pair symbols, shown as slash-form cards in Search History. */
+  const recentItems = useMemo<RecentCoin[]>(
+    () => recents.map((symbol) => ({ symbol, label: formatPairSymbol(symbol) })),
+    [recents],
+  );
 
   const toggleFavorite = useCallback((symbol: string) => {
     setFavorites((previous) => {
@@ -196,20 +212,58 @@ export default function MarketsScreen() {
     setIsSearchFocused(false);
   }, []);
 
+  const closeSearch = useCallback(() => {
+    setSearch("");
+    setIsSearchFocused(false);
+    interactingRef.current = false;
+    Keyboard.dismiss();
+  }, []);
+
+  /** Filters the list; it deliberately does not touch history — only opening a pair records it. */
   const commitSearch = useCallback(
     (query: string) => {
-      addRecent(query);
       setSearch(query);
       setIsSearchFocused(false);
       interactingRef.current = false;
       Keyboard.dismiss();
     },
-    [addRecent],
+    [],
   );
 
   const handleSubmit = useCallback(() => {
     commitSearch(search);
   }, [commitSearch, search]);
+
+  /** Opening a pair from the results list is what the history records, not the typed query. */
+  const handleOpenMarket = useCallback(
+    (symbol: string) => {
+      addRecent(symbol);
+      closeSearch();
+    },
+    [addRecent, closeSearch],
+  );
+
+  const openPair = useCallback(
+    (symbol: string) => {
+      const market = findMarketBySymbol(markets, symbol);
+      setActiveCoin(
+        market
+          ? { symbol: market.symbol, name: market.baseName, decimals: market.priceDecimals }
+          : { symbol, name: symbol.split("-")[0] ?? symbol, decimals: 8 },
+      );
+      router.navigate("/(tabs)/trade");
+    },
+    [markets, setActiveCoin],
+  );
+
+  const handleRecentSelect = useCallback(
+    (item: RecentCoin) => {
+      addRecent(item.symbol);
+      closeSearch();
+      openPair(item.symbol);
+    },
+    [addRecent, closeSearch, openPair],
+  );
 
   const showSuggestions = isSearchFocused && activeQuery.length === 0;
 
@@ -236,9 +290,8 @@ export default function MarketsScreen() {
       {showSuggestions ? (
         <>
           <RecentSearches
-            recents={recents}
-            onSelect={commitSearch}
-            onRemove={removeRecent}
+            items={recentItems}
+            onSelect={handleRecentSelect}
             onClear={clearRecents}
             onInteract={() => {
               interactingRef.current = true;
@@ -262,6 +315,7 @@ export default function MarketsScreen() {
           onPopularSelect={commitSearch}
           favorites={favorites}
           toggleFavorite={toggleFavorite}
+          onOpenMarket={handleOpenMarket}
         />
       )}
     </SafeAreaView>
