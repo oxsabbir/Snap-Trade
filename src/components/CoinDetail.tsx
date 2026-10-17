@@ -324,8 +324,8 @@ const useStyles = createThemedStyles((colors) =>
     flexDirection: "row",
     alignItems: "center",
     gap: spacing.md,
-    paddingHorizontal: spacing.lg,
-    paddingBottom: spacing.lg,
+    paddingHorizontal: spacing.md,
+    paddingBottom: spacing.sm,
   },
   timeframeRow: {
     flexGrow: 0,

@@ -58,7 +58,7 @@ const useStyles = createThemedStyles((colors) =>
   StyleSheet.create({
     price: {
       color: colors.text,
-      fontSize: 30,
+      fontSize: 24,
       fontWeight: '700',
       fontVariant: ['tabular-nums'],
     },

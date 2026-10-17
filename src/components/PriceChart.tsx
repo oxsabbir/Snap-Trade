@@ -15,7 +15,10 @@ const PAD_BOTTOM = 18;
 const AXIS_WIDTH = 54;
 const TIME_LABEL_WIDTH = 44;
 const BAND_STEPS = 4;
-const GRID_LINES = 8;
+/** Target price-axis label count; the tick interval is chosen to land near this. */
+const PRICE_LABELS = 8;
+/** Fixed line box of an axis label, used to keep the end labels inside the plot. */
+const AXIS_LABEL_HEIGHT = 12;
 const X_LABELS = 4;
 const MIN_VISIBLE = 20;
 const DEFAULT_SPAN = 50;
@@ -91,6 +94,61 @@ function defaultSpanFor(count: number, isLine: boolean, defaultSpan?: number): n
 
 function niceStep(raw: number): number { 'worklet'; if (!(raw > 0)) return 1; const magnitude = Math.pow(10, Math.floor(Math.log10(raw))); const mantissa = raw / magnitude; return (mantissa <= 1 ? 1 : mantissa <= 2 ? 2 : mantissa <= 5 ? 5 : 10) * magnitude; }
 function niceBand(min: number, max: number): Domain { 'worklet'; const span = max > min ? max - min : Math.abs(max || 1) * 0.01; const gap = niceStep(span / BAND_STEPS); const lower = Math.floor(min / gap) * gap; const upper = Math.ceil(max / gap) * gap; return upper > lower ? { lower, upper } : { lower: lower - gap, upper: upper + gap }; }
+
+interface PriceTick { value: number; fraction: number }
+interface PriceAxis { step: number; ticks: PriceTick[] }
+
+/** Smallest step from the 1 / 2 / 2.5 / 5 x 10^n ladder whose tick count lands nearest the target. */
+function priceStep(range: number, target: number): number {
+  const rough = range / Math.max(target - 1, 1);
+  const magnitude = Math.pow(10, Math.floor(Math.log10(rough)));
+  let best = magnitude;
+  let bestScore = Number.POSITIVE_INFINITY;
+  for (const multiplier of [1, 2, 2.5, 5, 10]) {
+    const step = multiplier * magnitude;
+    const count = Math.floor(range / step + 1e-9) + 1;
+    const score = Math.abs(count - target);
+    if (score < bestScore || (score === bestScore && step > best)) {
+      bestScore = score;
+      best = step;
+    }
+  }
+  return best;
+}
+
+/** Decimal places needed to write a step exactly, e.g. 2.5 -> 1, 1e-6 -> 6. */
+function stepDecimals(step: number): number {
+  if (!(step > 0)) return 0;
+  let scaled = step;
+  let places = 0;
+  while (places < 12 && Math.abs(scaled - Math.round(scaled)) > 1e-9) {
+    scaled *= 10;
+    places += 1;
+  }
+  return places;
+}
+
+/** Nice ticks across a band, as values plus their normalised vertical position. */
+function priceAxis(lower: number, upper: number, target: number): PriceAxis {
+  const range = upper - lower;
+  if (!(range > 0) || !Number.isFinite(range)) return { step: 0, ticks: [] };
+  const step = priceStep(range, target);
+  if (!(step > 0)) return { step: 0, ticks: [] };
+  const epsilon = step * 1e-6;
+  const first = Math.ceil((lower - epsilon) / step);
+  const last = Math.floor((upper + epsilon) / step);
+  const ticks: PriceTick[] = [];
+  for (let index = first; index <= last && ticks.length < 32; index += 1) {
+    const value = Number((index * step).toPrecision(12));
+    ticks.push({ value, fraction: (value - lower) / range });
+  }
+  return { step, ticks };
+}
+
+/** Drop trailing zeros from a fixed-decimal string so labels stay as short as possible. */
+function trimZeros(label: string): string {
+  return label.includes('.') ? label.replace(/0+$/, '').replace(/\.$/, '') : label;
+}
 
 /**
  * Price band for one window of the series, read from the packed array rather than from
@@ -230,6 +288,8 @@ function PriceChartComponent({ candles, mode, height = 250, decimals, defaultSpa
     for (const candle of visible) { min = Math.min(min, candle.low); max = Math.max(max, candle.high); }
     return niceBand(min, max);
   }, [visible]);
+  const axis = useMemo(() => (domain ? priceAxis(domain.lower, domain.upper, PRICE_LABELS) : null), [domain]);
+  const axisDecimals = axis ? stepDecimals(axis.step) : 0;
 
   // Mirrors the worklet's `xOf` exactly, so the crosshair sits on the candle it points at.
   const plotX = useCallback((index: number) => settledSpan <= 1 ? innerWidth / 2 : (index - settledStart + 0.5) * (innerWidth / settledSpan), [innerWidth, settledSpan, settledStart]);
@@ -252,8 +312,8 @@ function PriceChartComponent({ candles, mode, height = 250, decimals, defaultSpa
     border.setStrokeWidth(HAIRLINE);
     border.setColor(Skia.Color(colors.gridBorder));
 
-    for (let line = 1; line < GRID_LINES; line++) {
-      const y = PAD_TOP + (line / GRID_LINES) * priceHeight;
+    for (const tick of axis?.ticks ?? []) {
+      const y = PAD_TOP + (1 - tick.fraction) * priceHeight;
       canvas.drawLine(0, y, innerWidth, y, grid);
     }
 
@@ -284,7 +344,7 @@ function PriceChartComponent({ candles, mode, height = 250, decimals, defaultSpa
     const picture = recorder.finishRecordingAsPicture();
     recorder.dispose();
     return picture;
-  }, [colors.gridBorder, colors.gridLine, count, innerWidth, priceHeight, settledSpan, settledStart]);
+  }, [axis, colors.gridBorder, colors.gridLine, count, innerWidth, priceHeight, settledSpan, settledStart]);
 
   const onLayout = useCallback((event: LayoutChangeEvent) => setWidth(event.nativeEvent.layout.width), []);
 
@@ -523,9 +583,6 @@ function PriceChartComponent({ candles, mode, height = 250, decimals, defaultSpa
   const activeX = activeIndex === null || !active ? 0 : plotX(activeIndex);
   const activeY = active ? plotY(active.close) : 0;
   const spanMs = visible.length > 1 ? visible[visible.length - 1]!.time - visible[0]!.time : 0;
-  const axisValues = domain
-    ? Array.from({ length: GRID_LINES + 1 }, (_, index) => domain.upper - ((domain.upper - domain.lower) / GRID_LINES) * index)
-    : [];
 
   return <View style={styles.container} onLayout={onLayout}>
     <GestureDetector gesture={gestures}>
@@ -537,7 +594,10 @@ function PriceChartComponent({ candles, mode, height = 250, decimals, defaultSpa
         </Canvas>
       </View>
     </GestureDetector>
-    <View style={{ width: AXIS_WIDTH, height }}><View style={{ marginTop: PAD_TOP, height: priceHeight, justifyContent: 'space-between' }}>{axisValues.map((value, index) => <Text key={`axis-${index}`} style={styles.axisLabel}>{formatPrice(value, decimals)}</Text>)}</View></View>
+    <View style={{ width: AXIS_WIDTH, height }}>{axis?.ticks.map((tick) => {
+      const top = clamp(PAD_TOP + (1 - tick.fraction) * priceHeight - AXIS_LABEL_HEIGHT / 2, 0, Math.max(height - AXIS_LABEL_HEIGHT, 0));
+      return <Text key={`axis-${tick.value}`} numberOfLines={1} style={[styles.axisLabel, { position: 'absolute', right: 0, top, width: AXIS_WIDTH, height: AXIS_LABEL_HEIGHT, lineHeight: AXIS_LABEL_HEIGHT }]}>{trimZeros(formatPrice(tick.value, axisDecimals))}</Text>;
+    })}</View>
     {Array.from({ length: X_LABELS }, (_, index) => {
       const at = Math.round((index / (X_LABELS - 1)) * (visible.length - 1));
       const candle = visible[at];
@@ -561,7 +621,7 @@ export const PriceChart = memo(PriceChartComponent);
 
 const useStyles = createThemedStyles((colors) =>
   StyleSheet.create({
-    container: { flexDirection: 'row', position: 'relative' }, canvas: { flex: 1 }, axisLabel: { color: colors.textFaint, fontSize: 10, textAlign: 'right' }, timeLabel: { position: 'absolute', bottom: 2, color: colors.textFaint, fontSize: 10, width: TIME_LABEL_WIDTH, textAlign: 'center' },
+    container: { flexDirection: 'row', position: 'relative' }, canvas: { flex: 1 }, axisLabel: { color: colors.textFaint, fontSize: 10, textAlign: 'left', paddingHorizontal: 10 }, timeLabel: { position: 'absolute', bottom: 2, color: colors.textFaint, fontSize: 10, width: TIME_LABEL_WIDTH, textAlign: 'center' },
     readout: { position: 'absolute', top: spacing.xs, left: spacing.xs, backgroundColor: colors.surface, borderRadius: radius.sm, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border, paddingHorizontal: spacing.sm, paddingVertical: 6, gap: 3 }, readoutTime: { color: colors.textMuted, fontSize: 10, fontWeight: '600' }, readoutGrid: { flexDirection: 'row', gap: spacing.md }, ohlcCell: { flexDirection: 'row', alignItems: 'center', gap: 3 }, ohlcLabel: { color: colors.textFaint, fontSize: 10, fontWeight: '700' }, ohlcValue: { color: colors.text, fontSize: 10, fontWeight: '600', fontVariant: ['tabular-nums'] }, readoutVolume: { color: colors.textMuted, fontSize: 10, fontVariant: ['tabular-nums'] },
   }),
 );
