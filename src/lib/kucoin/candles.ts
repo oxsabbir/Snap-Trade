@@ -43,21 +43,58 @@ function toCandle(row: CandleTuple): Candle {
 }
 
 /**
- * KuCoin returns candles newest-first, capped at 100 per call, with second-precision
+ * KuCoin returns candles newest-first, capped at ~100 per call, with second-precision
  * timestamps. We flip to oldest-first so the chart reads left to right.
  *
- * `endAt` is in seconds and is how the lifetime walk pages backwards. It does not raise
- * the 100-row cap; it only moves the window.
+ * `startAt`/`endAt` are in seconds and are the only way to bound a call: the endpoint takes
+ * no `limit`, just a time window. They do not raise the per-call cap; they only move it.
  */
-export async function fetchCandles(
+async function fetchCandleWindow(
   symbol: string,
   type: string,
+  startAt?: number,
   endAt?: number
 ): Promise<Candle[]> {
-  const rows = await request<CandleTuple[]>('/market/candles', {
-    query: endAt === undefined ? { symbol, type } : { symbol, type, endAt },
-  });
+  const query: Record<string, string | number> = { symbol, type };
+  if (startAt !== undefined) query.startAt = startAt;
+  if (endAt !== undefined) query.endAt = endAt;
+  const rows = await request<CandleTuple[]>('/market/candles', { query });
   return rows.map(toCandle).reverse();
+}
+
+/** Candles fetched on first paint. Deliberately small; older ones page in on demand. */
+export const INITIAL_CANDLES = 35;
+/** Candles fetched per older-history page as the user drags back. */
+export const OLDER_PAGE_SIZE = 100;
+/**
+ * Ceiling on loaded history. The endpoint returns at most 1500 rows per query, so beyond this
+ * the chart would only be re-slicing the same window while making packing every tick heavier.
+ */
+export const MAX_HISTORY_CANDLES = 1500;
+
+/**
+ * The newest `INITIAL_CANDLES` candles, bounded by a `startAt` window rather than the endpoint's
+ * own default so first paint packs and draws a smaller series.
+ */
+export function fetchInitialCandles(symbol: string, timeframe: Timeframe): Promise<Candle[]> {
+  const endAt = Math.floor(Date.now() / 1000);
+  const startAt = endAt - INITIAL_CANDLES * timeframe.seconds;
+  return fetchCandleWindow(symbol, timeframe.key, startAt, endAt);
+}
+
+/**
+ * Up to `count` candles immediately older than `before` (ms), for panning back through history.
+ * `endAt` is inclusive, so the boundary candle can come back again; the caller de-dupes by time.
+ */
+export function fetchOlderCandles(
+  symbol: string,
+  timeframe: Timeframe,
+  before: number,
+  count: number
+): Promise<Candle[]> {
+  const endAt = Math.floor(before / 1000);
+  const startAt = endAt - count * timeframe.seconds;
+  return fetchCandleWindow(symbol, timeframe.key, startAt, endAt);
 }
 
 /** Rows per `/market/candles` call. Also the short-page test that ends the walk. */

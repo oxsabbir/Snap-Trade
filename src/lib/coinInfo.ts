@@ -20,10 +20,47 @@ export type CoinDescription = {
   url: string;
 };
 
+/**
+ * Market figures for a coin that KuCoin's public API does not expose: market capitalisation and
+ * token supply. `null` on any field means CoinPaprika did not report it, so the sheet omits that
+ * row rather than showing a zero.
+ */
+export type CoinMarket = {
+  /** Global market-cap rank, 1 = largest. */
+  rank: number | null;
+  /** Market capitalisation in USD. */
+  marketCap: number | null;
+  /** CoinPaprika's global 24h traded volume in USD, across every exchange. */
+  volume24h: number | null;
+  /** Global 24h price change as a percentage. */
+  change24h: number | null;
+  circulatingSupply: number | null;
+  totalSupply: number | null;
+  maxSupply: number | null;
+  /** Attribution, rendered by the sheet. */
+  source: string;
+  url: string;
+};
+
 type PaprikaCurrency = {
   id?: string;
   symbol?: string;
   rank?: number;
+};
+
+type PaprikaQuote = {
+  price?: number;
+  volume_24h?: number;
+  market_cap?: number;
+  percent_change_24h?: number;
+};
+
+type PaprikaTicker = {
+  rank?: number;
+  circulating_supply?: number;
+  total_supply?: number;
+  max_supply?: number;
+  quotes?: { USD?: PaprikaQuote };
 };
 
 type PaprikaCoin = {
@@ -83,6 +120,56 @@ async function getJson<T>(url: string): Promise<T> {
   }
 }
 
+/**
+ * The symbol → CoinPaprika-id search is needed by both the description and the market lookups, so
+ * it runs once per ticker and is replayed from here afterwards. A rejection is evicted so a retry is
+ * a real retry; a genuine "no match" resolves to `null` and is cached like any other result.
+ */
+const coinIdCache = new Map<string, Promise<string | null>>();
+
+function resolveCoinId(symbol: string): Promise<string | null> {
+  const wanted = symbol.trim().toUpperCase();
+  if (!wanted) return Promise.resolve(null);
+
+  const cached = coinIdCache.get(wanted);
+  if (cached) return cached;
+
+  const pending = (async () => {
+    const search = await getJson<{ currencies?: PaprikaCurrency[] }>(
+      `${BASE_URL}/search?q=${encodeURIComponent(wanted)}&c=currencies&limit=15`
+    );
+    return pickCurrencyId(search.currencies ?? [], wanted);
+  })();
+  coinIdCache.set(wanted, pending);
+  pending.catch(() => {
+    if (coinIdCache.get(wanted) === pending) coinIdCache.delete(wanted);
+  });
+  return pending;
+}
+
+function finiteOrNull(value: number | undefined): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+/**
+ * Flattens a CoinPaprika ticker row into the fields the sheet draws. Exported so the mapping —
+ * which fields are USD, which are supplies — is pinned by a test without a network call.
+ */
+export function normalizeCoinMarket(ticker: PaprikaTicker, id: string): CoinMarket {
+  const usd = ticker.quotes?.USD;
+  return {
+    rank: finiteOrNull(ticker.rank),
+    marketCap: finiteOrNull(usd?.market_cap),
+    volume24h: finiteOrNull(usd?.volume_24h),
+    change24h: finiteOrNull(usd?.percent_change_24h),
+    circulatingSupply: finiteOrNull(ticker.circulating_supply),
+    totalSupply: finiteOrNull(ticker.total_supply),
+    maxSupply: finiteOrNull(ticker.max_supply),
+    source: 'CoinPaprika',
+    url: `https://coinpaprika.com/coin/${id}/`,
+  };
+}
+
 const descriptionCache = new Map<string, Promise<CoinDescription | null>>();
 
 /**
@@ -108,10 +195,7 @@ export function fetchCoinDescription(symbol: string): Promise<CoinDescription | 
 }
 
 async function loadDescription(symbol: string): Promise<CoinDescription | null> {
-  const search = await getJson<{ currencies?: PaprikaCurrency[] }>(
-    `${BASE_URL}/search?q=${encodeURIComponent(symbol)}&c=currencies&limit=15`
-  );
-  const id = pickCurrencyId(search.currencies ?? [], symbol);
+  const id = await resolveCoinId(symbol);
   if (!id) return null;
 
   const coin = await getJson<PaprikaCoin>(`${BASE_URL}/coins/${encodeURIComponent(id)}`);
@@ -119,4 +203,34 @@ async function loadDescription(symbol: string): Promise<CoinDescription | null> 
   if (!text) return null;
 
   return { text, source: 'CoinPaprika', url: `https://coinpaprika.com/coin/${id}/` };
+}
+
+const marketCache = new Map<string, Promise<CoinMarket | null>>();
+
+/**
+ * Resolves a base ticker to its market capitalisation and supply figures. Returns `null` when the
+ * ticker has no CoinPaprika match, so the sheet can omit the whole section. Cached per ticker for
+ * the session, with failures evicted so a retry can succeed.
+ */
+export function fetchCoinMarket(symbol: string): Promise<CoinMarket | null> {
+  const wanted = symbol.trim().toUpperCase();
+  if (!wanted) return Promise.resolve(null);
+
+  const cached = marketCache.get(wanted);
+  if (cached) return cached;
+
+  const pending = loadMarket(wanted);
+  marketCache.set(wanted, pending);
+  pending.catch(() => {
+    if (marketCache.get(wanted) === pending) marketCache.delete(wanted);
+  });
+  return pending;
+}
+
+async function loadMarket(symbol: string): Promise<CoinMarket | null> {
+  const id = await resolveCoinId(symbol);
+  if (!id) return null;
+
+  const ticker = await getJson<PaprikaTicker>(`${BASE_URL}/tickers/${encodeURIComponent(id)}`);
+  return normalizeCoinMarket(ticker, id);
 }

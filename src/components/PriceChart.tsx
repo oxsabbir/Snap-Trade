@@ -82,9 +82,17 @@ type Props = {
   defaultSpan?: number;
   resetKey?: string;
   onVisibleRangeChange?: (visible: number, total: number) => void;
+  /** Asked for more older candles when the window reaches the left edge of the loaded series. */
+  onLoadOlder?: () => void;
 };
 type Viewport = { start: number; span: number };
-type Committed = Viewport & { key: string | undefined; count: number };
+type Committed = Viewport & {
+  key: string | undefined;
+  count: number;
+  /** Times of the oldest and newest candles when the window was committed. */
+  oldestTime: number;
+  newestTime: number;
+};
 type Domain = { lower: number; upper: number };
 
 function clamp(value: number, min: number, max: number): number {
@@ -285,6 +293,7 @@ function PriceChartComponent({
   defaultSpan,
   resetKey,
   onVisibleRangeChange,
+  onLoadOlder,
 }: Props) {
   const { colors } = useTheme();
   const styles = useStyles();
@@ -296,6 +305,8 @@ function PriceChartComponent({
     count: 0,
     start: 0,
     span: 0,
+    oldestTime: 0,
+    newestTime: 0,
   });
   const [selection, setSelection] = useState<{
     key: string | undefined;
@@ -304,10 +315,36 @@ function PriceChartComponent({
 
   const isLine = mode === "line";
   const count = candles.length;
+  const firstTime = count > 0 ? candles[0]!.time : 0;
+  const lastTime = count > 0 ? candles[count - 1]!.time : 0;
   const innerWidth = Math.max(width - AXIS_WIDTH, 0);
   const priceHeight = Math.max(height - PAD_TOP - PAD_BOTTOM, 1);
   const activeIndex =
     selection !== null && selection.key === resetKey ? selection.index : null;
+
+  /**
+   * Older candles were prepended below the committed window (the newest candle is unchanged but
+   * the oldest moved back), so every index shifted by however many arrived. Shift the committed
+   * viewport by the same amount in this render, otherwise the visible candles would jump right by
+   * a whole page. Adjusting state during render is the supported way to react to a prop change
+   * without an extra paint; it converges because the condition is false once applied.
+   */
+  if (
+    committed.key === resetKey &&
+    committed.newestTime !== 0 &&
+    count > committed.count &&
+    lastTime === committed.newestTime &&
+    firstTime < committed.oldestTime
+  ) {
+    setCommitted({
+      key: committed.key,
+      count,
+      start: committed.start + (count - committed.count),
+      span: committed.span,
+      oldestTime: firstTime,
+      newestTime: committed.newestTime,
+    });
+  }
 
   // Everything the UI runtime needs. The series is flattened to open/high/low/close so the
   // worklet never touches objects. The newest candle is packed alongside the rest rather than
@@ -319,6 +356,9 @@ function PriceChartComponent({
   const plotWidth = useSharedValue(0);
   const plotHeight = useSharedValue(0);
   const lineValue = useSharedValue(isLine ? 1 : 0);
+  /** Oldest/newest candle times, read by `commit` without depending on the candles array. */
+  const oldestValue = useSharedValue(0);
+  const newestValue = useSharedValue(0);
 
   /**
    * The window to draw, derived during render rather than pushed into state by an effect.
@@ -379,16 +419,28 @@ function PriceChartComponent({
    */
   useEffect(() => {
     countValue.set(count);
+    oldestValue.set(firstTime);
+    newestValue.set(lastTime);
     if (count === 0) {
       packed.set([]);
       return;
     }
     packed.set(packCandles(candles));
-  }, [candles, count, countValue, packed]);
+  }, [candles, count, countValue, firstTime, lastTime, newestValue, oldestValue, packed]);
 
   useEffect(() => {
     if (count > 0) onVisibleRangeChange?.(settledSpan, count);
   }, [count, onVisibleRangeChange, settledSpan]);
+
+  /**
+   * Ask for older candles once the window has reached the oldest loaded one. The trigger can be
+   * a pan (settled at the edge) or a pinch (zoomed out past the history already fetched); the hook
+   * de-dupes, so firing on every settle near the edge is free.
+   */
+  useEffect(() => {
+    if (count === 0 || settledStart > 0) return;
+    onLoadOlder?.();
+  }, [count, onLoadOlder, settledStart]);
 
   // The window only backs the axis labels and the crosshair, both of which are JS-thread
   // text. They settle on gesture end rather than tracking every frame.
@@ -505,17 +557,35 @@ function PriceChartComponent({
       count: countValue.get(),
       start: Math.round(startValue.get()),
       span: spanValue.get(),
+      oldestTime: oldestValue.get(),
+      newestTime: newestValue.get(),
     });
-  }, [countValue, resetKey, spanValue, startValue]);
+  }, [countValue, newestValue, oldestValue, resetKey, spanValue, startValue]);
 
   const resetViewport = useCallback(() => {
     const span = defaultSpanFor(count, isLine, defaultSpan);
     const start = maxStartFor(count, span);
     spanValue.set(span);
     startValue.set(start);
-    setCommitted({ key: resetKey, count, start, span });
+    setCommitted({
+      key: resetKey,
+      count,
+      start,
+      span,
+      oldestTime: firstTime,
+      newestTime: lastTime,
+    });
     setSelection(null);
-  }, [count, defaultSpan, isLine, resetKey, spanValue, startValue]);
+  }, [
+    count,
+    defaultSpan,
+    firstTime,
+    isLine,
+    lastTime,
+    resetKey,
+    spanValue,
+    startValue,
+  ]);
 
   const selectAt = useCallback(
     (x: number) => {
@@ -703,7 +773,10 @@ function PriceChartComponent({
     startValue,
   ]);
 
-  const panAnchor = useSharedValue(0);
+  const panLast = useSharedValue(0);
+  // Set while a drag sits at the left edge and a page has been asked for; cleared once the window
+  // moves away, so a continued drag pages again only after the previous page has landed.
+  const panLoadArmed = useSharedValue(0);
   const pinchSpan = useSharedValue(0);
   const pinchStart = useSharedValue(0);
   const pinchFocal = useSharedValue(0.5);
@@ -714,7 +787,7 @@ function PriceChartComponent({
         .activeOffsetX([-PAN_SLOP, PAN_SLOP])
         .failOffsetY(PAN_FAIL_Y)
         .onBegin(() => {
-          panAnchor.set(startValue.get());
+          panLast.set(0);
         })
         // Cleared on activation rather than on touch-down: a tap that never becomes a drag used
         // to clear the crosshair first and immediately re-select it, which made tapping the same
@@ -727,10 +800,25 @@ function PriceChartComponent({
           const span = spanValue.get();
           const perPixel = span / Math.max(plotWidth.get(), 1);
           const maxStart = maxStartFor(count, span);
+          // Applied as a delta from the previous frame rather than from the gesture's start, so a
+          // page of older candles arriving mid-drag (which shifts `startValue` to keep the visible
+          // candles still) is not undone by the next update.
+          const dx = event.translationX - panLast.get();
+          panLast.set(event.translationX);
           // Resistance only past the edge, so the window still tracks the finger one-to-one for the
           // whole of its travel and the stop is felt as a soft wall rather than a dead end.
-          const raw = panAnchor.get() - event.translationX * perPixel;
+          const raw = startValue.get() - dx * perPixel;
           startValue.set(resistedStart(raw, maxStart, span * OVERSCROLL));
+          // Reaching the oldest loaded candle asks for the next page; once older candles land the
+          // window is pushed back into the series, so this re-arms and the drag keeps going.
+          if (raw <= 0) {
+            if (onLoadOlder && panLoadArmed.get() === 0) {
+              panLoadArmed.set(1);
+              runOnJS(onLoadOlder)();
+            }
+          } else if (raw > span * 0.5) {
+            panLoadArmed.set(0);
+          }
         })
         .onFinalize(() => {
           const span = spanValue.get();
@@ -754,7 +842,9 @@ function PriceChartComponent({
       clearActive,
       commit,
       countValue,
-      panAnchor,
+      onLoadOlder,
+      panLast,
+      panLoadArmed,
       plotWidth,
       spanValue,
       startValue,

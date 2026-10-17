@@ -8,6 +8,11 @@
  * Method is weighted average. A buy adds its base size and its quote cost. A sell removes base
  * size and removes cost in proportion (`cost * remaining / before`), which leaves the average
  * untouched — the whole point of a weighted average. Selling everything resets the ledger.
+ *
+ * Fees are deliberately left out. The average is meant to mirror the price actually executed, and
+ * KuCoin charges spot fees in the coin received: folding that in would lift a buy's average above
+ * the quoted price (1.0012 paid would read back as 1.0022), which is not the number the user
+ * recognises from their order.
  */
 
 import {
@@ -66,43 +71,28 @@ export function normalizeCreatedAt(value: number): number {
 }
 
 /**
- * Turns a raw fill into the two numbers the ledger needs, or `null` when it cannot be counted:
- * malformed size/price, or a fee paid in a currency that is neither leg's (e.g. KCS), which would
- * silently misstate the cost. Fees in the base leg reduce the received size on a buy and add to the
- * spent size on a sell; a quote fee adds to a buy's cost. Sell proceeds never enter the cost basis.
+ * Turns a raw fill into the two numbers the ledger needs, or `null` when it cannot be counted
+ * (malformed size or price, or no positive size). Fees are left out so the resulting average equals
+ * the price actually executed. Sell proceeds never enter the cost basis.
  */
-export function toParsedFill(
-  fill: Fill,
-  base: string,
-  quote: string
-): ParsedFill | null {
+export function toParsedFill(fill: Fill): ParsedFill | null {
   const size = fill.size;
   const price = fill.price;
   if (!size || !price) return null;
   if (cmp(size, '0') <= 0) return null;
 
-  // `funds` is the quote value KuCoin reports for the deal; fall back to price * size when absent.
-  const gross = fill.funds && cmp(fill.funds, '0') > 0 ? fill.funds : multiplyDecimal(price, size);
-  if (gross === null) return null;
-
-  const fee = fill.fee && cmp(fill.fee, '0') > 0 ? fill.fee : null;
-  const feeInBase = fee !== null && !!base && fill.feeCurrency === base;
-  const feeInQuote = fee !== null && !!quote && fill.feeCurrency === quote;
+  const cost = multiplyDecimal(price, size);
+  if (cost === null) return null;
 
   if (fill.side === 'buy') {
-    const qty = feeInBase ? addDecimal(size, `-${fee}`) : size;
-    const cost = feeInQuote ? addDecimal(gross, fee) : gross;
-    if (qty === null || cost === null || !isPositive(qty)) return null;
-    return { id: fill.tradeId, createdAt: normalizeCreatedAt(fill.createdAt), side: 'buy', qty, cost };
+    return { id: fill.tradeId, createdAt: normalizeCreatedAt(fill.createdAt), side: 'buy', qty: size, cost };
   }
 
-  const qty = feeInBase ? addDecimal(size, fee) : size;
-  if (qty === null || !isPositive(qty)) return null;
   return {
     id: fill.tradeId,
     createdAt: normalizeCreatedAt(fill.createdAt),
     side: 'sell',
-    qty,
+    qty: size,
     cost: '0',
   };
 }
@@ -141,15 +131,10 @@ export function averageCost(ledger: CostLedger): string | null {
  * order the API returned them in. The cursor advances to the newest applied fill; ids applied at
  * exactly that timestamp are remembered so a `startAt`-overlapping refetch is not double-counted.
  */
-export function absorbFills(
-  ledger: CostLedger,
-  fills: Fill[],
-  base: string,
-  quote: string
-): CostLedger {
+export function absorbFills(ledger: CostLedger, fills: Fill[]): CostLedger {
   const pending: ParsedFill[] = [];
   for (const raw of fills) {
-    const parsed = toParsedFill(raw, base, quote);
+    const parsed = toParsedFill(raw);
     if (!parsed) continue;
     if (parsed.createdAt < ledger.cursor) continue;
     if (parsed.createdAt === ledger.cursor && ledger.cursorIds.includes(parsed.id)) continue;

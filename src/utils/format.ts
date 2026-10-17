@@ -70,7 +70,19 @@ export function formatAmount(value: number): string {
   return fraction ? `${grouped}.${fraction}` : grouped;
 }
 
+/**
+ * A signed dollar amount for a profit/loss figure: `+$12.34`, `-$0.40`, `$0.00` at breakeven.
+ * Significant digits rather than a fixed two, so a sub-cent position still reads as a number
+ * instead of rounding away to `$0.00`.
+ */
+export function formatSignedUsd(value: number): string {
+  if (!Number.isFinite(value)) return '-';
+  const sign = value > 0 ? '+' : value < 0 ? '-' : '';
+  return `${sign}$${formatAmount(Math.abs(value))}`;
+}
+
 const COMPACT_UNITS = [
+  { threshold: 1_000_000_000_000, suffix: 'T' },
   { threshold: 1_000_000_000, suffix: 'B' },
   { threshold: 1_000_000, suffix: 'M' },
   { threshold: 1_000, suffix: 'K' },

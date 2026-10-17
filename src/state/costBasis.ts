@@ -18,7 +18,9 @@ import {
  * subscribes to a view and `ensureCostBasis` fills it in when the request lands.
  */
 
-const KEY_PREFIX = 'cost_basis:';
+// Bumped to v2 when fees stopped feeding the average: a v1 ledger holds fee-inclusive numbers and a
+// cursor past the fills that produced them, so it must be discarded and rebuilt rather than upgraded.
+const KEY_PREFIX = 'cost_basis_v2:';
 /** Ignore a refresh that ran less than this long ago so reopening a pair is free. */
 const REFRESH_AFTER_MS = 60_000;
 const MAX_PAGES = 50;
@@ -39,6 +41,15 @@ const views = new Map<string, CostBasisView>();
 const listeners = new Map<string, Set<() => void>>();
 const fetchedAt = new Map<string, number>();
 const inflight = new Map<string, Promise<void>>();
+const refreshTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+/**
+ * How long to wait after an order event before re-reading fills. A fill is placed and settled on
+ * the exchange's side, and `GET /fills` can lag the private feed by a moment, so an immediate read
+ * would miss the trade it is reacting to. A short delay also coalesces the burst of partial-fill
+ * frames a single order produces into one request.
+ */
+const POST_ORDER_REFRESH_DELAY_MS = 1200;
 
 function notify(symbol: string): void {
   const set = listeners.get(symbol);
@@ -74,12 +85,6 @@ export function subscribeCostBasis(symbol: string, listener: () => void): () => 
 
 function storageKey(symbol: string): string {
   return `${KEY_PREFIX}${symbol}`;
-}
-
-function split(symbol: string): { base: string; quote: string } {
-  const dash = symbol.indexOf('-');
-  if (dash === -1) return { base: symbol, quote: '' };
-  return { base: symbol.slice(0, dash), quote: symbol.slice(dash + 1) };
 }
 
 async function loadPersisted(symbol: string): Promise<CostLedger | null> {
@@ -120,12 +125,17 @@ function publish(symbol: string, ledger: CostLedger, loading: boolean, error: st
  * unless a refresh ran moments ago — pulls new fills in the background. Safe to call from every
  * mount: concurrent calls share one promise, and a pair with a warm ledger resolves immediately
  * while the refresh continues unawaited by the UI.
+ *
+ * `force` skips the recent-refresh guard so a just-filled order is reflected straight away. If a
+ * fetch is already running, the forced run is chained after it rather than dropped.
  */
-export function ensureCostBasis(symbol: string): Promise<void> {
+export function ensureCostBasis(symbol: string, options: { force?: boolean } = {}): Promise<void> {
+  const { force = false } = options;
   const active = inflight.get(symbol);
-  if (active) return active;
-
-  const symbolParts = split(symbol);
+  if (active) {
+    if (!force) return active;
+    return active.catch(() => {}).then(() => ensureCostBasis(symbol, { force: true }));
+  }
 
   const task = (async () => {
     let ledger = ledgers.get(symbol) ?? null;
@@ -136,7 +146,7 @@ export function ensureCostBasis(symbol: string): Promise<void> {
     }
 
     const last = fetchedAt.get(symbol) ?? 0;
-    if (Date.now() - last < REFRESH_AFTER_MS) {
+    if (!force && Date.now() - last < REFRESH_AFTER_MS) {
       publish(symbol, ledger, false, null);
       return;
     }
@@ -150,7 +160,7 @@ export function ensureCostBasis(symbol: string): Promise<void> {
 
       for (let guard = 0; guard < MAX_PAGES; guard += 1) {
         const result = await fetchFills(symbol, { page, startAt });
-        accumulated = absorbFills(accumulated, result.items, symbolParts.base, symbolParts.quote);
+        accumulated = absorbFills(accumulated, result.items);
         if (!result.hasMore) break;
         page += 1;
       }
@@ -168,4 +178,23 @@ export function ensureCostBasis(symbol: string): Promise<void> {
   inflight.set(symbol, task);
   task.catch(() => {}).finally(() => inflight.delete(symbol));
   return task;
+}
+
+/**
+ * Re-reads a pair's fills shortly after an order event, so the average cost — and therefore the
+ * header's profit/loss chip — tracks buys and sells as they complete. Debounced per pair: a market
+ * order firing several partial-fill frames still costs one request. A forced refresh bypasses the
+ * routine recent-refresh guard that would otherwise swallow it.
+ */
+export function scheduleCostBasisRefresh(symbol: string): void {
+  if (!symbol) return;
+  const timer = refreshTimers.get(symbol);
+  if (timer) clearTimeout(timer);
+  refreshTimers.set(
+    symbol,
+    setTimeout(() => {
+      refreshTimers.delete(symbol);
+      void ensureCostBasis(symbol, { force: true });
+    }, POST_ORDER_REFRESH_DELAY_MS)
+  );
 }

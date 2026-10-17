@@ -2,8 +2,9 @@
  * Unit tests for the cost-basis ledger.
  *
  * Offline, no API key. They pin down the weighted-average rules the Assets tab depends on: a buy
- * adds size and cost, a sell removes cost in proportion and leaves the average alone, a full exit
- * resets, fees move the right side, and the cursor stops a refetched page from being counted twice.
+ * adds size and cost at its executed price, a sell removes cost in proportion and leaves the
+ * average alone, a full exit resets, fees are left out of the average, and the cursor stops a
+ * refetched page from being counted twice.
  *
  *   bun src/state/costBasisEntries.test.ts
  */
@@ -51,51 +52,49 @@ function ledger(over: Partial<CostLedger> = {}): CostLedger {
 
 // --- parsing ------------------------------------------------------------------------------------
 
-test('a buy stores size as quantity and funds as cost', () => {
-  const parsed = toParsedFill(fill(), 'BTC', 'USDT');
+test('a buy stores size as quantity and price times size as cost', () => {
+  const parsed = toParsedFill(fill());
   if (!parsed) return fail('expected a parsed fill');
   eq(parsed.side, 'buy');
   eq(parsed.qty, '2');
   eq(parsed.cost, '200');
 });
 
-test('a buy fee charged in the base leg reduces the received size', () => {
-  const parsed = toParsedFill(fill({ fee: '0.01', feeCurrency: 'BTC' }), 'BTC', 'USDT');
+test('fees are left out so the average tracks the executed price', () => {
+  // Bought 1000 USDC at 1.0012 with a 0.1% fee charged in the base coin. The fee is ignored, so
+  // the average comes back as the price paid (1.0012), not the fee-inclusive 1.0022.
+  const parsed = toParsedFill(
+    fill({ price: '1.0012', size: '1000', funds: '', fee: '1.0012', feeCurrency: 'USDC' })
+  );
   if (!parsed) return fail('expected a parsed fill');
-  eq(parsed.qty, '1.99');
-  eq(parsed.cost, '200');
+  eq(parsed.qty, '1000');
+  eq(parsed.cost, '1001.2');
+  eq(averageCost(applyFill(emptyLedger(), parsed)), '1.0012');
 });
 
-test('a buy fee charged in the quote leg adds to the cost', () => {
-  const parsed = toParsedFill(fill({ fee: '0.2', feeCurrency: 'USDT' }), 'BTC', 'USDT');
-  if (!parsed) return fail('expected a parsed fill');
-  eq(parsed.qty, '2');
-  eq(parsed.cost, '200.2');
-});
-
-test('a fee in a third currency is ignored rather than misattributed', () => {
-  const parsed = toParsedFill(fill({ fee: '0.5', feeCurrency: 'KCS' }), 'BTC', 'USDT');
+test('a quote-leg fee does not inflate the cost either', () => {
+  const parsed = toParsedFill(fill({ fee: '0.2', feeCurrency: 'USDT' }));
   if (!parsed) return fail('expected a parsed fill');
   eq(parsed.qty, '2');
   eq(parsed.cost, '200');
 });
 
 test('a sell charges no cost basis, only removal of size', () => {
-  const parsed = toParsedFill(fill({ side: 'sell', fee: '0.01', feeCurrency: 'BTC' }), 'BTC', 'USDT');
+  const parsed = toParsedFill(fill({ side: 'sell' }));
   if (!parsed) return fail('expected a parsed fill');
   eq(parsed.side, 'sell');
-  eq(parsed.qty, '2.01');
+  eq(parsed.qty, '2');
   eq(parsed.cost, '0');
 });
 
-test('a fill with no funds falls back to price times size', () => {
-  const parsed = toParsedFill(fill({ funds: '' }), 'BTC', 'USDT');
+test('a fill with no funds still prices the cost from price times size', () => {
+  const parsed = toParsedFill(fill({ funds: '' }));
   if (!parsed) return fail('expected a parsed fill');
   eq(parsed.cost, '200');
 });
 
 test('a fill with a non-positive size is dropped', () => {
-  eq(toParsedFill(fill({ size: '0' }), 'BTC', 'USDT'), null);
+  eq(toParsedFill(fill({ size: '0' })), null);
 });
 
 test('nanosecond timestamps are scaled down to milliseconds', () => {
@@ -107,7 +106,7 @@ test('nanosecond timestamps are scaled down to milliseconds', () => {
 
 test('two buys produce the weighted average of their prices', () => {
   const parsed = (price: string, size: string, at: number) =>
-    toParsedFill(fill({ price, size, funds: '', createdAt: at }), 'BTC', 'USDT')!;
+    toParsedFill(fill({ price, size, funds: '', createdAt: at }))!;
   const a = parsed('100', '1', 1);
   const b = parsed('200', '3', 2);
   const result = applyFill(applyFill(emptyLedger(), a), b);
@@ -119,7 +118,7 @@ test('two buys produce the weighted average of their prices', () => {
 test('a partial sell removes cost in proportion and keeps the average', () => {
   // Buy 4 @ 175, then sell 1. Cost left = 700 * 3/4 = 525, average stays 175.
   const bought = ledger({ qty: '4', cost: '700' });
-  const sell = toParsedFill(fill({ side: 'sell', price: '300', size: '1', funds: '300' }), 'BTC', 'USDT')!;
+  const sell = toParsedFill(fill({ side: 'sell', price: '300', size: '1', funds: '300' }))!;
   const result = applyFill(bought, sell);
   eq(result.qty, '3');
   eq(averageCost(result), '175');
@@ -127,7 +126,7 @@ test('a partial sell removes cost in proportion and keeps the average', () => {
 
 test('selling the whole position resets quantity and cost', () => {
   const bought = ledger({ qty: '4', cost: '700' });
-  const sell = toParsedFill(fill({ side: 'sell', size: '4', price: '300', funds: '1200' }), 'BTC', 'USDT')!;
+  const sell = toParsedFill(fill({ side: 'sell', size: '4', price: '300', funds: '1200' }))!;
   const result = applyFill(bought, sell);
   eq(result.qty, '0');
   eq(result.cost, '0');
@@ -136,7 +135,7 @@ test('selling the whole position resets quantity and cost', () => {
 
 test('selling more than held also resets to flat', () => {
   const bought = ledger({ qty: '4', cost: '700' });
-  const sell = toParsedFill(fill({ side: 'sell', size: '5', price: '300', funds: '1500' }), 'BTC', 'USDT')!;
+  const sell = toParsedFill(fill({ side: 'sell', size: '5', price: '300', funds: '1500' }))!;
   const result = applyFill(bought, sell);
   eq(result.qty, '0');
   eq(result.cost, '0');
@@ -149,28 +148,28 @@ test('absorbFills applies a newest-first page in chronological order', () => {
     fill({ tradeId: 'b', price: '200', size: '3', funds: '', createdAt: 2 }),
     fill({ tradeId: 'a', price: '100', size: '1', funds: '', createdAt: 1 }),
   ];
-  const result = absorbFills(emptyLedger(), page, 'BTC', 'USDT');
+  const result = absorbFills(emptyLedger(), page);
   eq(averageCost(result), '175');
   eq(result.cursor, 2);
   eq(result.cursorIds.join(','), 'b');
 });
 
 test('absorbFills skips fills at or before the cursor', () => {
-  const start = absorbFills(emptyLedger(), [fill({ tradeId: 'a', createdAt: 5 })], 'BTC', 'USDT');
-  const again = absorbFills(start, [fill({ tradeId: 'a', createdAt: 5 }), fill({ tradeId: 'old', createdAt: 1 })], 'BTC', 'USDT');
+  const start = absorbFills(emptyLedger(), [fill({ tradeId: 'a', createdAt: 5 })]);
+  const again = absorbFills(start, [fill({ tradeId: 'a', createdAt: 5 }), fill({ tradeId: 'old', createdAt: 1 })]);
   eq(again.qty, '2');
   eq(again, start);
 });
 
 test('absorbFills does not double-count a fill at the cursor timestamp', () => {
-  const first = absorbFills(emptyLedger(), [fill({ tradeId: 'a', createdAt: 5 })], 'BTC', 'USDT');
-  const refetched = absorbFills(first, [fill({ tradeId: 'a', createdAt: 5 })], 'BTC', 'USDT');
+  const first = absorbFills(emptyLedger(), [fill({ tradeId: 'a', createdAt: 5 })]);
+  const refetched = absorbFills(first, [fill({ tradeId: 'a', createdAt: 5 })]);
   eq(refetched.qty, '2');
 });
 
 test('absorbFills counts a new fill sharing the cursor timestamp', () => {
-  const first = absorbFills(emptyLedger(), [fill({ tradeId: 'a', createdAt: 5 })], 'BTC', 'USDT');
-  const next = absorbFills(first, [fill({ tradeId: 'b', createdAt: 5 })], 'BTC', 'USDT');
+  const first = absorbFills(emptyLedger(), [fill({ tradeId: 'a', createdAt: 5 })]);
+  const next = absorbFills(first, [fill({ tradeId: 'b', createdAt: 5 })]);
   eq(next.qty, '4');
   eq(next.cursorIds.sort().join(','), 'a,b');
 });

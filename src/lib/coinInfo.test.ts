@@ -7,7 +7,7 @@
  *
  *   bun src/lib/coinInfo.test.ts
  */
-import { cleanDescription, pickCurrencyId } from './coinInfo';
+import { cleanDescription, normalizeCoinMarket, pickCurrencyId } from './coinInfo';
 
 const tests: { name: string; run: () => void }[] = [];
 function test(name: string, run: () => void): void {
@@ -96,6 +96,48 @@ test('returns an empty string for missing text', () => {
   eq(cleanDescription(undefined), '');
   eq(cleanDescription(''), '');
   eq(cleanDescription('   '), '');
+});
+
+// --- normalizeCoinMarket ----------------------------------------------------------------------
+
+test('maps the ticker quote and supply fields into USD figures', () => {
+  const market = normalizeCoinMarket(
+    {
+      rank: 1,
+      circulating_supply: 19_500_000,
+      total_supply: 21_000_000,
+      max_supply: 21_000_000,
+      quotes: {
+        USD: { price: 65_000, market_cap: 1_267_500_000_000, volume_24h: 32_000_000_000, percent_change_24h: -1.25 },
+      },
+    },
+    'btc-bitcoin'
+  );
+  eq(market.rank, 1);
+  eq(market.marketCap, 1_267_500_000_000);
+  eq(market.volume24h, 32_000_000_000);
+  eq(market.change24h, -1.25);
+  eq(market.circulatingSupply, 19_500_000);
+  eq(market.totalSupply, 21_000_000);
+  eq(market.maxSupply, 21_000_000);
+  eq(market.url, 'https://coinpaprika.com/coin/btc-bitcoin/');
+});
+
+test('leaves fields CoinPaprika did not report as null', () => {
+  const market = normalizeCoinMarket({ quotes: { USD: { market_cap: 5 } } }, 'x');
+  eq(market.marketCap, 5);
+  eq(market.rank, null);
+  eq(market.volume24h, null);
+  eq(market.change24h, null);
+  eq(market.circulatingSupply, null);
+  eq(market.maxSupply, null);
+});
+
+test('treats a missing USD quote as no figures rather than zero', () => {
+  const market = normalizeCoinMarket({ rank: 42, total_supply: 1000 }, 'x');
+  eq(market.marketCap, null);
+  eq(market.volume24h, null);
+  eq(market.totalSupply, 1000);
 });
 
 // --- runner -----------------------------------------------------------------------------------

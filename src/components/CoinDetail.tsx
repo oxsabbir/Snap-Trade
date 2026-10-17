@@ -11,6 +11,7 @@ import { CoinInfoSheet } from "@/components/CoinInfoSheet";
 import { InfoIcon } from "@/components/Icons";
 import { LiveBadge } from "@/components/LiveBadge";
 import { LivePrice } from "@/components/LivePrice";
+import { PositionPnlChip } from "@/components/PositionPnlChip";
 import { PriceChart } from "@/components/PriceChart";
 import { TimeframeTabs } from "@/components/TimeframeTabs";
 import { useLifetimeSeries } from "@/hooks/useLifetimeSeries";
@@ -115,6 +116,10 @@ const ChartChrome = memo(function ChartChrome({
           fallbackPrice={seedPrice ?? undefined}
           decimals={decimals}
         />
+        <PositionPnlChip
+          symbol={symbol}
+          fallbackPrice={seedPrice ?? undefined}
+        />
         <LiveBadge symbol={symbol} />
       </View>
 
@@ -122,11 +127,11 @@ const ChartChrome = memo(function ChartChrome({
         <TimeframeTabs value={timeframeKey} onChange={onSelectTimeframe} />
       </View>
 
-      {/* <View style={styles.toolbar}>
+      <View style={styles.toolbar}>
         <Text style={styles.periodLabel} numberOfLines={1}>
           {periodLabel}
         </Text>
-      </View> */}
+      </View>
     </>
   );
 });
@@ -249,6 +254,7 @@ export function CoinDetail({ symbol, name, decimals }: Props) {
           decimals={decimals}
           resetKey={`${symbol}:${timeframe.key}`}
           onVisibleRangeChange={onVisibleRangeChange}
+          onLoadOlder={isLine ? undefined : live.loadOlder}
         />
 
         {candles.length === 0 ? (

@@ -15,10 +15,11 @@ import { CloseIcon } from '@/components/Icons';
 import { Stat } from '@/components/Stat';
 import { useCoinDescription, type CoinDescriptionState } from '@/hooks/useCoinDescription';
 import { useCoinInfo } from '@/hooks/useCoinInfo';
+import { useCoinMarket, type CoinMarketState } from '@/hooks/useCoinMarket';
 import { radius, spacing } from '@/theme';
 import { useTheme } from '@/theme/ThemeProvider';
 import { createThemedStyles } from '@/theme/themedStyles';
-import { formatCompact, formatPrice, formatRate, parseNumber } from '@/utils/format';
+import { formatCompact, formatPercent, formatPrice, formatRate, parseNumber } from '@/utils/format';
 
 /** Past this length the paragraph collapses behind a "Read more" toggle. */
 const DESCRIPTION_COLLAPSE_LENGTH = 240;
@@ -41,6 +42,7 @@ function CoinInfoSheetComponent({ symbol, visible, onClose, decimals }: Props) {
   const insets = useSafeAreaInsets();
   const { stats, symbolInfo, currency, isLoading, error, refresh } = useCoinInfo(symbol, visible);
   const description = useCoinDescription(symbol, visible);
+  const market = useCoinMarket(symbol, visible);
 
   const [base, quote] = symbol.split('-');
   const high = parseNumber(stats?.high);
@@ -88,6 +90,8 @@ function CoinInfoSheetComponent({ symbol, visible, onClose, decimals }: Props) {
             contentContainerStyle={styles.scrollContent}
             showsVerticalScrollIndicator={false}
           >
+            <MarketSection state={market} />
+
             <Section title="24 hour">
               <View style={styles.grid}>
                 <Stat label="Last" value={last === null ? '—' : formatPrice(last, decimals)} />
@@ -229,6 +233,77 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 function formatAmount2(value: string | undefined): string {
   const parsed = parseNumber(value);
   return parsed === null ? '—' : formatCompact(parsed, 4);
+}
+
+/** `$1.23T` style, guarding against a `null` the caller already filtered. */
+function usd(value: number | null): string {
+  return value === null ? '—' : `$${formatCompact(value)}`;
+}
+
+/**
+ * Market capitalisation and supply, sourced from CoinPaprika because KuCoin's public API carries
+ * neither. Fetched independently of the KuCoin stats, so this section can show a spinner or an
+ * error of its own while the rest of the sheet renders. Missing fields are dropped rather than
+ * drawn as zero, and a coin CoinPaprika does not know renders nothing at all.
+ */
+function MarketSection({ state }: { state: CoinMarketState }) {
+  const { colors } = useTheme();
+  const styles = useStyles();
+  const { market, isLoading, error, refresh } = state;
+
+  if (isLoading) {
+    return (
+      <Section title="Market">
+        <ActivityIndicator style={styles.marketLoader} color={colors.accent} />
+      </Section>
+    );
+  }
+
+  if (error) {
+    return (
+      <Section title="Market">
+        <Pressable style={styles.aboutError} onPress={refresh}>
+          <Text style={styles.errorBody}>Market data unavailable</Text>
+          <Text style={styles.errorHint}>Tap to retry.</Text>
+        </Pressable>
+      </Section>
+    );
+  }
+
+  if (!market) return null;
+
+  const changeTone = (market.change24h ?? 0) >= 0 ? 'up' : 'down';
+  const rows: { label: string; value: string; tone?: 'up' | 'down' }[] = [];
+  if (market.marketCap !== null) rows.push({ label: 'Market cap', value: usd(market.marketCap) });
+  if (market.rank !== null) rows.push({ label: 'Rank', value: `#${market.rank}` });
+  if (market.volume24h !== null) {
+    rows.push({ label: 'Volume, 24h (USD)', value: usd(market.volume24h) });
+  }
+  if (market.change24h !== null) {
+    rows.push({ label: 'Change, 24h (USD)', value: formatPercent(market.change24h), tone: changeTone });
+  }
+  if (market.circulatingSupply !== null) {
+    rows.push({ label: 'Circulating supply', value: formatCompact(market.circulatingSupply) });
+  }
+  if (market.totalSupply !== null) {
+    rows.push({ label: 'Total supply', value: formatCompact(market.totalSupply) });
+  }
+  if (market.maxSupply !== null) {
+    rows.push({ label: 'Max supply', value: formatCompact(market.maxSupply) });
+  }
+
+  if (rows.length === 0) return null;
+
+  return (
+    <Section title="Market">
+      <View style={styles.grid}>
+        {rows.map((row) => (
+          <Stat key={row.label} label={row.label} value={row.value} tone={row.tone} />
+        ))}
+      </View>
+      <Text style={styles.note}>Source: {market.source}. Global figures, not specific to this exchange.</Text>
+    </Section>
+  );
 }
 
 /**
@@ -399,6 +474,9 @@ const useStyles = createThemedStyles((colors) =>
     lineHeight: 14,
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.sm,
+  },
+  marketLoader: {
+    paddingVertical: spacing.lg,
   },
   aboutLoader: {
     paddingVertical: spacing.lg,

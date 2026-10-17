@@ -26,6 +26,7 @@ import {
 } from '@/lib/kucoin/orders';
 import type { OrderSide } from '@/lib/kucoin/types';
 import { refreshBalance, reconcileBalanceAfterChange } from '@/state/balance';
+import { scheduleCostBasisRefresh } from '@/state/costBasis';
 
 import {
   isTerminalStatus,
@@ -294,6 +295,9 @@ export function applyOrderUpdate(message: unknown): void {
   // this only schedules the REST safety net for the case where the socket was not connected.
   if (filledChanged || isTerminalStatus(merged.status)) {
     reconcileBalanceAfterChange();
+    // A fill also moves the cost basis: a buy raises the position's average entry, a sell that
+    // closes it out clears it. Re-readfills shortly so the header's P&L chip follows along.
+    scheduleCostBasisRefresh(merged.symbol);
   }
 }
 
@@ -327,6 +331,8 @@ export async function cancelOpenOrder(orderId: string): Promise<boolean> {
     // The frozen funds are released on the exchange's side, and the balance feed pushes the new
     // figure directly; this re-reads once as a safety net.
     reconcileBalanceAfterChange();
+    // A cancel can leave behind whatever filled before it, so the average needs re-reading too.
+    scheduleCostBasisRefresh(order.symbol);
     return true;
   } catch (caught) {
     // Cancelling an order that already filled or was cancelled elsewhere comes back as
@@ -337,6 +343,7 @@ export async function cancelOpenOrder(orderId: string): Promise<boolean> {
       emit({ orders: state.orders.filter((o) => o.orderId !== orderId), error: null });
       void loadOpenOrders();
       reconcileBalanceAfterChange();
+      scheduleCostBasisRefresh(order.symbol);
       return true;
     }
     emit({ error: describeError(caught, 'Cancel failed.') });

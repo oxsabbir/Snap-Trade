@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import { fetchCandles, type TimeframeOrLine } from '@/lib/kucoin/candles';
+import {
+  fetchInitialCandles,
+  fetchOlderCandles,
+  MAX_HISTORY_CANDLES,
+  OLDER_PAGE_SIZE,
+  type TimeframeOrLine,
+} from '@/lib/kucoin/candles';
 import { createGenerationGuard } from '@/lib/generation';
 import type { TickerUpdate } from '@/lib/kucoin/socket';
 import type { Candle } from '@/lib/kucoin/types';
@@ -17,6 +23,10 @@ export type LiveCandlesState = {
   seedPrice: number | null;
   isLoading: boolean;
   error: string | null;
+  /** Whether calling `loadOlder` can still return candles (false once the listing is reached). */
+  hasMore: boolean;
+  /** Prepends the next older page of candles, for the chart's scroll-back. */
+  loadOlder: () => void;
   refresh: () => void;
 };
 
@@ -42,9 +52,16 @@ export function useLiveCandles(
   const [seedPrice, setSeedPrice] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [hasMore, setHasMore] = useState(true);
   const [activeKey, setActiveKey] = useState(`${symbol}:${timeframe.key}`);
   const mountedRef = useRef(true);
   const bucketRef = useRef(0);
+  // The loaded series, readable from callbacks that must not close over `candles` (which would
+  // rebuild them every tick). Kept in sync by an effect.
+  const seriesRef = useRef<Candle[]>([]);
+  // Guards against overlapping older-page requests; the trigger can fire many times a second.
+  const loadingOlderRef = useRef(false);
+  const hasMoreRef = useRef(true);
   const [guard] = useState(createGenerationGuard);
 
   // Reset during render so a timeframe switch never flashes the previous chart.
@@ -61,6 +78,7 @@ export function useLiveCandles(
     setCandles([]);
     setSeedPrice(null);
     setError(null);
+    setHasMore(true);
     setIsLoading(enabled);
   }
 
@@ -68,13 +86,28 @@ export function useLiveCandles(
   // lifetime view — nothing below reads it, and handleTick returns before the rollover.
   const periodMs = 'seconds' in timeframe ? timeframe.seconds * 1000 : 0;
 
+  // Mirror the series into a ref so `loadOlder` can read it without depending on `candles`
+  // (which would rebuild the callback every tick).
+  useEffect(() => {
+    seriesRef.current = candles;
+  }, [candles]);
+
   const fetchHistory = useCallback(() => {
-    if (!enabled) return;
+    if (!enabled || !('seconds' in timeframe)) return;
     const token = guard.snapshot();
-    fetchCandles(symbol, timeframe.key).then(
+    fetchInitialCandles(symbol, timeframe).then(
       (next) => {
         if (!mountedRef.current || !guard.isCurrent(token)) return;
-        setCandles(next);
+        // Keep already-loaded older candles and replace only the recent tail, so a bucket
+        // rollover refetch does not throw away history the user paged in.
+        setCandles((previous) => {
+          if (next.length === 0) return previous;
+          const oldest = next[0]!.time;
+          const older = previous.filter((candle) => candle.time < oldest);
+          const merged = older.length > 0 ? [...older, ...next] : next;
+          seriesRef.current = merged;
+          return merged;
+        });
         setError(null);
         setIsLoading(false);
         const last = next[next.length - 1];
@@ -89,7 +122,56 @@ export function useLiveCandles(
         setIsLoading(false);
       }
     );
-  }, [enabled, guard, periodMs, symbol, timeframe.key]);
+  }, [enabled, guard, periodMs, symbol, timeframe]);
+
+  /**
+   * Prepends the next older page of candles, for the chart's scroll-back. Safe to call
+   * repeatedly: an in-flight request and a spent listing are both ignored here, so the chart's
+   * gesture handler can call it on every frame without de-duping on its side.
+   */
+  const loadOlder = useCallback(() => {
+    if (!enabled || !('seconds' in timeframe) || loadingOlderRef.current) return;
+    if (!hasMoreRef.current) return;
+    const current = seriesRef.current;
+    if (current.length === 0) return;
+
+    const room = Math.min(OLDER_PAGE_SIZE, MAX_HISTORY_CANDLES - current.length);
+    if (room <= 0) {
+      hasMoreRef.current = false;
+      setHasMore(false);
+      return;
+    }
+
+    loadingOlderRef.current = true;
+    const token = guard.snapshot();
+    fetchOlderCandles(symbol, timeframe, current[0]!.time, room).then(
+      (older) => {
+        loadingOlderRef.current = false;
+        if (!mountedRef.current || !guard.isCurrent(token)) return;
+        if (older.length === 0) {
+          hasMoreRef.current = false;
+          setHasMore(false);
+          return;
+        }
+        // A short page means the listing date is behind it.
+        if (older.length < room) {
+          hasMoreRef.current = false;
+          setHasMore(false);
+        }
+        setCandles((previous) => {
+          const oldest = previous.length > 0 ? previous[0]!.time : Number.POSITIVE_INFINITY;
+          const add = older.filter((candle) => candle.time < oldest);
+          if (add.length === 0) return previous;
+          const merged = [...add, ...previous];
+          seriesRef.current = merged;
+          return merged;
+        });
+      },
+      () => {
+        loadingOlderRef.current = false;
+      }
+    );
+  }, [enabled, guard, symbol, timeframe]);
 
   // Deliberately no `update.symbol` check here. `tickRef` is refreshed in an effect, so just
   // after a symbol switch it still holds the previous symbol's closure and a stale tick would
@@ -153,6 +235,9 @@ export function useLiveCandles(
     // over makes the comparison meaningless — after 1D -> 1m it would never fire again.
     // Zero disables the rollover until history lands, which is the correct starting point.
     bucketRef.current = 0;
+    // A new series has a fresh, unknown history: allow paging again.
+    loadingOlderRef.current = false;
+    hasMoreRef.current = true;
     fetchHistory();
     return () => {
       mountedRef.current = false;
@@ -174,5 +259,5 @@ export function useLiveCandles(
     fetchHistory();
   }, [fetchHistory]);
 
-  return { candles, seedPrice, isLoading, error, refresh };
+  return { candles, seedPrice, isLoading, error, hasMore, loadOlder, refresh };
 }
