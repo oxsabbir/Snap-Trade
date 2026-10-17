@@ -37,6 +37,12 @@ const AXIS_LABEL_HEIGHT = 12;
 const X_LABELS = 4;
 const MIN_VISIBLE = 20;
 const DEFAULT_SPAN = 50;
+/**
+ * How close the window's left edge may come to the oldest loaded candle before the next page is
+ * requested, in candles. Fetches slightly ahead of the edge so the drag never stalls at the end
+ * of the loaded series.
+ */
+const PRELOAD_CANDLES = 8;
 const CANDLE_BODY_RATIO = 0.72;
 const HAIRLINE = StyleSheet.hairlineWidth;
 /** Horizontal travel before a drag starts moving the window. */
@@ -433,14 +439,17 @@ function PriceChartComponent({
   }, [count, onVisibleRangeChange, settledSpan]);
 
   /**
-   * Ask for older candles once the window has reached the oldest loaded one. The trigger can be
-   * a pan (settled at the edge) or a pinch (zoomed out past the history already fetched); the hook
-   * de-dupes, so firing on every settle near the edge is free.
+   * Ask for older candles once the window has settled within `PRELOAD_CANDLES` of the oldest
+   * loaded one. The trigger can be a pan (released near the edge) or a pinch (zoomed out past the
+   * history already fetched); the hook de-dupes, so firing on every settle near the edge is free.
+   * `settledStart < maxStart` skips the case where the window is parked at the right edge of a
+   * series it already spans in full, which would otherwise page history in on mount.
    */
   useEffect(() => {
-    if (count === 0 || settledStart > 0) return;
+    if (count === 0 || settledStart > PRELOAD_CANDLES) return;
+    if (settledStart >= maxStartFor(count, settledSpan)) return;
     onLoadOlder?.();
-  }, [count, onLoadOlder, settledStart]);
+  }, [count, onLoadOlder, settledSpan, settledStart]);
 
   // The window only backs the axis labels and the crosshair, both of which are JS-thread
   // text. They settle on gesture end rather than tracking every frame.
@@ -809,14 +818,16 @@ function PriceChartComponent({
           // whole of its travel and the stop is felt as a soft wall rather than a dead end.
           const raw = startValue.get() - dx * perPixel;
           startValue.set(resistedStart(raw, maxStart, span * OVERSCROLL));
-          // Reaching the oldest loaded candle asks for the next page; once older candles land the
-          // window is pushed back into the series, so this re-arms and the drag keeps going.
-          if (raw <= 0) {
+          // Coming within PRELOAD_CANDLES of the oldest loaded candle asks for the next page;
+          // once older candles land the window is pushed back into the series, so this re-arms and
+          // the drag keeps going. `raw < maxStart` keeps a window that already spans the whole
+          // series from paging in history the user never scrolled towards.
+          if (raw <= PRELOAD_CANDLES && raw < maxStart) {
             if (onLoadOlder && panLoadArmed.get() === 0) {
               panLoadArmed.set(1);
               runOnJS(onLoadOlder)();
             }
-          } else if (raw > span * 0.5) {
+          } else if (raw > Math.max(PRELOAD_CANDLES, span * 0.5)) {
             panLoadArmed.set(0);
           }
         })

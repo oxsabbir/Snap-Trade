@@ -63,7 +63,7 @@ async function fetchCandleWindow(
 }
 
 /** Candles fetched on first paint. Deliberately small; older ones page in on demand. */
-export const INITIAL_CANDLES = 35;
+export const INITIAL_CANDLES = 40;
 /** Candles fetched per older-history page as the user drags back. */
 export const OLDER_PAGE_SIZE = 100;
 /**
