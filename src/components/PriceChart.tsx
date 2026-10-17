@@ -1,14 +1,29 @@
-import { memo, useCallback, useEffect, useMemo, useState } from 'react';
-import { StyleSheet, Text, View, type LayoutChangeEvent } from 'react-native';
-import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import { runOnJS, useDerivedValue, useSharedValue, withSpring } from 'react-native-reanimated';
-import { Canvas, Line, PaintStyle, Picture, Skia, StrokeCap, StrokeJoin, TileMode, vec } from '@shopify/react-native-skia';
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import { StyleSheet, Text, View, type LayoutChangeEvent } from "react-native";
+import { Gesture, GestureDetector } from "react-native-gesture-handler";
+import {
+  runOnJS,
+  useDerivedValue,
+  useSharedValue,
+  withSpring,
+} from "react-native-reanimated";
+import {
+  Canvas,
+  Line,
+  PaintStyle,
+  Picture,
+  Skia,
+  StrokeCap,
+  StrokeJoin,
+  TileMode,
+  vec,
+} from "@shopify/react-native-skia";
 
-import type { Candle, ChartMode } from '@/lib/kucoin/types';
-import { radius, spacing } from '@/theme';
-import { useTheme } from '@/theme/ThemeProvider';
-import { createThemedStyles } from '@/theme/themedStyles';
-import { formatAmount, formatPercent, formatPrice } from '@/utils/format';
+import type { Candle, ChartMode } from "@/lib/kucoin/types";
+import { radius, spacing } from "@/theme";
+import { useTheme } from "@/theme/ThemeProvider";
+import { createThemedStyles } from "@/theme/themedStyles";
+import { formatAmount, formatPercent, formatPrice } from "@/utils/format";
 
 const PAD_TOP = 8;
 const PAD_BOTTOM = 18;
@@ -52,14 +67,30 @@ const RESIST = 0.5;
  */
 const RIGHT_PAD = 0.1;
 /** Snaps the window back to its edge. Tight and slightly springy rather than bouncy. */
-const SPRING = { damping: 19, stiffness: 190, mass: 0.8, overshootClamping: true };
+const SPRING = {
+  damping: 19,
+  stiffness: 190,
+  mass: 0.8,
+  overshootClamping: true,
+};
 
-type Props = { candles: Candle[]; mode: ChartMode; height?: number; decimals?: number; defaultSpan?: number; resetKey?: string; onVisibleRangeChange?: (visible: number, total: number) => void };
+type Props = {
+  candles: Candle[];
+  mode: ChartMode;
+  height?: number;
+  decimals?: number;
+  defaultSpan?: number;
+  resetKey?: string;
+  onVisibleRangeChange?: (visible: number, total: number) => void;
+};
 type Viewport = { start: number; span: number };
 type Committed = Viewport & { key: string | undefined; count: number };
 type Domain = { lower: number; upper: number };
 
-function clamp(value: number, min: number, max: number): number { 'worklet'; return Math.min(Math.max(value, min), max); }
+function clamp(value: number, min: number, max: number): number {
+  "worklet";
+  return Math.min(Math.max(value, min), max);
+}
 /**
  * Softens a drag that runs past either end of the window, then stops it.
  *
@@ -70,33 +101,74 @@ function clamp(value: number, min: number, max: number): number { 'worklet'; ret
  * which is what makes the newest candle stop at the middle of the plot instead of drifting.
  */
 function resistedStart(raw: number, maxStart: number, cap: number): number {
-  'worklet';
-  const eased = (distance: number) => Math.min(Math.max(distance, 0) * RESIST, cap);
+  "worklet";
+  const eased = (distance: number) =>
+    Math.min(Math.max(distance, 0) * RESIST, cap);
   if (raw > maxStart) return maxStart + eased(raw - maxStart);
   if (raw < 0) return -eased(-raw);
   return raw;
 }
-function resolveSpan(count: number, span: number): number { 'worklet'; return count <= 0 ? 0 : clamp(Math.round(span), Math.min(MIN_VISIBLE, count), count); }
+function resolveSpan(count: number, span: number): number {
+  "worklet";
+  return count <= 0
+    ? 0
+    : clamp(Math.round(span), Math.min(MIN_VISIBLE, count), count);
+}
 /**
  * The window's rightmost resting position: past the newest candle by `RIGHT_PAD` of the visible
  * window, so there is always empty plot to the right of the series.
  */
 function maxStartFor(count: number, span: number): number {
-  'worklet';
+  "worklet";
   if (count <= 0) return 0;
   // The newest candle already rests half a slot in from the edge, so only the shortfall is added
   // on top. That makes RIGHT_PAD the fraction of the plot left empty after the last candle,
   // rather than the fraction of the window travelled past it.
-  return Math.max(0, Math.round(Math.max(count - span, 0) + span * RIGHT_PAD - 0.5));
+  return Math.max(
+    0,
+    Math.round(Math.max(count - span, 0) + span * RIGHT_PAD - 0.5),
+  );
 }
-function resolveStart(count: number, start: number, span: number): number { 'worklet'; return count <= 0 ? 0 : clamp(Math.round(start), 0, maxStartFor(count, span)); }
-function defaultSpanFor(count: number, isLine: boolean, defaultSpan?: number): number { return resolveSpan(count, defaultSpan ?? (isLine ? count : DEFAULT_SPAN)); }
+function resolveStart(count: number, start: number, span: number): number {
+  "worklet";
+  return count <= 0 ? 0 : clamp(Math.round(start), 0, maxStartFor(count, span));
+}
+function defaultSpanFor(
+  count: number,
+  isLine: boolean,
+  defaultSpan?: number,
+): number {
+  return resolveSpan(count, defaultSpan ?? (isLine ? count : DEFAULT_SPAN));
+}
 
-function niceStep(raw: number): number { 'worklet'; if (!(raw > 0)) return 1; const magnitude = Math.pow(10, Math.floor(Math.log10(raw))); const mantissa = raw / magnitude; return (mantissa <= 1 ? 1 : mantissa <= 2 ? 2 : mantissa <= 5 ? 5 : 10) * magnitude; }
-function niceBand(min: number, max: number): Domain { 'worklet'; const span = max > min ? max - min : Math.abs(max || 1) * 0.01; const gap = niceStep(span / BAND_STEPS); const lower = Math.floor(min / gap) * gap; const upper = Math.ceil(max / gap) * gap; return upper > lower ? { lower, upper } : { lower: lower - gap, upper: upper + gap }; }
+function niceStep(raw: number): number {
+  "worklet";
+  if (!(raw > 0)) return 1;
+  const magnitude = Math.pow(10, Math.floor(Math.log10(raw)));
+  const mantissa = raw / magnitude;
+  return (
+    (mantissa <= 1 ? 1 : mantissa <= 2 ? 2 : mantissa <= 5 ? 5 : 10) * magnitude
+  );
+}
+function niceBand(min: number, max: number): Domain {
+  "worklet";
+  const span = max > min ? max - min : Math.abs(max || 1) * 0.01;
+  const gap = niceStep(span / BAND_STEPS);
+  const lower = Math.floor(min / gap) * gap;
+  const upper = Math.ceil(max / gap) * gap;
+  return upper > lower
+    ? { lower, upper }
+    : { lower: lower - gap, upper: upper + gap };
+}
 
-interface PriceTick { value: number; fraction: number }
-interface PriceAxis { step: number; ticks: PriceTick[] }
+interface PriceTick {
+  value: number;
+  fraction: number;
+}
+interface PriceAxis {
+  step: number;
+  ticks: PriceTick[];
+}
 
 /** Smallest step from the 1 / 2 / 2.5 / 5 x 10^n ladder whose tick count lands nearest the target. */
 function priceStep(range: number, target: number): number {
@@ -147,7 +219,9 @@ function priceAxis(lower: number, upper: number, target: number): PriceAxis {
 
 /** Drop trailing zeros from a fixed-decimal string so labels stay as short as possible. */
 function trimZeros(label: string): string {
-  return label.includes('.') ? label.replace(/0+$/, '').replace(/\.$/, '') : label;
+  return label.includes(".")
+    ? label.replace(/0+$/, "").replace(/\.$/, "")
+    : label;
 }
 
 /**
@@ -159,8 +233,13 @@ function trimZeros(label: string): string {
  * up spanning two different coins at once: the window rendered flat, and dragging left — which
  * is the only thing that removes the last index from the window — made it look correct again.
  */
-function visibleBand(packed: number[], count: number, start: number, span: number): Domain | null {
-  'worklet';
+function visibleBand(
+  packed: number[],
+  count: number,
+  start: number,
+  span: number,
+): Domain | null {
+  "worklet";
   const to = Math.min(count, start + span);
   if (to <= start) return null;
   let min = Number.POSITIVE_INFINITY;
@@ -191,26 +270,44 @@ function packCandles(candles: Candle[]): number[] {
 
 function formatAxisTime(timestamp: number, spanMs: number): string {
   const date = new Date(timestamp);
-  const pad = (n: number) => n.toString().padStart(2, '0');
-  if (spanMs <= 86_400_000) return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  const pad = (n: number) => n.toString().padStart(2, "0");
+  if (spanMs <= 86_400_000)
+    return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
   if (spanMs > 63_072_000_000) return date.getFullYear().toString();
   return `${pad(date.getMonth() + 1)}/${pad(date.getDate())}`;
 }
 
-function PriceChartComponent({ candles, mode, height = 250, decimals, defaultSpan, resetKey, onVisibleRangeChange }: Props) {
+function PriceChartComponent({
+  candles,
+  mode,
+  height = 200,
+  decimals,
+  defaultSpan,
+  resetKey,
+  onVisibleRangeChange,
+}: Props) {
   const { colors } = useTheme();
   const styles = useStyles();
   const [width, setWidth] = useState(0);
   // The viewport the user last settled on, tagged with the series and length it was
   // settled against so the render pass can tell a new candle from a new series.
-  const [committed, setCommitted] = useState<Committed>({ key: '', count: 0, start: 0, span: 0 });
-  const [selection, setSelection] = useState<{ key: string | undefined; index: number } | null>(null);
+  const [committed, setCommitted] = useState<Committed>({
+    key: "",
+    count: 0,
+    start: 0,
+    span: 0,
+  });
+  const [selection, setSelection] = useState<{
+    key: string | undefined;
+    index: number;
+  } | null>(null);
 
-  const isLine = mode === 'line';
+  const isLine = mode === "line";
   const count = candles.length;
   const innerWidth = Math.max(width - AXIS_WIDTH, 0);
   const priceHeight = Math.max(height - PAD_TOP - PAD_BOTTOM, 1);
-  const activeIndex = selection !== null && selection.key === resetKey ? selection.index : null;
+  const activeIndex =
+    selection !== null && selection.key === resetKey ? selection.index : null;
 
   // Everything the UI runtime needs. The series is flattened to open/high/low/close so the
   // worklet never touches objects. The newest candle is packed alongside the rest rather than
@@ -236,20 +333,33 @@ function PriceChartComponent({ candles, mode, height = 250, decimals, defaultSpa
       const span = defaultSpanFor(count, isLine, defaultSpan);
       return { start: maxStartFor(count, span), span };
     }
-    if (committed.count === count) return { start: committed.start, span: committed.span };
+    if (committed.count === count)
+      return { start: committed.start, span: committed.span };
     const previousSpan = committed.span;
-    const atRightEdge = committed.start >= maxStartFor(committed.count, previousSpan) - 0.5;
-    const span = resolveSpan(count, isLine && previousSpan >= committed.count ? count : previousSpan);
-    const start = atRightEdge ? maxStartFor(count, span) : resolveStart(count, committed.start, span);
+    const atRightEdge =
+      committed.start >= maxStartFor(committed.count, previousSpan) - 0.5;
+    const span = resolveSpan(
+      count,
+      isLine && previousSpan >= committed.count ? count : previousSpan,
+    );
+    const start = atRightEdge
+      ? maxStartFor(count, span)
+      : resolveStart(count, committed.start, span);
     return { start, span };
   }, [committed, count, defaultSpan, isLine, resetKey]);
 
   const settledSpan = resolveSpan(count, viewport.span);
   const settledStart = resolveStart(count, viewport.start, settledSpan);
 
-  useEffect(() => { lineValue.set(isLine ? 1 : 0); }, [isLine, lineValue]);
-  useEffect(() => { plotWidth.set(innerWidth); }, [innerWidth, plotWidth]);
-  useEffect(() => { plotHeight.set(priceHeight); }, [priceHeight, plotHeight]);
+  useEffect(() => {
+    lineValue.set(isLine ? 1 : 0);
+  }, [isLine, lineValue]);
+  useEffect(() => {
+    plotWidth.set(innerWidth);
+  }, [innerWidth, plotWidth]);
+  useEffect(() => {
+    plotHeight.set(priceHeight);
+  }, [priceHeight, plotHeight]);
   useEffect(() => {
     spanValue.set(settledSpan);
     startValue.set(settledStart);
@@ -276,33 +386,59 @@ function PriceChartComponent({ candles, mode, height = 250, decimals, defaultSpa
     packed.set(packCandles(candles));
   }, [candles, count, countValue, packed]);
 
-  useEffect(() => { if (count > 0) onVisibleRangeChange?.(settledSpan, count); }, [count, onVisibleRangeChange, settledSpan]);
+  useEffect(() => {
+    if (count > 0) onVisibleRangeChange?.(settledSpan, count);
+  }, [count, onVisibleRangeChange, settledSpan]);
 
   // The window only backs the axis labels and the crosshair, both of which are JS-thread
   // text. They settle on gesture end rather than tracking every frame.
-  const visible = useMemo(() => candles.slice(settledStart, settledStart + settledSpan), [candles, settledSpan, settledStart]);
+  const visible = useMemo(
+    () => candles.slice(settledStart, settledStart + settledSpan),
+    [candles, settledSpan, settledStart],
+  );
   const domain = useMemo(() => {
     if (visible.length === 0) return null;
     let min = Number.POSITIVE_INFINITY;
     let max = Number.NEGATIVE_INFINITY;
-    for (const candle of visible) { min = Math.min(min, candle.low); max = Math.max(max, candle.high); }
+    for (const candle of visible) {
+      min = Math.min(min, candle.low);
+      max = Math.max(max, candle.high);
+    }
     return niceBand(min, max);
   }, [visible]);
-  const axis = useMemo(() => (domain ? priceAxis(domain.lower, domain.upper, PRICE_LABELS) : null), [domain]);
+  const axis = useMemo(
+    () => (domain ? priceAxis(domain.lower, domain.upper, PRICE_LABELS) : null),
+    [domain],
+  );
   const axisDecimals = axis ? stepDecimals(axis.step) : 0;
 
   // Mirrors the worklet's `xOf` exactly, so the crosshair sits on the candle it points at.
-  const plotX = useCallback((index: number) => settledSpan <= 1 ? innerWidth / 2 : (index - settledStart + 0.5) * (innerWidth / settledSpan), [innerWidth, settledSpan, settledStart]);
-  const plotY = useCallback((value: number) => {
-    if (!domain) return 0;
-    return PAD_TOP + (1 - (value - domain.lower) / (domain.upper - domain.lower)) * priceHeight;
-  }, [domain, priceHeight]);
+  const plotX = useCallback(
+    (index: number) =>
+      settledSpan <= 1
+        ? innerWidth / 2
+        : (index - settledStart + 0.5) * (innerWidth / settledSpan),
+    [innerWidth, settledSpan, settledStart],
+  );
+  const plotY = useCallback(
+    (value: number) => {
+      if (!domain) return 0;
+      return (
+        PAD_TOP +
+        (1 - (value - domain.lower) / (domain.upper - domain.lower)) *
+          priceHeight
+      );
+    },
+    [domain, priceHeight],
+  );
 
   // Static plot grid: depends on layout and the settled window only, never on live candle values.
   const gridPicture = useMemo(() => {
     const canvasHeight = priceHeight + PAD_TOP + PAD_BOTTOM;
     const recorder = Skia.PictureRecorder();
-    const canvas = recorder.beginRecording(Skia.XYWHRect(0, 0, innerWidth, canvasHeight));
+    const canvas = recorder.beginRecording(
+      Skia.XYWHRect(0, 0, innerWidth, canvasHeight),
+    );
     const grid = Skia.Paint();
     const border = Skia.Paint();
     grid.setStyle(PaintStyle.Stroke);
@@ -317,7 +453,10 @@ function PriceChartComponent({ candles, mode, height = 250, decimals, defaultSpa
       canvas.drawLine(0, y, innerWidth, y, grid);
     }
 
-    const visibleCount = Math.max(0, Math.min(count, settledStart + settledSpan) - settledStart);
+    const visibleCount = Math.max(
+      0,
+      Math.min(count, settledStart + settledSpan) - settledStart,
+    );
     if (visibleCount > 0) {
       const step = settledSpan <= 1 ? innerWidth : innerWidth / settledSpan;
       for (let index = 0; index < X_LABELS; index++) {
@@ -344,9 +483,21 @@ function PriceChartComponent({ candles, mode, height = 250, decimals, defaultSpa
     const picture = recorder.finishRecordingAsPicture();
     recorder.dispose();
     return picture;
-  }, [axis, colors.gridBorder, colors.gridLine, count, innerWidth, priceHeight, settledSpan, settledStart]);
+  }, [
+    axis,
+    colors.gridBorder,
+    colors.gridLine,
+    count,
+    innerWidth,
+    priceHeight,
+    settledSpan,
+    settledStart,
+  ]);
 
-  const onLayout = useCallback((event: LayoutChangeEvent) => setWidth(event.nativeEvent.layout.width), []);
+  const onLayout = useCallback(
+    (event: LayoutChangeEvent) => setWidth(event.nativeEvent.layout.width),
+    [],
+  );
 
   const commit = useCallback(() => {
     setCommitted({
@@ -366,11 +517,26 @@ function PriceChartComponent({ candles, mode, height = 250, decimals, defaultSpa
     setSelection(null);
   }, [count, defaultSpan, isLine, resetKey, spanValue, startValue]);
 
-  const selectAt = useCallback((x: number) => {
-    if (count === 0 || settledSpan === 0) return;
-    const index = Math.min(settledStart + Math.round(clamp(x / Math.max(innerWidth, 1), 0, 1) * (settledSpan - 1)), count - 1);
-    setSelection((previous) => previous !== null && previous.key === resetKey && previous.index === index ? null : { key: resetKey, index });
-  }, [count, innerWidth, resetKey, settledSpan, settledStart]);
+  const selectAt = useCallback(
+    (x: number) => {
+      if (count === 0 || settledSpan === 0) return;
+      const index = Math.min(
+        settledStart +
+          Math.round(
+            clamp(x / Math.max(innerWidth, 1), 0, 1) * (settledSpan - 1),
+          ),
+        count - 1,
+      );
+      setSelection((previous) =>
+        previous !== null &&
+        previous.key === resetKey &&
+        previous.index === index
+          ? null
+          : { key: resetKey, index },
+      );
+    },
+    [count, innerWidth, resetKey, settledSpan, settledStart],
+  );
 
   const clearActive = useCallback(() => setSelection(null), []);
 
@@ -393,7 +559,9 @@ function PriceChartComponent({ candles, mode, height = 250, decimals, defaultSpa
       return blank;
     }
 
-    const canvas = recorder.beginRecording(Skia.XYWHRect(0, 0, widthValue, heightValue));
+    const canvas = recorder.beginRecording(
+      Skia.XYWHRect(0, 0, widthValue, heightValue),
+    );
     const total = countValue.get();
     const series = packed.get();
     const span = resolveSpan(total, spanValue.get()) || 1;
@@ -418,8 +586,10 @@ function PriceChartComponent({ candles, mode, height = 250, decimals, defaultSpa
     // candles exactly on the edges instead pinned them to x=0 and x=width, so the bodies of the
     // leftmost and rightmost candles were sliced in half by the canvas edge.
     const step = span <= 1 ? widthValue : widthValue / span;
-    const xOf = (index: number) => span <= 1 ? widthValue / 2 : (index - offset + 0.5) * step;
-    const yOf = (value: number) => PAD_TOP + (1 - (value - band.lower) / range) * heightValue;
+    const xOf = (index: number) =>
+      span <= 1 ? widthValue / 2 : (index - offset + 0.5) * step;
+    const yOf = (value: number) =>
+      PAD_TOP + (1 - (value - band.lower) / range) * heightValue;
     const to = Math.min(total, start + span);
     const closeOf = (index: number) => series[index * 4 + 3];
 
@@ -434,8 +604,13 @@ function PriceChartComponent({ candles, mode, height = 250, decimals, defaultSpa
       for (let index = start; index < to; index++) {
         const x = xOf(index);
         const y = yOf(closeOf(index));
-        if (index === start) { linePath.moveTo(x, y); areaPath.moveTo(x, y); }
-        else { linePath.lineTo(x, y); areaPath.lineTo(x, y); }
+        if (index === start) {
+          linePath.moveTo(x, y);
+          areaPath.moveTo(x, y);
+        } else {
+          linePath.lineTo(x, y);
+          areaPath.lineTo(x, y);
+        }
       }
       if (to - start > 1) {
         areaPath.lineTo(xOf(to - 1), PAD_TOP + heightValue);
@@ -446,13 +621,15 @@ function PriceChartComponent({ candles, mode, height = 250, decimals, defaultSpa
       const fill = Skia.Paint();
       const stroke = Skia.Paint();
       scratch.push(fill, stroke);
-      fill.setShader(Skia.Shader.MakeLinearGradient(
-        Skia.Point(0, PAD_TOP),
-        Skia.Point(0, PAD_TOP + heightValue),
-        [Skia.Color(tint), Skia.Color(`${tint}00`)],
-        null,
-        TileMode.Clamp,
-      ));
+      fill.setShader(
+        Skia.Shader.MakeLinearGradient(
+          Skia.Point(0, PAD_TOP),
+          Skia.Point(0, PAD_TOP + heightValue),
+          [Skia.Color(tint), Skia.Color(`${tint}00`)],
+          null,
+          TileMode.Clamp,
+        ),
+      );
       canvas.drawPath(areaPath, fill);
       stroke.setStyle(PaintStyle.Stroke);
       stroke.setStrokeWidth(1.6);
@@ -497,131 +674,341 @@ function PriceChartComponent({ candles, mode, height = 250, decimals, defaultSpa
         const x = xOf(index);
         const top = Math.min(yOf(open), yOf(close));
         const bottom = Math.max(yOf(open), yOf(close));
-        canvas.drawRect(Skia.XYWHRect(x - bodyWidth / 2, top, bodyWidth, Math.max(bottom - top, 1)), rising ? bodyUp : bodyDown);
+        canvas.drawRect(
+          Skia.XYWHRect(
+            x - bodyWidth / 2,
+            top,
+            bodyWidth,
+            Math.max(bottom - top, 1),
+          ),
+          rising ? bodyUp : bodyDown,
+        );
       }
     }
 
     const picture = recorder.finishRecordingAsPicture();
     recorder.dispose();
-    for (let index = 0; index < scratch.length; index++) scratch[index]!.dispose();
+    for (let index = 0; index < scratch.length; index++)
+      scratch[index]!.dispose();
     return picture;
-  }, [colors.down, colors.up, countValue, lineValue, packed, plotHeight, plotWidth, spanValue, startValue]);
+  }, [
+    colors.down,
+    colors.up,
+    countValue,
+    lineValue,
+    packed,
+    plotHeight,
+    plotWidth,
+    spanValue,
+    startValue,
+  ]);
 
   const panAnchor = useSharedValue(0);
   const pinchSpan = useSharedValue(0);
   const pinchStart = useSharedValue(0);
   const pinchFocal = useSharedValue(0.5);
 
-  const pan = useMemo(() => Gesture.Pan().activeOffsetX([-PAN_SLOP, PAN_SLOP]).failOffsetY(PAN_FAIL_Y)
-    .onBegin(() => { panAnchor.set(startValue.get()); })
-    // Cleared on activation rather than on touch-down: a tap that never becomes a drag used
-    // to clear the crosshair first and immediately re-select it, which made tapping the same
-    // candle again unable to dismiss it.
-    .onStart(() => { runOnJS(clearActive)(); })
-    .onUpdate((event) => {
-      const count = countValue.get();
-      const span = spanValue.get();
-      const perPixel = span / Math.max(plotWidth.get(), 1);
-      const maxStart = maxStartFor(count, span);
-      // Resistance only past the edge, so the window still tracks the finger one-to-one for the
-      // whole of its travel and the stop is felt as a soft wall rather than a dead end.
-      const raw = panAnchor.get() - event.translationX * perPixel;
-      startValue.set(resistedStart(raw, maxStart, span * OVERSCROLL));
-    })
-    .onFinalize(() => {
-      const span = spanValue.get();
-      const maxStart = maxStartFor(countValue.get(), span);
-      const current = startValue.get();
-      const target = clamp(Math.round(current), 0, maxStart);
-      if (target === current) { runOnJS(commit)(); return; }
-      // Settle first, then latch. Committing up front would rewrite the committed window, whose
-      // effect pushes `startValue` back and cancel the animation mid-flight.
-      startValue.set(withSpring(target, SPRING, (finished) => {
-        'worklet';
-        if (finished) runOnJS(commit)();
-      }));
-    }), [clearActive, commit, countValue, panAnchor, plotWidth, spanValue, startValue]);
+  const pan = useMemo(
+    () =>
+      Gesture.Pan()
+        .activeOffsetX([-PAN_SLOP, PAN_SLOP])
+        .failOffsetY(PAN_FAIL_Y)
+        .onBegin(() => {
+          panAnchor.set(startValue.get());
+        })
+        // Cleared on activation rather than on touch-down: a tap that never becomes a drag used
+        // to clear the crosshair first and immediately re-select it, which made tapping the same
+        // candle again unable to dismiss it.
+        .onStart(() => {
+          runOnJS(clearActive)();
+        })
+        .onUpdate((event) => {
+          const count = countValue.get();
+          const span = spanValue.get();
+          const perPixel = span / Math.max(plotWidth.get(), 1);
+          const maxStart = maxStartFor(count, span);
+          // Resistance only past the edge, so the window still tracks the finger one-to-one for the
+          // whole of its travel and the stop is felt as a soft wall rather than a dead end.
+          const raw = panAnchor.get() - event.translationX * perPixel;
+          startValue.set(resistedStart(raw, maxStart, span * OVERSCROLL));
+        })
+        .onFinalize(() => {
+          const span = spanValue.get();
+          const maxStart = maxStartFor(countValue.get(), span);
+          const current = startValue.get();
+          const target = clamp(Math.round(current), 0, maxStart);
+          if (target === current) {
+            runOnJS(commit)();
+            return;
+          }
+          // Settle first, then latch. Committing up front would rewrite the committed window, whose
+          // effect pushes `startValue` back and cancel the animation mid-flight.
+          startValue.set(
+            withSpring(target, SPRING, (finished) => {
+              "worklet";
+              if (finished) runOnJS(commit)();
+            }),
+          );
+        }),
+    [
+      clearActive,
+      commit,
+      countValue,
+      panAnchor,
+      plotWidth,
+      spanValue,
+      startValue,
+    ],
+  );
 
-  const pinch = useMemo(() => Gesture.Pinch()
-    .onBegin((event) => {
-      pinchSpan.set(spanValue.get());
-      pinchStart.set(startValue.get());
-      pinchFocal.set(clamp(event.focalX / Math.max(plotWidth.get(), 1), 0, 1));
-    })
-    .onStart(() => { runOnJS(clearActive)(); })
-    .onUpdate((event) => {
-      const span = resolveSpan(countValue.get(), pinchSpan.get() / Math.max(event.scale, 0.01));
-      const focal = pinchFocal.get();
-      const anchor = pinchStart.get() + focal * (pinchSpan.get() - 1);
-      startValue.set(clamp(anchor - focal * (span - 1), 0, maxStartFor(countValue.get(), span)));
-      spanValue.set(span);
-    })
-    .onFinalize(() => { runOnJS(commit)(); }), [clearActive, commit, countValue, pinchFocal, pinchSpan, pinchStart, plotWidth, spanValue, startValue]);
+  const pinch = useMemo(
+    () =>
+      Gesture.Pinch()
+        .onBegin((event) => {
+          pinchSpan.set(spanValue.get());
+          pinchStart.set(startValue.get());
+          pinchFocal.set(
+            clamp(event.focalX / Math.max(plotWidth.get(), 1), 0, 1),
+          );
+        })
+        .onStart(() => {
+          runOnJS(clearActive)();
+        })
+        .onUpdate((event) => {
+          const span = resolveSpan(
+            countValue.get(),
+            pinchSpan.get() / Math.max(event.scale, 0.01),
+          );
+          const focal = pinchFocal.get();
+          const anchor = pinchStart.get() + focal * (pinchSpan.get() - 1);
+          startValue.set(
+            clamp(
+              anchor - focal * (span - 1),
+              0,
+              maxStartFor(countValue.get(), span),
+            ),
+          );
+          spanValue.set(span);
+        })
+        .onFinalize(() => {
+          runOnJS(commit)();
+        }),
+    [
+      clearActive,
+      commit,
+      countValue,
+      pinchFocal,
+      pinchSpan,
+      pinchStart,
+      plotWidth,
+      spanValue,
+      startValue,
+    ],
+  );
 
-  const singleTap = useMemo(() => Gesture.Tap()
-    .maxDistance(TAP_SLOP)
-    .maxDuration(TAP_DURATION)
-    .onEnd((event, success) => { if (success) runOnJS(selectAt)(event.x); }), [selectAt]);
+  const singleTap = useMemo(
+    () =>
+      Gesture.Tap()
+        .maxDistance(TAP_SLOP)
+        .maxDuration(TAP_DURATION)
+        .onEnd((event, success) => {
+          if (success) runOnJS(selectAt)(event.x);
+        }),
+    [selectAt],
+  );
 
-  const doubleTap = useMemo(() => Gesture.Tap()
-    .numberOfTaps(2)
-    .maxDistance(TAP_SLOP)
-    .maxDuration(TAP_DURATION)
-    .maxDelay(DOUBLE_TAP_DELAY)
-    .onEnd((_event, success) => { if (success) runOnJS(resetViewport)(); }), [resetViewport]);
+  const doubleTap = useMemo(
+    () =>
+      Gesture.Tap()
+        .numberOfTaps(2)
+        .maxDistance(TAP_SLOP)
+        .maxDuration(TAP_DURATION)
+        .maxDelay(DOUBLE_TAP_DELAY)
+        .onEnd((_event, success) => {
+          if (success) runOnJS(resetViewport)();
+        }),
+    [resetViewport],
+  );
 
   // Drags sit outside the taps rather than beside them. Under Simultaneous an activating pan
   // left the tap alive, so a drag that stayed inside the tap slop still landed a crosshair.
-  const gestures = useMemo(() => Gesture.Exclusive(
-    Gesture.Simultaneous(pan, pinch),
-    Gesture.Exclusive(doubleTap, singleTap),
-  ), [doubleTap, pan, pinch, singleTap]);
+  const gestures = useMemo(
+    () =>
+      Gesture.Exclusive(
+        Gesture.Simultaneous(pan, pinch),
+        Gesture.Exclusive(doubleTap, singleTap),
+      ),
+    [doubleTap, pan, pinch, singleTap],
+  );
 
   if (width === 0) return <View style={{ height }} onLayout={onLayout} />;
 
-  const active = activeIndex === null ? null : candles[activeIndex] ?? null;
+  const active = activeIndex === null ? null : (candles[activeIndex] ?? null);
   const activeX = activeIndex === null || !active ? 0 : plotX(activeIndex);
   const activeY = active ? plotY(active.close) : 0;
-  const spanMs = visible.length > 1 ? visible[visible.length - 1]!.time - visible[0]!.time : 0;
+  const spanMs =
+    visible.length > 1
+      ? visible[visible.length - 1]!.time - visible[0]!.time
+      : 0;
 
-  return <View style={styles.container} onLayout={onLayout}>
-    <GestureDetector gesture={gestures}>
-      <View style={{ width: innerWidth, height }}>
-        <Canvas style={styles.canvas}>
-          <Picture picture={gridPicture} />
-          <Picture picture={chartPicture} />
-          {active ? <><Line p1={vec(activeX, PAD_TOP)} p2={vec(activeX, PAD_TOP + priceHeight)} color={colors.textMuted} strokeWidth={1} /><Line p1={vec(0, activeY)} p2={vec(innerWidth, activeY)} color={colors.textMuted} strokeWidth={1} /></> : null}
-        </Canvas>
+  return (
+    <View style={styles.container} onLayout={onLayout}>
+      <GestureDetector gesture={gestures}>
+        <View style={{ width: innerWidth, height }}>
+          <Canvas style={styles.canvas}>
+            <Picture picture={gridPicture} />
+            <Picture picture={chartPicture} />
+            {active ? (
+              <>
+                <Line
+                  p1={vec(activeX, PAD_TOP)}
+                  p2={vec(activeX, PAD_TOP + priceHeight)}
+                  color={colors.textMuted}
+                  strokeWidth={1}
+                />
+                <Line
+                  p1={vec(0, activeY)}
+                  p2={vec(innerWidth, activeY)}
+                  color={colors.textMuted}
+                  strokeWidth={1}
+                />
+              </>
+            ) : null}
+          </Canvas>
+        </View>
+      </GestureDetector>
+      <View style={{ width: AXIS_WIDTH, height }}>
+        {axis?.ticks.map((tick) => {
+          const top = clamp(
+            PAD_TOP + (1 - tick.fraction) * priceHeight - AXIS_LABEL_HEIGHT / 2,
+            0,
+            Math.max(height - AXIS_LABEL_HEIGHT, 0),
+          );
+          return (
+            <Text
+              key={`axis-${tick.value}`}
+              numberOfLines={1}
+              style={[
+                styles.axisLabel,
+                {
+                  position: "absolute",
+                  right: 0,
+                  top,
+                  width: AXIS_WIDTH,
+                  height: AXIS_LABEL_HEIGHT,
+                  lineHeight: AXIS_LABEL_HEIGHT,
+                },
+              ]}
+            >
+              {trimZeros(formatPrice(tick.value, axisDecimals))}
+            </Text>
+          );
+        })}
       </View>
-    </GestureDetector>
-    <View style={{ width: AXIS_WIDTH, height }}>{axis?.ticks.map((tick) => {
-      const top = clamp(PAD_TOP + (1 - tick.fraction) * priceHeight - AXIS_LABEL_HEIGHT / 2, 0, Math.max(height - AXIS_LABEL_HEIGHT, 0));
-      return <Text key={`axis-${tick.value}`} numberOfLines={1} style={[styles.axisLabel, { position: 'absolute', right: 0, top, width: AXIS_WIDTH, height: AXIS_LABEL_HEIGHT, lineHeight: AXIS_LABEL_HEIGHT }]}>{trimZeros(formatPrice(tick.value, axisDecimals))}</Text>;
-    })}</View>
-    {Array.from({ length: X_LABELS }, (_, index) => {
-      const at = Math.round((index / (X_LABELS - 1)) * (visible.length - 1));
-      const candle = visible[at];
-      if (!candle) return null;
-      // Anchored to the candle itself rather than to an even split of the width, which put the
-      // labels up to a full half-slot away from the candles they name.
-      const left = Math.max(plotX(settledStart + at) - TIME_LABEL_WIDTH / 2, 0);
-      return <Text key={`time-${index}`} style={[styles.timeLabel, { left }]}>{formatAxisTime(candle.time, spanMs)}</Text>;
-    })}
-    {active ? <Readout candle={active} decimals={decimals} /> : null}
-  </View>;
+      {Array.from({ length: X_LABELS }, (_, index) => {
+        const at = Math.round((index / (X_LABELS - 1)) * (visible.length - 1));
+        const candle = visible[at];
+        if (!candle) return null;
+        // Anchored to the candle itself rather than to an even split of the width, which put the
+        // labels up to a full half-slot away from the candles they name.
+        const left = Math.max(
+          plotX(settledStart + at) - TIME_LABEL_WIDTH / 2,
+          0,
+        );
+        return (
+          <Text key={`time-${index}`} style={[styles.timeLabel, { left }]}>
+            {formatAxisTime(candle.time, spanMs)}
+          </Text>
+        );
+      })}
+      {active ? <Readout candle={active} decimals={decimals} /> : null}
+    </View>
+  );
 }
 
 function Readout({ candle, decimals }: { candle: Candle; decimals?: number }) {
   const styles = useStyles();
-  return <View style={styles.readout} pointerEvents="none"><Text style={styles.readoutTime}>{new Date(candle.time).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</Text><View style={styles.readoutGrid}><OhlcCell label="O" value={formatPrice(candle.open, decimals)} /><OhlcCell label="H" value={formatPrice(candle.high, decimals)} /><OhlcCell label="L" value={formatPrice(candle.low, decimals)} /><OhlcCell label="C" value={formatPrice(candle.close, decimals)} /></View><Text style={styles.readoutVolume}>Vol {formatAmount(candle.volume)}{candle.open !== 0 ? `  ${formatPercent(((candle.close - candle.open) / candle.open) * 100)}` : ''}</Text></View>;
+  return (
+    <View style={styles.readout} pointerEvents="none">
+      <Text style={styles.readoutTime}>
+        {new Date(candle.time).toLocaleString(undefined, {
+          month: "short",
+          day: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+        })}
+      </Text>
+      <View style={styles.readoutGrid}>
+        <OhlcCell label="O" value={formatPrice(candle.open, decimals)} />
+        <OhlcCell label="H" value={formatPrice(candle.high, decimals)} />
+        <OhlcCell label="L" value={formatPrice(candle.low, decimals)} />
+        <OhlcCell label="C" value={formatPrice(candle.close, decimals)} />
+      </View>
+      <Text style={styles.readoutVolume}>
+        Vol {formatAmount(candle.volume)}
+        {candle.open !== 0
+          ? `  ${formatPercent(((candle.close - candle.open) / candle.open) * 100)}`
+          : ""}
+      </Text>
+    </View>
+  );
 }
-function OhlcCell({ label, value }: { label: string; value: string }) { const styles = useStyles(); return <View style={styles.ohlcCell}><Text style={styles.ohlcLabel}>{label}</Text><Text style={styles.ohlcValue}>{value}</Text></View>; }
+function OhlcCell({ label, value }: { label: string; value: string }) {
+  const styles = useStyles();
+  return (
+    <View style={styles.ohlcCell}>
+      <Text style={styles.ohlcLabel}>{label}</Text>
+      <Text style={styles.ohlcValue}>{value}</Text>
+    </View>
+  );
+}
 
 export const PriceChart = memo(PriceChartComponent);
 
 const useStyles = createThemedStyles((colors) =>
   StyleSheet.create({
-    container: { flexDirection: 'row', position: 'relative' }, canvas: { flex: 1 }, axisLabel: { color: colors.textFaint, fontSize: 10, textAlign: 'left', paddingHorizontal: 10 }, timeLabel: { position: 'absolute', bottom: 2, color: colors.textFaint, fontSize: 10, width: TIME_LABEL_WIDTH, textAlign: 'center' },
-    readout: { position: 'absolute', top: spacing.xs, left: spacing.xs, backgroundColor: colors.surface, borderRadius: radius.sm, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border, paddingHorizontal: spacing.sm, paddingVertical: 6, gap: 3 }, readoutTime: { color: colors.textMuted, fontSize: 10, fontWeight: '600' }, readoutGrid: { flexDirection: 'row', gap: spacing.md }, ohlcCell: { flexDirection: 'row', alignItems: 'center', gap: 3 }, ohlcLabel: { color: colors.textFaint, fontSize: 10, fontWeight: '700' }, ohlcValue: { color: colors.text, fontSize: 10, fontWeight: '600', fontVariant: ['tabular-nums'] }, readoutVolume: { color: colors.textMuted, fontSize: 10, fontVariant: ['tabular-nums'] },
+    container: { flexDirection: "row", position: "relative", paddingTop: 5 },
+    canvas: { flex: 1 },
+    axisLabel: {
+      color: colors.textFaint,
+      fontSize: 10,
+      textAlign: "left",
+      paddingHorizontal: 10,
+    },
+    timeLabel: {
+      position: "absolute",
+      bottom: 2,
+      color: colors.textFaint,
+      fontSize: 10,
+      width: TIME_LABEL_WIDTH,
+      textAlign: "center",
+    },
+    readout: {
+      position: "absolute",
+      top: spacing.xs,
+      left: spacing.xs,
+      backgroundColor: colors.surface,
+      borderRadius: radius.sm,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.border,
+      paddingHorizontal: spacing.sm,
+      paddingVertical: 6,
+      gap: 3,
+    },
+    readoutTime: { color: colors.textMuted, fontSize: 10, fontWeight: "600" },
+    readoutGrid: { flexDirection: "row", gap: spacing.md },
+    ohlcCell: { flexDirection: "row", alignItems: "center", gap: 3 },
+    ohlcLabel: { color: colors.textFaint, fontSize: 10, fontWeight: "700" },
+    ohlcValue: {
+      color: colors.text,
+      fontSize: 10,
+      fontWeight: "600",
+      fontVariant: ["tabular-nums"],
+    },
+    readoutVolume: {
+      color: colors.textMuted,
+      fontSize: 10,
+      fontVariant: ["tabular-nums"],
+    },
   }),
 );

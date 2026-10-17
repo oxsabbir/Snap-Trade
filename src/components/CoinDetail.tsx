@@ -62,7 +62,7 @@ type ChromeProps = {
   timeframeKey: string;
   onSelectTimeframe: (next: TimeframeOrLine) => void;
   onOpenInfo: () => void;
-  periodLabel: string;
+  periodLabel?: string;
 };
 
 /**
@@ -122,11 +122,11 @@ const ChartChrome = memo(function ChartChrome({
         <TimeframeTabs value={timeframeKey} onChange={onSelectTimeframe} />
       </View>
 
-      <View style={styles.toolbar}>
+      {/* <View style={styles.toolbar}>
         <Text style={styles.periodLabel} numberOfLines={1}>
           {periodLabel}
         </Text>
-      </View>
+      </View> */}
     </>
   );
 });
@@ -296,104 +296,104 @@ export function CoinDetail({ symbol, name, decimals }: Props) {
 
 const useStyles = createThemedStyles((colors) =>
   StyleSheet.create({
-  section: {
-    // Content-sized: this is one section of the screen's scroll view, not the screen itself.
-  },
-  header: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.md,
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.sm,
-    paddingBottom: spacing.md,
-  },
-  headerText: {
-    flex: 1,
-    gap: 1,
-  },
-  symbol: {
-    color: colors.text,
-    fontSize: 17,
-    fontWeight: "700",
-  },
-  name: {
-    color: colors.textFaint,
-    fontSize: 11,
-  },
-  priceBlock: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.md,
-    paddingHorizontal: spacing.md,
-    paddingBottom: spacing.sm,
-  },
-  timeframeRow: {
-    flexGrow: 0,
-  },
-  toolbar: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.lg,
-    paddingBottom: spacing.sm,
-  },
-  periodLabel: {
-    color: colors.textFaint,
-    fontSize: 11,
-    fontWeight: "600",
-    letterSpacing: 0.4,
-    flexShrink: 1,
-  },
-  chartWrap: {
-    justifyContent: "center",
-  },
-  // Sits over the chart, which stays mounted underneath it.
-  chartOverlay: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: colors.bg,
-  },
-  loader: {
-    alignSelf: "center",
-    alignItems: "center",
-    gap: spacing.sm,
-  },
-  loaderCaption: {
-    color: colors.textFaint,
-    fontSize: 11,
-    fontWeight: "600",
-    letterSpacing: 0.4,
-  },
-  errorBox: {
-    alignItems: "center",
-    gap: spacing.sm,
-    paddingVertical: spacing.xl,
-  },
-  errorTitle: {
-    color: colors.text,
-    fontSize: 15,
-    fontWeight: "600",
-  },
-  errorBody: {
-    color: colors.textMuted,
-    fontSize: 13,
-    textAlign: "center",
-    paddingHorizontal: spacing.xl,
-  },
-  errorHint: {
-    color: colors.textFaint,
-    fontSize: 12,
-  },
-  infoButton: {
-    padding: spacing.xs,
-    marginLeft: spacing.xs,
-    borderRadius: radius.pill,
-  },
+    section: {
+      // Content-sized: this is one section of the screen's scroll view, not the screen itself.
+    },
+    header: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.md,
+      paddingHorizontal: spacing.lg,
+      paddingTop: spacing.sm,
+      paddingBottom: spacing.md,
+    },
+    headerText: {
+      flex: 1,
+      gap: 1,
+    },
+    symbol: {
+      color: colors.text,
+      fontSize: 17,
+      fontWeight: "700",
+    },
+    name: {
+      color: colors.textFaint,
+      fontSize: 11,
+    },
+    priceBlock: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.md,
+      paddingHorizontal: spacing.md,
+      paddingBottom: spacing.sm,
+    },
+    timeframeRow: {
+      flexGrow: 0,
+    },
+    toolbar: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      paddingHorizontal: spacing.lg,
+      paddingTop: spacing.lg,
+      paddingBottom: spacing.sm,
+    },
+    periodLabel: {
+      color: colors.textFaint,
+      fontSize: 11,
+      fontWeight: "600",
+      letterSpacing: 0.4,
+      flexShrink: 1,
+    },
+    chartWrap: {
+      justifyContent: "center",
+    },
+    // Sits over the chart, which stays mounted underneath it.
+    chartOverlay: {
+      position: "absolute",
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: colors.bg,
+    },
+    loader: {
+      alignSelf: "center",
+      alignItems: "center",
+      gap: spacing.sm,
+    },
+    loaderCaption: {
+      color: colors.textFaint,
+      fontSize: 11,
+      fontWeight: "600",
+      letterSpacing: 0.4,
+    },
+    errorBox: {
+      alignItems: "center",
+      gap: spacing.sm,
+      paddingVertical: spacing.xl,
+    },
+    errorTitle: {
+      color: colors.text,
+      fontSize: 15,
+      fontWeight: "600",
+    },
+    errorBody: {
+      color: colors.textMuted,
+      fontSize: 13,
+      textAlign: "center",
+      paddingHorizontal: spacing.xl,
+    },
+    errorHint: {
+      color: colors.textFaint,
+      fontSize: 12,
+    },
+    infoButton: {
+      padding: spacing.xs,
+      marginLeft: spacing.xs,
+      borderRadius: radius.pill,
+    },
   }),
 );

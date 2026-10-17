@@ -9,13 +9,14 @@ import {
   type TextInputSubmitEditingEventData,
 } from 'react-native';
 
+import { Avatar } from '@/components/Avatar';
 import { EyeIcon, EyeOffIcon } from '@/components/Icons';
 import type { Portfolio } from '@/lib/kucoin/account';
 import type { AccountInfo } from '@/lib/kucoin/types';
 import { radius, spacing } from '@/theme';
 import { useTheme } from '@/theme/ThemeProvider';
 import { createThemedStyles } from '@/theme/themedStyles';
-import { formatPrice, formatTime, hashToHue } from '@/utils/format';
+import { formatPrice, formatTime } from '@/utils/format';
 
 type Props = {
   displayName: string;
@@ -27,13 +28,6 @@ type Props = {
 };
 
 const MASK = '••••••';
-
-function initialsFor(name: string): string {
-  const words = name.trim().split(/\s+/).filter(Boolean);
-  if (words.length === 0) return 'K';
-  if (words.length === 1) return words[0]!.slice(0, 2).toUpperCase();
-  return `${words[0]![0]}${words[1]![0]}`.toUpperCase();
-}
 
 function ProfileCardComponent({ displayName, onRename, accountInfo, portfolio, lastUpdated }: Props) {
   const { colors, scheme } = useTheme();
@@ -70,16 +64,12 @@ function ProfileCardComponent({ displayName, onRename, accountInfo, portfolio, l
     [isHidden]
   );
 
-  const hue = hashToHue(displayName || 'kucoin');
-
   return (
     <View style={styles.card}>
       <View style={styles.accentBar} />
 
       <View style={styles.topRow}>
-        <View style={[styles.avatar, { backgroundColor: `hsl(${hue}, 34%, 21%)` }]}>
-          <Text style={styles.avatarLabel}>{initialsFor(displayName)}</Text>
-        </View>
+        <Avatar name={displayName} size={46} />
 
         <View style={styles.identityText}>
           <View style={styles.nameRow}>
@@ -223,21 +213,6 @@ const useStyles = createThemedStyles((colors) => StyleSheet.create({
     gap: spacing.md,
     marginTop: spacing.xs,
     marginBottom: spacing.lg,
-  },
-  avatar: {
-    width: 46,
-    height: 46,
-    borderRadius: radius.pill,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.border,
-  },
-  avatarLabel: {
-    color: colors.text,
-    fontSize: 16,
-    fontWeight: '700',
-    letterSpacing: 0.3,
   },
   identityText: {
     flex: 1,

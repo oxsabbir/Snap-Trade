@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const STORAGE_KEY = 'profile:display-name';
-const DEFAULT_NAME = 'My KuCoin';
+const DEFAULT_NAME = 'Trader';
 const MAX_LENGTH = 24;
 
 export type ProfileState = {

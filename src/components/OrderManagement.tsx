@@ -305,16 +305,12 @@ const useStyles = createThemedStyles((colors) => StyleSheet.create({
     paddingBottom: spacing.xs,
   },
   tabBar: {
-    // The bar needs a fill of its own for the drop shadow to render on Android; it is the screen
-    // colour, so the only things that show are the hairline and the soft shadow beneath it.
+    // Full-bleed within the section, cancelling the container's horizontal padding so the tabs run
+    // edge to edge instead of leaving a gutter on the left and right.
+    marginHorizontal: -spacing.md,
     backgroundColor: colors.bg,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.border,
-    shadowColor: colors.shadow,
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.25,
-    shadowRadius: 6,
-    elevation: 4,
     marginBottom: spacing.sm,
     // A row, not a block: without this the ScrollView would try to claim the section's height.
     flexGrow: 0,
@@ -324,7 +320,6 @@ const useStyles = createThemedStyles((colors) => StyleSheet.create({
     // tab holds its minimum width and the content overflows into a scroll.
     flexGrow: 1,
     alignItems: "stretch",
-    gap: spacing.lg,
   },
   tab: {
     flexGrow: 1,

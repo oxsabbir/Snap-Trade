@@ -10,11 +10,14 @@ import {
 import { CoinAvatar } from "@/components/CoinAvatar";
 import { ChevronRightIcon } from "@/components/Icons";
 import { useAccountBalance } from "@/hooks/useAccountBalance";
+import { useCostBasis } from "@/hooks/useCostBasis";
+import { useSymbolRules } from "@/hooks/useSymbolRules";
 import { useTicker } from "@/state/ticker";
 import { radius, spacing } from "@/theme";
 import { useTheme } from "@/theme/ThemeProvider";
 import { createThemedStyles } from "@/theme/themedStyles";
-import { formatAmount, formatPrice } from "@/utils/format";
+import { compareDecimal } from "@/utils/decimal";
+import { decimalsFromIncrement, formatAmount, formatPrice } from "@/utils/format";
 
 type Props = {
   /** The pair being traded, e.g. `BTC-USDT`. Splits into the token and its quote on the dash. */
@@ -37,6 +40,11 @@ function toNumber(value: string | undefined): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+/** A stored average cost is only worth drawing once it parses to something greater than zero. */
+function isPositiveDecimal(value: string | null): boolean {
+  return value !== null && (compareDecimal(value, "0") ?? 0) > 0;
+}
+
 type SectionProps = {
   currency: string;
   total: number;
@@ -44,6 +52,9 @@ type SectionProps = {
   locked: number;
   /** USD value of `total`, or `null` when the asset has no reliable dollar price. */
   usdValue: number | null;
+  /** Weighted average entry price in quote, or `null` when the position is flat/unknown. */
+  avgCost: string | null;
+  costDecimals: number;
 };
 
 /**
@@ -56,6 +67,8 @@ function AssetSection({
   available,
   locked,
   usdValue,
+  avgCost,
+  costDecimals,
 }: SectionProps) {
   const { colors } = useTheme();
   const styles = useStyles();
@@ -100,12 +113,13 @@ function AssetSection({
 
         <View style={styles.row}>
           <Text style={styles.label}>Avg. Cost Price</Text>
-          {/* No cost basis is tracked, so this stays a dash rather than a fabricated figure. */}
           <Text
-            style={[styles.value, styles.valueUnavailable]}
+            style={[styles.value, !isPositiveDecimal(avgCost) && styles.valueUnavailable]}
             numberOfLines={1}
           >
-            —
+            {isPositiveDecimal(avgCost)
+              ? formatPrice(Number(avgCost), Math.min(costDecimals, 8))
+              : "—"}
           </Text>
         </View>
       </View>
@@ -125,8 +139,10 @@ function AssetsPanelComponent({ symbol }: Props) {
   const styles = useStyles();
   const { available, holds, isLoading, error, refresh } = useAccountBalance();
   const { update } = useTicker(symbol);
-
+  const { rules } = useSymbolRules(symbol);
   const [base, quote = ""] = symbol.split("-");
+  const baseBasis = useCostBasis(symbol);
+
   const price = update && Number.isFinite(update.price) ? update.price : null;
   const quoteIsUsd = USD_STABLES.has(quote);
 
@@ -175,6 +191,8 @@ function AssetsPanelComponent({ symbol }: Props) {
         available={baseAvailable}
         locked={baseLocked}
         usdValue={baseUsd}
+        avgCost={baseBasis.avgCost}
+        costDecimals={rules ? decimalsFromIncrement(rules.priceIncrement) : 6}
       />
       <AssetSection
         currency="USDT"
@@ -182,6 +200,8 @@ function AssetsPanelComponent({ symbol }: Props) {
         available={usdtAvailable}
         locked={usdtLocked}
         usdValue={usdtTotal}
+        avgCost={null}
+        costDecimals={2}
       />
     </View>
   );

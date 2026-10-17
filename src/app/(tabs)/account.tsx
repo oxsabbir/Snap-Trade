@@ -2,7 +2,7 @@ import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, ScrollVie
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AssetList } from '@/components/AssetList';
-import { AccountIcon } from '@/components/Icons';
+import { AccountIcon, CheckIcon } from '@/components/Icons';
 import { ProfileCard } from '@/components/ProfileCard';
 import { useAccount } from '@/hooks/useAccount';
 import { useProfile } from '@/hooks/useProfile';
@@ -13,7 +13,7 @@ import { getKcsDiscountEnabled, setKcsDiscountEnabled } from '@/state/kcsDiscoun
 import { radius, spacing } from '@/theme';
 import { useTheme, type ThemePreference } from '@/theme/ThemeProvider';
 import { createThemedStyles } from '@/theme/themedStyles';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 
 function maskApiKey(apiKey: string | null): string {
   if (!apiKey || apiKey.length < 9) return '••••••';
@@ -48,6 +48,35 @@ export default function AccountScreen() {
     setPrevSignalName(signal.displayName);
     setSignalNameInput(signal.displayName);
   }
+  // Save button feedback: idle -> saving -> saved (for a beat) -> idle.
+  const [signalSaveState, setSignalSaveState] = useState<'idle' | 'saving' | 'saved'>('idle');
+  const saveTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
+  useEffect(
+    () => () => {
+      saveTimers.current.forEach(clearTimeout);
+      saveTimers.current = [];
+    },
+    [],
+  );
+  const signalInputEmpty = signalNameInput.trim() === '';
+  const saveSignalDisabled = !signal.isEnabled || signalInputEmpty;
+
+  const saveSignalName = () => {
+    const trimmed = signalNameInput.trim().slice(0, 80);
+    if (saveSignalDisabled || signalSaveState !== 'idle') return;
+    setSignalNameInput(trimmed);
+    setSignalSaveState('saving');
+    // A short beat so the saving state is actually perceivable before the (synchronous) write.
+    saveTimers.current.push(
+      setTimeout(() => {
+        signal.setDisplayName(trimmed);
+        setSignalSaveState('saved');
+        saveTimers.current.push(
+          setTimeout(() => setSignalSaveState('idle'), 1000),
+        );
+      }, 450),
+    );
+  };
 
   // With signal detection on, the profile card shows the first configured source as a label
   // (the full comma-separated list is edited only in the Signal Sources field below, so a
@@ -205,19 +234,26 @@ export default function AccountScreen() {
                     accessibilityLabel="Signal sources, comma-separated"
                   />
                   <Pressable
-                    onPress={() => {
-                      const trimmed = signalNameInput.trim().slice(0, 80);
-                      setSignalNameInput(trimmed);
-                      signal.setDisplayName(trimmed);
-                    }}
-                    disabled={!signal.isEnabled || signalNameInput.trim() === ''}
+                    onPress={saveSignalName}
+                    disabled={saveSignalDisabled || signalSaveState !== 'idle'}
                     style={[
                       styles.signalSaveButton,
-                      (!signal.isEnabled || signalNameInput.trim() === '') && styles.signalSaveButtonDisabled,
+                      saveSignalDisabled && styles.signalSaveButtonDisabled,
+                      signalSaveState === 'saving' && styles.signalSaveButtonBusy,
                     ]}
                     accessibilityLabel="Save signal sources"
+                    accessibilityState={{ busy: signalSaveState === 'saving', disabled: saveSignalDisabled }}
                   >
-                    <Text style={styles.signalSaveButtonText}>Save</Text>
+                    {signalSaveState === 'saving' ? (
+                      <ActivityIndicator size="small" color={colors.onAccent} />
+                    ) : signalSaveState === 'saved' ? (
+                      <View style={styles.signalSaveContent}>
+                        <CheckIcon size={14} color={colors.onAccent} />
+                        <Text style={styles.signalSaveButtonText}>Saved</Text>
+                      </View>
+                    ) : (
+                      <Text style={styles.signalSaveButtonText}>Save</Text>
+                    )}
                   </Pressable>
                 </View>
                 <Text style={styles.signalDesc}>Separate each source&apos;s X display name with a comma.</Text>
@@ -456,8 +492,10 @@ const useStyles = createThemedStyles((colors) =>
     signalNameInput: {
       backgroundColor: colors.surfaceAlt,
       borderRadius: radius.sm,
-      paddingHorizontal: spacing.sm,
-      paddingVertical: spacing.xs,
+      height: 36,
+      paddingHorizontal: spacing.md,
+      paddingVertical: 0,
+      textAlignVertical: 'center',
       color: colors.text,
       fontSize: 14,
       fontWeight: '600',
@@ -482,6 +520,14 @@ const useStyles = createThemedStyles((colors) =>
     signalSaveButtonDisabled: {
       opacity: 0.4,
       backgroundColor: colors.surfaceAlt,
+    },
+    signalSaveButtonBusy: {
+      opacity: 0.8,
+    },
+    signalSaveContent: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
     },
     signalSaveButtonText: {
       color: colors.onAccent,
