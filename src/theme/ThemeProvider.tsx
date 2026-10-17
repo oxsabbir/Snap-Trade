@@ -33,14 +33,13 @@ function isPreference(value: unknown): value is ThemePreference {
 }
 
 /**
- * Owns the resolved colour scheme. The first frame renders with the system scheme and the saved
- * override is applied a tick later, so the splash is never held open waiting on storage and a
- * System user sees no flash. `useColorScheme` stays subscribed, so switching the phone theme
- * while System is selected updates the UI without a restart.
+ * Owns the resolved colour scheme. Default is Dark; saved preference is applied after the first
+ * frame. When 'system' is selected, switching the phone theme updates the UI without restart.
+ * Note: following device requires `userInterfaceStyle: "automatic"` in app.json and a native rebuild.
  */
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const systemScheme = useColorScheme();
-  const [preference, setPreferenceState] = useState<ThemePreference>('system');
+  const [preference, setPreferenceState] = useState<ThemePreference>('dark');
 
   useEffect(() => {
     let cancelled = false;
