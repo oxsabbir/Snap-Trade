@@ -205,11 +205,18 @@ export default function MarketsScreen() {
   const handleSearchFocus = useCallback(() => {
     interactingRef.current = false;
     setIsSearchFocused(true);
+    // Search should span every pair, not only the quote/tab that happened to be selected.
+    setTab("All");
   }, []);
 
   const handleSearchBlur = useCallback(() => {
     if (interactingRef.current) return;
     setIsSearchFocused(false);
+  }, []);
+
+  /** Marks a tap inside the panel so the blur that follows cannot close it. */
+  const handleSuggestInteract = useCallback(() => {
+    interactingRef.current = true;
   }, []);
 
   const closeSearch = useCallback(() => {
@@ -287,37 +294,52 @@ export default function MarketsScreen() {
         />
       </View>
 
-      {showSuggestions ? (
-        <>
+      {/*
+        Both panels stay mounted and only their visibility flips. Mounting/unmounting the market
+        list on every focus would tear down and rebuild ~20 rows (each with SVGs) behind the
+        keyboard, which is the slow part of tapping the search bar.
+      */}
+      <View style={styles.body}>
+        <View
+          style={!showSuggestions ? styles.hidden : undefined}
+          pointerEvents={showSuggestions ? "auto" : "none"}
+          accessibilityElementsHidden={!showSuggestions}
+          importantForAccessibility={showSuggestions ? "auto" : "no-hide-descendants"}
+        >
           <RecentSearches
             items={recentItems}
             onSelect={handleRecentSelect}
             onClear={clearRecents}
-            onInteract={() => {
-              interactingRef.current = true;
-            }}
+            onInteract={handleSuggestInteract}
           />
           <PopularSearches symbols={popularSymbols} onSelect={commitSearch} />
-        </>
-      ) : (
-        <MarketsList
-          visibleMarkets={visibleMarkets}
-          keyExtractor={keyExtractor}
-          isLoading={isLoading}
-          isRefreshing={isRefreshing}
-          error={error}
-          activeQuery={activeQuery}
-          tab={tab}
-          refresh={refresh}
-          onTabChange={setTab}
-          favoritesCount={favorites.size}
-          popularSymbols={popularSymbols}
-          onPopularSelect={commitSearch}
-          favorites={favorites}
-          toggleFavorite={toggleFavorite}
-          onOpenMarket={handleOpenMarket}
-        />
-      )}
+        </View>
+
+        <View
+          style={[styles.listLayer, showSuggestions && styles.hidden]}
+          pointerEvents={showSuggestions ? "none" : "auto"}
+          accessibilityElementsHidden={showSuggestions}
+          importantForAccessibility={showSuggestions ? "no-hide-descendants" : "auto"}
+        >
+          <MarketsList
+            visibleMarkets={visibleMarkets}
+            keyExtractor={keyExtractor}
+            isLoading={isLoading}
+            isRefreshing={isRefreshing}
+            error={error}
+            activeQuery={activeQuery}
+            tab={tab}
+            refresh={refresh}
+            onTabChange={setTab}
+            favoritesCount={favorites.size}
+            popularSymbols={popularSymbols}
+            onPopularSelect={commitSearch}
+            favorites={favorites}
+            toggleFavorite={toggleFavorite}
+            onOpenMarket={handleOpenMarket}
+          />
+        </View>
+      </View>
     </SafeAreaView>
   );
 }
@@ -370,6 +392,17 @@ const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: colors.bg,
+  },
+  body: {
+    flex: 1,
+  },
+  /** The list fills the space; the suggestion panel above it keeps its natural height. */
+  listLayer: {
+    flex: 1,
+  },
+  /** Hidden but mounted, so switching panels never rebuilds the list. */
+  hidden: {
+    display: "none",
   },
   header: {
     paddingHorizontal: spacing.lg,
