@@ -29,9 +29,13 @@ export default function TradeDeepLinkRoute() {
 
 function TradeDeepLinkContent() {
   const styles = useStyles();
-  const params = useLocalSearchParams<{ symbol?: string | string[] }>();
+  const params = useLocalSearchParams<{ symbol?: string | string[]; entry?: string | string[] }>();
   const raw = Array.isArray(params.symbol) ? params.symbol[0] : params.symbol;
   const symbol = normalizeTradeSymbol(raw);
+  const rawEntry = Array.isArray(params.entry) ? params.entry[0] : params.entry;
+  // The route param is validated again here: cold-start URLs arrive straight from the
+  // native listener without passing through `parseTradeSignalUrl`.
+  const entry = rawEntry && /^\d+(\.\d+)?$/.test(rawEntry.trim()) ? rawEntry.trim() : null;
 
   const launch = useSignalLaunch();
   const { status } = useAndroidPermissions();
@@ -66,6 +70,7 @@ function TradeDeepLinkContent() {
         symbol={symbol}
         name={base}
         decimals={8}
+        signalEntry={entry}
         onBack={() => router.navigate('/(tabs)/trade')}
       />
       {!status.notificationAccess ? (

@@ -5,7 +5,9 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 const STORAGE_KEY_ENABLED = 'signal_detection_enabled';
 const STORAGE_KEY_DISPLAY_NAME = 'signal_source:display-name';
 const DEFAULT_DISPLAY_NAME = 'My Signal Source';
-const MAX_LENGTH = 24;
+
+/** Wide enough for several comma-separated sources ("Alpha Calls, Gem Hunter, ..."). */
+const MAX_LENGTH = 80;
 
 const { NotificationListenerModule } = NativeModules as {
   NotificationListenerModule?: {

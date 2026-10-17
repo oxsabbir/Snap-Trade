@@ -18,13 +18,15 @@ import java.util.regex.Pattern
  * Reads the signal source's notifications directly on device, without the JS runtime.
  *
  * The app process can be dead (swiped from recents) when a notification lands, so the whole
- * decision — package gate, toggle, trusted display name, ticker and TP count — has to be made
+ * decision — package gate, toggle, trusted display names, and the format-specific anchors
+ * (ticker + TPs for TP posts, ticker + marker + market price for gem posts) — has to be made
  * here. The settings the JS side owns are mirrored into the same SharedPreferences file this
  * service reads; see [NotificationListenerModule.syncSignalSettings].
  *
  * On a signal the service starts the MainActivity through a `snaptrade://trade/<symbol>` deep
- * link. If the process is alive the activity is brought forward and the link is re-delivered;
- * if it was killed, that link becomes the app's initial route.
+ * link (with `?entry=<price>` for gem posts). If the process is alive the activity is brought
+ * forward and the link is re-delivered; if it was killed, that link becomes the app's initial
+ * route.
  */
 class NotificationListener : NotificationListenerService() {
 
@@ -72,6 +74,15 @@ class NotificationListener : NotificationListenerService() {
     private val tpAltPattern =
         Pattern.compile("(?i)(?:TP|T\\.P)\\s*(\\d+)\\s+([\\d,.]+)(?![=:])")
 
+    // Gem-post marker: `Buying this GEM on #KuCoin` (constant across the source's posts).
+    private val gemMarkerPattern =
+        Pattern.compile("(?i)buying\\s+this\\s+gem\\s+on\\s+#?kucoin")
+
+    // `Current market price - 0.0007306 $` — value kept as a plain string, not a Double,
+    // so the deep link carries the exact posted decimal (no scientific notation).
+    private val gemPricePattern =
+        Pattern.compile("(?i)current\\s+market\\s+price\\s*[-–:]?\\s*([\\d.,]+)")
+
     override fun onCreate() {
         super.onCreate()
         log("ListenerCreated", "service created")
@@ -108,8 +119,18 @@ class NotificationListener : NotificationListenerService() {
 
         val ticker = extractTicker(primaryText)
         val tps = extractTps(primaryText)
-        if (ticker == null || tps.size < 3) {
-            log("Decision", "not signal (ticker=${ticker ?: "none"}, tps=${tps.size})")
+        if (ticker == null) {
+            log("Decision", "not signal (ticker=none, tps=${tps.size})")
+            return
+        }
+
+        // Format 1 (TP posts): a cashtag plus at least three numbered take-profits.
+        // Format 2 (gem posts): a cashtag plus the marker phrase and a market price line.
+        // The trailing cashtag list in gem posts is a decoy — only the first cashtag is
+        // ever taken as the ticker.
+        val entryPrice = if (tps.size < 3) extractGemPrice(primaryText) else null
+        if (tps.size < 3 && entryPrice == null) {
+            log("Decision", "not signal (ticker=$ticker, tps=${tps.size}, gem=false)")
             return
         }
 
@@ -121,8 +142,10 @@ class NotificationListener : NotificationListenerService() {
         }
         lastLaunchByTicker[ticker] = now
 
-        log("Decision", "signal $ticker (tps=${tps.size})")
-        launchTradeScreen(ticker)
+        val format = if (tps.size >= 3) "tp" else "gem"
+        val pricePart = entryPrice?.let { ", price=$it" } ?: ""
+        log("Decision", "signal $ticker (format=$format, tps=${tps.size}$pricePart)")
+        launchTradeScreen(ticker, entryPrice)
     }
 
     override fun onNotificationRemoved(sbn: StatusBarNotification?) {
@@ -143,21 +166,25 @@ class NotificationListener : NotificationListenerService() {
     private fun isSignalDetectionEnabled(): Boolean =
         prefs().getBoolean(PREFS_KEY_ENABLED, false)
 
-    private fun trustedDisplayName(): String {
-        val stored = prefs().getString(PREFS_KEY_DISPLAY_NAME, DEFAULT_DISPLAY_NAME)
-        return stored?.trim().orEmpty()
+    private fun trustedDisplayNames(): List<String> {
+        val stored = prefs().getString(PREFS_KEY_DISPLAY_NAME, DEFAULT_DISPLAY_NAME).orEmpty()
+        // The JS store holds a comma-separated list ("Alpha Calls, Gem Hunter"); an empty
+        // segment falls back so a stray comma never widens the match to everything.
+        return stored.split(',').map { it.trim() }.filter { it.isNotEmpty() }
     }
 
     private fun prefs() = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
     private fun titleMatchesTrustedSource(sbn: StatusBarNotification): Boolean {
-        val trusted = trustedDisplayName()
+        val trusted = trustedDisplayNames()
         if (trusted.isEmpty()) return false
         val extras = sbn.notification.extras
         val title = extras?.getString(Notification.EXTRA_TITLE)?.trim().orEmpty()
         val subText = extras?.getCharSequence(Notification.EXTRA_SUB_TEXT)?.toString()?.trim().orEmpty()
-        return title.contains(trusted, ignoreCase = true) ||
-            subText.contains(trusted, ignoreCase = true)
+        return trusted.any { name ->
+            title.contains(name, ignoreCase = true) ||
+                subText.contains(name, ignoreCase = true)
+        }
     }
 
     private fun extractTicker(text: String): String? {
@@ -198,10 +225,36 @@ class NotificationListener : NotificationListenerService() {
         return if (value.isFinite()) value else null
     }
 
-    private fun launchTradeScreen(ticker: String) {
+    /**
+     * Gem-format anchor: returns the posted market price as a plain decimal string, or null
+     * unless the post carries both the constant marker phrase and a parseable price line —
+     * a stray "current market price" mention without the marker is not a signal.
+     */
+    private fun extractGemPrice(text: String): String? {
+        if (text.isBlank()) return null
+        if (!gemMarkerPattern.matcher(text).find()) return null
+
+        val matcher = gemPricePattern.matcher(text)
+        if (!matcher.find()) return null
+
+        // Comma decimal separator to dot; BigDecimal keeps the posted precision as-is.
+        val normalized = matcher.group(1)?.replace(',', '.')?.trim() ?: return null
+        return try {
+            java.math.BigDecimal(normalized).toPlainString()
+        } catch (e: NumberFormatException) {
+            null
+        }
+    }
+
+    private fun launchTradeScreen(ticker: String, entryPrice: String? = null) {
         val symbol = "${ticker.uppercase()}-USDT"
+        val url = if (entryPrice != null) {
+            "snaptrade://trade/$symbol?entry=$entryPrice"
+        } else {
+            "snaptrade://trade/$symbol"
+        }
         val intent = Intent(Intent.ACTION_VIEW).apply {
-            data = Uri.parse("snaptrade://trade/$symbol")
+            data = Uri.parse(url)
             setPackage(packageName)
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
         }
@@ -214,7 +267,7 @@ class NotificationListener : NotificationListenerService() {
 
         try {
             startActivity(intent)
-            log("IntentSent", "snaptrade://trade/$symbol")
+            log("IntentSent", url)
         } catch (t: Throwable) {
             log("IntentFailed", "$symbol: ${t.message}")
         }

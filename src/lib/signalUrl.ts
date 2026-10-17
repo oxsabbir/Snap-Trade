@@ -25,11 +25,28 @@ export function normalizeTradeSymbol(value: string | null | undefined): string |
 }
 
 /**
- * Pulls the symbol out of a `snaptrade://trade/<symbol>` link, accepting both the
- * `host=trade`, `path=<symbol>` shape and the `path=trade/<symbol>` shape that different
- * platforms hand back.
+ * A parsed `snaptrade://trade/<symbol>` link: the normalised pair plus the optional signal
+ * entry price carried by gem-format posts (`?entry=0.0007306`).
  */
-export function parseTradeSignalUrl(url: string | null | undefined): string | null {
+export type TradeSignal = {
+  symbol: string;
+  /** Plain decimal string exactly as the signal posted it — display-ready, never reformatted. */
+  entry: string | null;
+};
+
+/** A posted price is carried through only if it is a plain positive decimal. */
+function sanitizeEntry(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return /^\d+(\.\d+)?$/.test(trimmed) ? trimmed : null;
+}
+
+/**
+ * Pulls the symbol (and optional entry price) out of a `snaptrade://trade/<symbol>` link,
+ * accepting both the `host=trade`, `path=<symbol>` shape and the `path=trade/<symbol>` shape
+ * that different platforms hand back.
+ */
+export function parseTradeSignalUrl(url: string | null | undefined): TradeSignal | null {
   if (!url) return null;
 
   let parsed: ReturnType<typeof Linking.parse>;
@@ -49,5 +66,8 @@ export function parseTradeSignalUrl(url: string | null | undefined): string | nu
     candidate = segments[1];
   }
 
-  return normalizeTradeSymbol(candidate ?? null);
+  const symbol = normalizeTradeSymbol(candidate ?? null);
+  if (!symbol) return null;
+
+  return { symbol, entry: sanitizeEntry(parsed.queryParams?.entry) };
 }

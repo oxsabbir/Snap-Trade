@@ -19,7 +19,8 @@ import { formatPrice, formatTime, hashToHue } from '@/utils/format';
 
 type Props = {
   displayName: string;
-  onRename: (name: string) => void;
+  /** Omit to render the name as static text (e.g. when it edits a list owned elsewhere). */
+  onRename?: (name: string) => void;
   accountInfo: AccountInfo | null;
   portfolio: Portfolio;
   lastUpdated: number | null;
@@ -43,7 +44,7 @@ function ProfileCardComponent({ displayName, onRename, accountInfo, portfolio, l
   const inputRef = useRef<TextInput>(null);
 
   const commit = useCallback(() => {
-    onRename(draft);
+    onRename?.(draft);
     setIsEditing(false);
   }, [draft, onRename]);
 
@@ -99,12 +100,16 @@ function ProfileCardComponent({ displayName, onRename, accountInfo, portfolio, l
                 keyboardAppearance={scheme === 'dark' ? 'dark' : 'light'}
                 accessibilityLabel="Display name"
               />
-            ) : (
+            ) : onRename ? (
               <Pressable onPress={beginEdit} hitSlop={8} accessibilityRole="button">
                 <Text style={styles.name} numberOfLines={1}>
                   {displayName}
                 </Text>
               </Pressable>
+            ) : (
+              <Text style={styles.name} numberOfLines={1}>
+                {displayName}
+              </Text>
             )}
 
             {accountInfo ? (

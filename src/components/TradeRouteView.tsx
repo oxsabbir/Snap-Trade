@@ -22,6 +22,8 @@ type Props = {
   symbol: string;
   name: string;
   decimals: number;
+  /** Market price posted with a gem-format signal; shown as a banner above the chart. */
+  signalEntry?: string | null;
   /** Shown only when the screen is a pushed route rather than a tab. */
   onBack?: () => void;
 };
@@ -36,7 +38,7 @@ const HISTORY_LOAD_MORE_THRESHOLD = 320;
  * The trade screen's content: the chart, the order form, and the order management section, with the
  * symbol supplied by the tab route that owns the screen's only scroll view.
  */
-export function TradeRouteView({ symbol, name, decimals, onBack }: Props) {
+export function TradeRouteView({ symbol, name, decimals, signalEntry, onBack }: Props) {
   const styles = useStyles();
   // The order form reads this from the shared store too, so this is one `/accounts` request
   // shared by both consumers rather than one each.
@@ -70,6 +72,17 @@ export function TradeRouteView({ symbol, name, decimals, onBack }: Props) {
           >
             <Text style={styles.backText}>‹ Back</Text>
           </Pressable>
+        </View>
+      ) : null}
+      {signalEntry ? (
+        // Pinned above the chart so the posted price stays in view while the user sizes the
+        // order — the whole point of carrying it off the notification.
+        <View
+          style={styles.signalBanner}
+          accessibilityLabel={`Signal price ${signalEntry}`}
+        >
+          <Text style={styles.signalBannerLabel}>Signal price</Text>
+          <Text style={styles.signalBannerValue}>{signalEntry}</Text>
         </View>
       ) : null}
       {/* One scroll view for the whole screen, so the sections below the chart are added as
@@ -120,6 +133,29 @@ const useStyles = createThemedStyles((colors) => StyleSheet.create({
     color: colors.text,
     fontSize: 13,
     fontWeight: '600',
+  },
+  signalBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginHorizontal: spacing.md,
+    marginTop: spacing.sm,
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.md,
+    borderRadius: radius.sm,
+    backgroundColor: colors.surfaceAlt,
+    borderLeftWidth: 3,
+    borderLeftColor: colors.accent,
+  },
+  signalBannerLabel: {
+    color: colors.textMuted,
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  signalBannerValue: {
+    color: colors.text,
+    fontSize: 14,
+    fontWeight: '700',
   },
   scroll: {
     flex: 1,

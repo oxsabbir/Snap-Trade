@@ -49,10 +49,13 @@ export default function AccountScreen() {
     setSignalNameInput(signal.displayName);
   }
 
-  // With signal detection on, the display name is the signal source's (it mirrors into the
-  // native listener's SharedPreferences); with it off, the local profile label is used.
-  const displayName = SIGNAL_DETECTION_ENABLED ? signal.displayName : profile.displayName;
-  const setDisplayName = SIGNAL_DETECTION_ENABLED ? signal.setDisplayName : profile.setDisplayName;
+  // With signal detection on, the profile card shows the first configured source as a label
+  // (the full comma-separated list is edited only in the Signal Sources field below, so a
+  // rename there can never overwrite the list); with it off, the local profile label is used.
+  const displayName = SIGNAL_DETECTION_ENABLED
+    ? (signal.displayName.split(',')[0]?.trim() || signal.displayName)
+    : profile.displayName;
+  const setDisplayName = SIGNAL_DETECTION_ENABLED ? undefined : profile.setDisplayName;
 
   useEffect(() => {
     getKcsDiscountEnabled().then(setKcsEnabled);
@@ -169,12 +172,12 @@ export default function AccountScreen() {
 
           {SIGNAL_DETECTION_ENABLED ? (
             <View style={styles.signalSection}>
-              <Text style={styles.signalTitle}>Signal Source</Text>
+              <Text style={styles.signalTitle}>Signal Sources</Text>
               <View style={styles.signalRow}>
                 <View style={styles.signalInfo}>
                   <Text style={styles.signalTitle}>Detect Signals from Notifications</Text>
                   <Text style={styles.signalDesc}>
-                    When on, the app reads notifications from the X app to detect trading signals from your configured source.
+                    When on, the app reads notifications from the X app to detect trading signals from your configured sources.
                   </Text>
                 </View>
                 <Switch
@@ -186,24 +189,24 @@ export default function AccountScreen() {
                 />
               </View>
               <View style={styles.signalNameRow}>
-                <Text style={styles.signalNameLabel}>Display Name</Text>
+                <Text style={styles.signalNameLabel}>Sources</Text>
                 <View style={styles.signalNameInputWrapper}>
                   <TextInput
                     value={signalNameInput}
                     onChangeText={setSignalNameInput}
                     editable={signal.isEnabled}
                     style={[styles.signalNameInput, styles.signalNameInputFlex, !signal.isEnabled && styles.signalNameInputDisabled]}
-                    maxLength={24}
+                    maxLength={80}
                     autoCapitalize="words"
                     autoCorrect={false}
                     autoComplete="off"
-                    placeholder={signal.isLoading ? 'Loading...' : 'Enter display name'}
+                    placeholder={signal.isLoading ? 'Loading...' : 'e.g. Alpha Calls, Gem Hunter'}
                     placeholderTextColor={colors.textFaint}
-                    accessibilityLabel="Signal source display name"
+                    accessibilityLabel="Signal sources, comma-separated"
                   />
                   <Pressable
                     onPress={() => {
-                      const trimmed = signalNameInput.trim().slice(0, 24);
+                      const trimmed = signalNameInput.trim().slice(0, 80);
                       setSignalNameInput(trimmed);
                       signal.setDisplayName(trimmed);
                     }}
@@ -212,11 +215,12 @@ export default function AccountScreen() {
                       styles.signalSaveButton,
                       (!signal.isEnabled || signalNameInput.trim() === '') && styles.signalSaveButtonDisabled,
                     ]}
-                    accessibilityLabel="Save display name"
+                    accessibilityLabel="Save signal sources"
                   >
                     <Text style={styles.signalSaveButtonText}>Save</Text>
                   </Pressable>
                 </View>
+                <Text style={styles.signalDesc}>Separate each source&apos;s X display name with a comma.</Text>
               </View>
             </View>
           ) : null}

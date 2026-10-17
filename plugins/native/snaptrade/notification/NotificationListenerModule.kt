@@ -29,7 +29,9 @@ class NotificationListenerModule(reactContext: ReactApplicationContext) :
         private const val PREFS_KEY_ENABLED = "signal_detection_enabled"
         private const val PREFS_KEY_DISPLAY_NAME = "signal_source_display_name"
         private const val DEFAULT_DISPLAY_NAME = "My Signal Source"
-        private const val MAX_DISPLAY_NAME_LENGTH = 24
+
+        /** Wide enough for several comma-separated sources ("Alpha Calls, Gem Hunter, ..."). */
+        private const val MAX_DISPLAY_NAME_LENGTH = 80
 
         @Volatile
         var instance: NotificationListenerModule? = null

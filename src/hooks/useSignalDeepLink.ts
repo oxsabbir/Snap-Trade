@@ -25,14 +25,18 @@ export function useSignalDeepLink(): void {
 
     const subscription = Linking.addEventListener('url', ({ url }) => {
       if (!url || lastHandledRef.current === url) return;
-      const symbol = parseTradeSignalUrl(url);
-      if (!symbol) return;
+      const signal = parseTradeSignalUrl(url);
+      if (!signal) return;
 
       lastHandledRef.current = url;
-      snapLog('DeepLink', `runtime intent ${symbol}`);
+      snapLog('DeepLink', `runtime intent ${signal.symbol}`);
 
       try {
-        router.navigate({ pathname: '/trade/[symbol]', params: { symbol } });
+        router.navigate({
+          pathname: '/trade/[symbol]',
+          // `entry` is undefined for TP-format signals; only gem posts carry a price.
+          params: { symbol: signal.symbol, ...(signal.entry ? { entry: signal.entry } : {}) },
+        });
       } catch {
         // The navigator may not be mounted for a beat on a very early intent; the launch URL
         // path still lands the user on the screen.

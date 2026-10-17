@@ -8,11 +8,16 @@ export type XNotification = {
   packageName: string;
 };
 
+export type SignalFormat = 'tp' | 'gem';
+
 export type SignalCheckResult = {
   isSignal: boolean;
+  format: SignalFormat | null;
   ticker: string | null;
   tp1: number | null;
   tpCount: number;
+  /** Market price from a gem-format post, as the plain decimal string it was posted as. */
+  entry: string | null;
 };
 
 function normalizeNumber(str: string): number | null {
@@ -59,11 +64,23 @@ function extractTPs(text: string): number[] {
   return tps;
 }
 
+/**
+ * Gem-format anchor, mirroring the native listener: the constant marker phrase plus a
+ * `Current market price - X $` line. Returns the price as the plain posted decimal string.
+ */
+function extractGemEntry(text: string): string | null {
+  if (!/buying\s+this\s+gem\s+on\s+#?kucoin/i.test(text)) return null;
+  const match = text.match(/current\s+market\s+price\s*[-–:]?\s*([\d.,]+)/i);
+  if (!match) return null;
+  const normalized = match[1].replace(',', '.');
+  return /^\d+(\.\d+)?$/.test(normalized) ? normalized : null;
+}
+
 export function checkForSignal(notification: XNotification): SignalCheckResult {
   const primaryText = notification.bigText?.trim() || notification.text?.trim() || '';
-  
+
   if (!primaryText) {
-    return { isSignal: false, ticker: null, tp1: null, tpCount: 0 };
+    return { isSignal: false, format: null, ticker: null, tp1: null, tpCount: 0, entry: null };
   }
 
   const ticker = extractTicker(primaryText);
@@ -71,7 +88,11 @@ export function checkForSignal(notification: XNotification): SignalCheckResult {
   const tpCount = tps.length;
   const tp1 = tps[0] ?? null;
 
-  const isSignal = ticker !== null && tpCount >= 3;
+  // Format 1: cashtag + ≥3 numbered TPs. Format 2 (gem posts): cashtag + marker + market
+  // price — the trailing cashtag list in gem posts is a decoy; only the first cashtag counts.
+  const entry = tpCount >= 3 ? null : extractGemEntry(primaryText);
+  const format: SignalFormat | null = tpCount >= 3 ? 'tp' : entry !== null ? 'gem' : null;
+  const isSignal = ticker !== null && format !== null;
 
-  return { isSignal, ticker, tp1, tpCount };
+  return { isSignal, format, ticker, tp1, tpCount, entry };
 }
