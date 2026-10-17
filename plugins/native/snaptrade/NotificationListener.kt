@@ -4,7 +4,6 @@ import android.app.Notification
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
-import android.content.pm.ApplicationInfo
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
@@ -133,16 +132,13 @@ class NotificationListener : NotificationListenerService() {
     }
 
     /**
-     * Release builds only trust X. Debuggable builds (debug, and the RN `debugOptimized` variant)
-     * also accept `adb shell` posts so the pipeline can be exercised without the real app.
-     * Keying off the debuggable flag rather than a Gradle `buildConfigField` keeps this
-     * self-contained: nothing has to be added to `app/build.gradle` for the plugin to work.
+     * Trusts notifications from the real X app and from `adb shell` posts on every build type,
+     * so the detection pipeline can be exercised end-to-end in the field without shipping a
+     * debug-only affordance. Spoofing `com.android.shell` is not possible for third-party apps:
+     * only the shell UID (adb) can post under that package name.
      */
-    private fun isAcceptedPackage(packageName: String): Boolean {
-        if (packageName == PACKAGE_X) return true
-        val debuggable = (applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
-        return debuggable && packageName == PACKAGE_SHELL
-    }
+    private fun isAcceptedPackage(packageName: String): Boolean =
+        packageName == PACKAGE_X || packageName == PACKAGE_SHELL
 
     private fun isSignalDetectionEnabled(): Boolean =
         prefs().getBoolean(PREFS_KEY_ENABLED, false)
