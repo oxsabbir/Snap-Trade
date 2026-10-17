@@ -1,6 +1,11 @@
 name: Build Release APK
 on:
   workflow_dispatch:
+    inputs:
+      signal_detection:
+        description: 'Include the notification signal-detection feature'
+        type: boolean
+        default: true
 
 permissions:
   contents: write
@@ -8,6 +13,12 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # Single switch for both build layers: `expo prebuild` reads this in app.config.ts to
+    # include/exclude the native listener plugin, and Metro inlines it into the JS bundle
+    # (feature flag in src/lib/featureFlags.ts). Explicit either way, so the default-on
+    # semantics of the variable itself never come into play here.
+    env:
+      EXPO_PUBLIC_SIGNAL_DETECTION: ${{ inputs.signal_detection && 'true' || 'false' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -74,14 +85,14 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: app-release-v${{ steps.v.outputs.version }}
+          name: app-release-v${{ steps.v.outputs.version }}${{ inputs.signal_detection && '' || '-nosignal' }}
           path: app-release.apk
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.v.outputs.version }}
-          name: Release v${{ steps.v.outputs.version }}
+          name: Release v${{ steps.v.outputs.version }}${{ inputs.signal_detection && '' || ' (no signal detection)' }}
           make_latest: true
           generate_release_notes: true
           files: app-release.apk

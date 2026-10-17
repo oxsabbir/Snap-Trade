@@ -1,4 +1,4 @@
-import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AssetList } from '@/components/AssetList';
@@ -6,6 +6,8 @@ import { AccountIcon } from '@/components/Icons';
 import { ProfileCard } from '@/components/ProfileCard';
 import { useAccount } from '@/hooks/useAccount';
 import { useProfile } from '@/hooks/useProfile';
+import { useSignalSource } from '@/hooks/useSignalSource';
+import { SIGNAL_DETECTION_ENABLED } from '@/lib/featureFlags';
 import { useApiCredentials, type OnboardingEntry } from '@/state/apiCredentials';
 import { getKcsDiscountEnabled, setKcsDiscountEnabled } from '@/state/kcsDiscount';
 import { radius, spacing } from '@/theme';
@@ -26,13 +28,31 @@ const THEME_OPTIONS: { value: ThemePreference; label: string }[] = [
 
 export default function AccountScreen() {
   const { status, portfolio, accountInfo, lastUpdated, error, refresh } = useAccount();
-  const { displayName, setDisplayName } = useProfile();
+  const profile = useProfile();
+  // Always mounted so its hydration/mirroring logic stays Rules-of-Hooks-safe; with signal
+  // detection stripped the native module is absent, so the mirror is a no-op.
+  const signal = useSignalSource();
   const { apiKey, disconnect } = useApiCredentials();
   const { colors, preference, setPreference } = useTheme();
   const styles = useStyles();
   const [accountAction, setAccountAction] = useState<OnboardingEntry | null>(null);
   const [accountActionError, setAccountActionError] = useState<string | null>(null);
   const [kcsEnabled, setKcsEnabled] = useState(false);
+  const [signalNameInput, setSignalNameInput] = useState(signal.displayName);
+  // Re-sync the input when the hook finishes hydrating the stored name (or the user saves a
+  // new one). Adjusted during render rather than in an effect: the derived-from-previous-state
+  // guard is the pattern React recommends for keeping a controlled input in step with state
+  // that changes underneath it.
+  const [prevSignalName, setPrevSignalName] = useState(signal.displayName);
+  if (signal.displayName !== prevSignalName) {
+    setPrevSignalName(signal.displayName);
+    setSignalNameInput(signal.displayName);
+  }
+
+  // With signal detection on, the display name is the signal source's (it mirrors into the
+  // native listener's SharedPreferences); with it off, the local profile label is used.
+  const displayName = SIGNAL_DETECTION_ENABLED ? signal.displayName : profile.displayName;
+  const setDisplayName = SIGNAL_DETECTION_ENABLED ? signal.setDisplayName : profile.setDisplayName;
 
   useEffect(() => {
     getKcsDiscountEnabled().then(setKcsEnabled);
@@ -146,6 +166,60 @@ export default function AccountScreen() {
               </Text>
             ) : null}
           </View>
+
+          {SIGNAL_DETECTION_ENABLED ? (
+            <View style={styles.signalSection}>
+              <Text style={styles.signalTitle}>Signal Source</Text>
+              <View style={styles.signalRow}>
+                <View style={styles.signalInfo}>
+                  <Text style={styles.signalTitle}>Detect Signals from Notifications</Text>
+                  <Text style={styles.signalDesc}>
+                    When on, the app reads notifications from the X app to detect trading signals from your configured source.
+                  </Text>
+                </View>
+                <Switch
+                  value={signal.isEnabled}
+                  onValueChange={signal.setIsEnabled}
+                  disabled={signal.isLoading}
+                  trackColor={{ false: colors.surfaceAlt, true: colors.up }}
+                  thumbColor={signal.isEnabled ? '#FFFFFF' : colors.text}
+                />
+              </View>
+              <View style={styles.signalNameRow}>
+                <Text style={styles.signalNameLabel}>Display Name</Text>
+                <View style={styles.signalNameInputWrapper}>
+                  <TextInput
+                    value={signalNameInput}
+                    onChangeText={setSignalNameInput}
+                    editable={signal.isEnabled}
+                    style={[styles.signalNameInput, styles.signalNameInputFlex, !signal.isEnabled && styles.signalNameInputDisabled]}
+                    maxLength={24}
+                    autoCapitalize="words"
+                    autoCorrect={false}
+                    autoComplete="off"
+                    placeholder={signal.isLoading ? 'Loading...' : 'Enter display name'}
+                    placeholderTextColor={colors.textFaint}
+                    accessibilityLabel="Signal source display name"
+                  />
+                  <Pressable
+                    onPress={() => {
+                      const trimmed = signalNameInput.trim().slice(0, 24);
+                      setSignalNameInput(trimmed);
+                      signal.setDisplayName(trimmed);
+                    }}
+                    disabled={!signal.isEnabled || signalNameInput.trim() === ''}
+                    style={[
+                      styles.signalSaveButton,
+                      (!signal.isEnabled || signalNameInput.trim() === '') && styles.signalSaveButtonDisabled,
+                    ]}
+                    accessibilityLabel="Save display name"
+                  >
+                    <Text style={styles.signalSaveButtonText}>Save</Text>
+                  </Pressable>
+                </View>
+              </View>
+            </View>
+          ) : null}
 
           <View style={styles.kcsSection}>
             <View style={styles.kcsRow}>
@@ -337,6 +411,82 @@ const useStyles = createThemedStyles((colors) =>
       color: colors.downText,
       fontSize: 12,
       lineHeight: 17,
+    },
+    signalSection: {
+      marginTop: spacing.lg,
+      marginBottom: spacing.xl,
+      paddingTop: spacing.md,
+      borderTopColor: colors.border,
+      borderTopWidth: StyleSheet.hairlineWidth,
+    },
+    signalTitle: {
+      color: colors.text,
+      fontSize: 14,
+      fontWeight: '600',
+      marginBottom: spacing.sm,
+    },
+    signalRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingVertical: spacing.xs,
+    },
+    signalInfo: {
+      flex: 1,
+    },
+    signalDesc: {
+      color: colors.textMuted,
+      fontSize: 12,
+      marginTop: 2,
+    },
+    signalNameRow: {
+      marginTop: spacing.sm,
+      gap: spacing.sm,
+    },
+    signalNameLabel: {
+      color: colors.textFaint,
+      fontSize: 10,
+      fontWeight: '700',
+      marginBottom: 4,
+    },
+    signalNameInput: {
+      backgroundColor: colors.surfaceAlt,
+      borderRadius: radius.sm,
+      paddingHorizontal: spacing.sm,
+      paddingVertical: spacing.xs,
+      color: colors.text,
+      fontSize: 14,
+      fontWeight: '600',
+    },
+    signalNameInputWrapper: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.xs,
+    },
+    signalNameInputFlex: {
+      flex: 3,
+    },
+    signalSaveButton: {
+      flex: 1,
+      height: 36,
+      borderRadius: radius.sm,
+      backgroundColor: colors.up,
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingHorizontal: spacing.xs,
+    },
+    signalSaveButtonDisabled: {
+      opacity: 0.4,
+      backgroundColor: colors.surfaceAlt,
+    },
+    signalSaveButtonText: {
+      color: colors.onAccent,
+      fontSize: 12,
+      fontWeight: '700',
+    },
+    signalNameInputDisabled: {
+      opacity: 0.4,
+      backgroundColor: colors.surfaceAlt,
     },
     kcsSection: {
       marginTop: spacing.lg,

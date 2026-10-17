@@ -16,8 +16,20 @@
         "buildType": "apk"
       }
     },
+    "preview-nosignal": {
+      "extends": "preview",
+      "env": {
+        "EXPO_PUBLIC_SIGNAL_DETECTION": "false"
+      }
+    },
     "production": {
       "autoIncrement": true
+    },
+    "production-nosignal": {
+      "extends": "production",
+      "env": {
+        "EXPO_PUBLIC_SIGNAL_DETECTION": "false"
+      }
     }
   }
 }
