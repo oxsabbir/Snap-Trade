@@ -30,9 +30,29 @@ npx expo start --ios    # or --android / --web
 npx tsc --noEmit        # typecheck
 npx expo lint           # eslint
 npx expo-doctor         # diagnose config/dep issues
+npm run bump <kind>     # bump app version (major|minor|patch|X.Y.Z)
 ```
 
 Both `typecheck` and `lint` pass clean as of the last commit.
+
+## Releasing
+
+The app version lives in `app.json`: `expo.version` is the SemVer, with `android.versionCode` and
+`ios.buildNumber` as monotonic build numbers. Bump it, commit, then run the GitHub Actions
+workflow — CI reads the version, builds the signed APK, and publishes a GitHub Release whose tag
+matches the APK's `versionName`.
+
+```bash
+npm run bump minor        # 1.0.0 -> 1.1.0, versionCode 1 -> 2, buildNumber "1" -> "2"
+npm run bump 2.0.0        # or set an explicit SemVer
+git commit -am "chore(release): v1.1.0"
+git push origin main
+```
+
+Then: GitHub → **Actions** → **Build Release APK** → **Run workflow** (branch `main`). The run
+creates release `v1.1.0` for that exact commit with the signed `app-release.apk` attached and
+auto-generated notes from the commit history. The workflow aborts if the tag already exists, so
+bump before rebuilding.
 
 ## Layout
 

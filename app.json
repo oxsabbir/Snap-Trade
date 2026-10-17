@@ -8,10 +8,12 @@
     "userInterfaceStyle": "dark",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.oxsabbir.snaptrade"
+      "bundleIdentifier": "com.oxsabbir.snaptrade",
+      "buildNumber": "1"
     },
     "android": {
       "package": "com.oxsabbir.snaptrade",
+      "versionCode": 1,
       "adaptiveIcon": {
         "backgroundColor": "#4782FF",
         "foregroundImage": "./assets/branding/adaptive-foreground.png"
