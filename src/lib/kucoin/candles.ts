@@ -62,8 +62,12 @@ async function fetchCandleWindow(
   return rows.map(toCandle).reverse();
 }
 
-/** Candles fetched on first paint. Deliberately small; older ones page in on demand. */
-export const INITIAL_CANDLES = 40;
+/**
+ * Candles fetched on first paint. Deliberately a little more than the default viewport shows:
+ * the surplus rests off the left edge, already loaded and packed, so the first backward drag is
+ * as smooth as a paged-in one instead of stalling at the end of the series.
+ */
+export const INITIAL_CANDLES = 60;
 /** Candles fetched per older-history page as the user drags back. */
 export const OLDER_PAGE_SIZE = 100;
 /**

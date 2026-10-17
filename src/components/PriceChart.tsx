@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { StyleSheet, Text, View, type LayoutChangeEvent } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import {
@@ -36,13 +36,18 @@ const PRICE_LABELS = 8;
 const AXIS_LABEL_HEIGHT = 12;
 const X_LABELS = 4;
 const MIN_VISIBLE = 20;
-const DEFAULT_SPAN = 50;
 /**
- * How close the window's left edge may come to the oldest loaded candle before the next page is
- * requested, in candles. Fetches slightly ahead of the edge so the drag never stalls at the end
- * of the loaded series.
+ * Window width on first paint, in slots. A tenth of it is the right-hand pad (see `RIGHT_PAD`),
+ * so this shows roughly thirty-six candles; the surplus of an `INITIAL_CANDLES` fetch waits off
+ * the left edge, already rendered.
  */
-const PRELOAD_CANDLES = 8;
+const DEFAULT_SPAN = 40;
+/**
+ * How close the window's left edge must come to the oldest loaded candle before the next page is
+ * requested, in candles. Zero means the oldest candle has to actually reach the edge: nothing is
+ * fetched until the user has scrolled the loaded series all the way to its start.
+ */
+const PRELOAD_CANDLES = 0;
 const CANDLE_BODY_RATIO = 0.72;
 const HAIRLINE = StyleSheet.hairlineWidth;
 /** Horizontal travel before a drag starts moving the window. */
@@ -365,6 +370,8 @@ function PriceChartComponent({
   /** Oldest/newest candle times, read by `commit` without depending on the candles array. */
   const oldestValue = useSharedValue(0);
   const newestValue = useSharedValue(0);
+  /** 1 while a pan or pinch owns the window, so background re-renders leave `startValue` alone. */
+  const gestureActive = useSharedValue(0);
 
   /**
    * The window to draw, derived during render rather than pushed into state by an effect.
@@ -406,10 +413,60 @@ function PriceChartComponent({
   useEffect(() => {
     plotHeight.set(priceHeight);
   }, [priceHeight, plotHeight]);
+  /**
+   * Mirrors the settled viewport into the shared window. Older history is prepended by shifting
+   * `startValue` by the same number of candles rather than resetting it to the settled start:
+   * resetting drops whatever offset an in-progress drag had (rubber-band past the edge, or a pan
+   * that has not committed yet), which read as the chart snapping back the instant a page landed.
+   * A change that is neither a prepend nor a new series is also skipped while a gesture owns the
+   * window, so a background re-render cannot fight the finger; the commit reconciles it instead.
+   */
+  const priorSeries = useRef({
+    key: resetKey as string | undefined,
+    count,
+    oldest: firstTime,
+    newest: lastTime,
+  });
   useEffect(() => {
+    const prior = priorSeries.current;
+    const newSeries = prior.key !== resetKey;
+    priorSeries.current = {
+      key: resetKey,
+      count,
+      oldest: firstTime,
+      newest: lastTime,
+    };
     spanValue.set(settledSpan);
+    if (newSeries) {
+      // A gesture never spans a series change; reset the counter in case one leaked.
+      gestureActive.set(0);
+      startValue.set(settledStart);
+      return;
+    }
+    const prepended =
+      prior.count > 0 &&
+      count > prior.count &&
+      lastTime === prior.newest &&
+      firstTime < prior.oldest;
+    if (prepended) {
+      startValue.set(startValue.get() + (count - prior.count));
+      return;
+    }
+    // Leave an in-flight gesture's window alone; it is already positioned by the finger and
+    // will be reconciled when the gesture commits.
+    if (gestureActive.get() > 0) return;
     startValue.set(settledStart);
-  }, [settledSpan, settledStart, spanValue, startValue]);
+  }, [
+    count,
+    firstTime,
+    gestureActive,
+    lastTime,
+    resetKey,
+    settledSpan,
+    settledStart,
+    spanValue,
+    startValue,
+  ]);
 
   /**
    * Re-pack whenever `candles` changes identity.
@@ -797,6 +854,7 @@ function PriceChartComponent({
         .failOffsetY(PAN_FAIL_Y)
         .onBegin(() => {
           panLast.set(0);
+          gestureActive.set(gestureActive.get() + 1);
         })
         // Cleared on activation rather than on touch-down: a tap that never becomes a drag used
         // to clear the crosshair first and immediately re-select it, which made tapping the same
@@ -818,10 +876,10 @@ function PriceChartComponent({
           // whole of its travel and the stop is felt as a soft wall rather than a dead end.
           const raw = startValue.get() - dx * perPixel;
           startValue.set(resistedStart(raw, maxStart, span * OVERSCROLL));
-          // Coming within PRELOAD_CANDLES of the oldest loaded candle asks for the next page;
-          // once older candles land the window is pushed back into the series, so this re-arms and
-          // the drag keeps going. `raw < maxStart` keeps a window that already spans the whole
-          // series from paging in history the user never scrolled towards.
+          // Reaching the oldest loaded candle (within PRELOAD_CANDLES of it) asks for the next
+          // page; once older candles land the window is pushed back into the series, so this
+          // re-arms and the drag keeps going. `raw < maxStart` keeps a window that already spans
+          // the whole series from paging in history the user never scrolled towards.
           if (raw <= PRELOAD_CANDLES && raw < maxStart) {
             if (onLoadOlder && panLoadArmed.get() === 0) {
               panLoadArmed.set(1);
@@ -832,6 +890,7 @@ function PriceChartComponent({
           }
         })
         .onFinalize(() => {
+          gestureActive.set(Math.max(0, gestureActive.get() - 1));
           const span = spanValue.get();
           const maxStart = maxStartFor(countValue.get(), span);
           const current = startValue.get();
@@ -853,6 +912,7 @@ function PriceChartComponent({
       clearActive,
       commit,
       countValue,
+      gestureActive,
       onLoadOlder,
       panLast,
       panLoadArmed,
@@ -866,6 +926,7 @@ function PriceChartComponent({
     () =>
       Gesture.Pinch()
         .onBegin((event) => {
+          gestureActive.set(gestureActive.get() + 1);
           pinchSpan.set(spanValue.get());
           pinchStart.set(startValue.get());
           pinchFocal.set(
@@ -892,12 +953,14 @@ function PriceChartComponent({
           spanValue.set(span);
         })
         .onFinalize(() => {
+          gestureActive.set(Math.max(0, gestureActive.get() - 1));
           runOnJS(commit)();
         }),
     [
       clearActive,
       commit,
       countValue,
+      gestureActive,
       pinchFocal,
       pinchSpan,
       pinchStart,

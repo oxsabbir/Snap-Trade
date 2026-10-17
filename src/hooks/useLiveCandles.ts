@@ -8,6 +8,11 @@ import {
   type TimeframeOrLine,
 } from '@/lib/kucoin/candles';
 import { createGenerationGuard } from '@/lib/generation';
+import {
+  mergeInitialCandles,
+  prependOlderCandles,
+  type CandleSeries,
+} from '@/lib/kucoin/candleSeries';
 import type { TickerUpdate } from '@/lib/kucoin/socket';
 import type { Candle } from '@/lib/kucoin/types';
 import { getTicker, subscribeTicker } from '@/state/ticker';
@@ -40,7 +45,7 @@ export type LiveCandlesState = {
  * volume — and exposes no display state of its own.
  *
  * The subscription is deliberately not `useTicker`. Reading the snapshot here would re-render
- * this hook on every tick *as well as* re-rendering it from `setCandles`, so the chart would
+ * this hook on every tick *as well as* re-rendering it from `setSeries`, so the chart would
  * commit twice per tick.
  */
 export function useLiveCandles(
@@ -48,12 +53,19 @@ export function useLiveCandles(
   timeframe: TimeframeOrLine,
   enabled = true
 ): LiveCandlesState {
-  const [candles, setCandles] = useState<Candle[]>([]);
+  // The series and its identity are one piece of state, so a symbol switch resets the candles
+  // and the key together and no async write can merge across the two. Kept as an object rather
+  // than two state values because the merge below has to compare the key the *candles* belong
+  // to, not the key the hook is currently rendering with.
+  const [series, setSeries] = useState<CandleSeries>(() => ({
+    key: `${symbol}:${timeframe.key}`,
+    candles: [],
+  }));
+  const candles = series.candles;
   const [seedPrice, setSeedPrice] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(true);
-  const [activeKey, setActiveKey] = useState(`${symbol}:${timeframe.key}`);
   const mountedRef = useRef(true);
   const bucketRef = useRef(0);
   // The loaded series, readable from callbacks that must not close over `candles` (which would
@@ -73,9 +85,8 @@ export function useLiveCandles(
   // it is handled there too — a subscriber asking for the incoming pair gets that pair's
   // entry, which starts empty, rather than the outgoing pair's last price.
   const key = `${symbol}:${timeframe.key}`;
-  if (key !== activeKey) {
-    setActiveKey(key);
-    setCandles([]);
+  if (key !== series.key) {
+    setSeries({ key, candles: [] });
     setSeedPrice(null);
     setError(null);
     setHasMore(true);
@@ -99,13 +110,13 @@ export function useLiveCandles(
       (next) => {
         if (!mountedRef.current || !guard.isCurrent(token)) return;
         // Keep already-loaded older candles and replace only the recent tail, so a bucket
-        // rollover refetch does not throw away history the user paged in.
-        setCandles((previous) => {
-          if (next.length === 0) return previous;
-          const oldest = next[0]!.time;
-          const older = previous.filter((candle) => candle.time < oldest);
-          const merged = older.length > 0 ? [...older, ...next] : next;
-          seriesRef.current = merged;
+        // rollover refetch does not throw away history the user paged in. But only merge when
+        // the loaded candles belong to this same pair: a symbol switch can render the new key
+        // while `series` still holds the outgoing pair's candles, and folding the incoming page
+        // onto those is what made a freshly opened pair show the previous pair's history.
+        setSeries((previous) => {
+          const merged = mergeInitialCandles(key, next, previous);
+          seriesRef.current = merged.candles;
           return merged;
         });
         setError(null);
@@ -122,7 +133,7 @@ export function useLiveCandles(
         setIsLoading(false);
       }
     );
-  }, [enabled, guard, periodMs, symbol, timeframe]);
+  }, [enabled, guard, key, periodMs, symbol, timeframe]);
 
   /**
    * Prepends the next older page of candles, for the chart's scroll-back. Safe to call
@@ -158,12 +169,9 @@ export function useLiveCandles(
           hasMoreRef.current = false;
           setHasMore(false);
         }
-        setCandles((previous) => {
-          const oldest = previous.length > 0 ? previous[0]!.time : Number.POSITIVE_INFINITY;
-          const add = older.filter((candle) => candle.time < oldest);
-          if (add.length === 0) return previous;
-          const merged = [...add, ...previous];
-          seriesRef.current = merged;
+        setSeries((previous) => {
+          const merged = prependOlderCandles(key, older, previous);
+          seriesRef.current = merged.candles;
           return merged;
         });
       },
@@ -171,7 +179,7 @@ export function useLiveCandles(
         loadingOlderRef.current = false;
       }
     );
-  }, [enabled, guard, symbol, timeframe]);
+  }, [enabled, guard, key, symbol, timeframe]);
 
   // Deliberately no `update.symbol` check here. `tickRef` is refreshed in an effect, so just
   // after a symbol switch it still holds the previous symbol's closure and a stale tick would
@@ -193,8 +201,11 @@ export function useLiveCandles(
         return;
       }
 
-      setCandles((previous) => {
-        const last = previous[previous.length - 1];
+      setSeries((previous) => {
+        // A tick for the outgoing pair can still arrive on the old subscription; never let it
+        // rewrite the incoming pair's forming candle.
+        if (previous.key !== key) return previous;
+        const last = previous.candles[previous.candles.length - 1];
         if (!last) return previous;
         const close = update.price;
         const high = Math.max(last.high, close);
@@ -202,22 +213,25 @@ export function useLiveCandles(
         // A tick that moves nothing returns the same array, so a quiet market does not commit
         // five times a second to redraw an identical chart.
         if (last.close === close && last.high === high && last.low === low) return previous;
-        return [
-          ...previous.slice(0, -1),
-          {
-            ...last,
-            close,
-            high,
-            low,
-            // `size` is base-currency volume and KuCoin's candle volume is base too,
-            // so turnover follows as size x price in quote currency.
-            volume: last.volume + update.size,
-            turnover: last.turnover + update.size * close,
-          },
-        ];
+        return {
+          key,
+          candles: [
+            ...previous.candles.slice(0, -1),
+            {
+              ...last,
+              close,
+              high,
+              low,
+              // `size` is base-currency volume and KuCoin's candle volume is base too,
+              // so turnover follows as size x price in quote currency.
+              volume: last.volume + update.size,
+              turnover: last.turnover + update.size * close,
+            },
+          ],
+        };
       });
     },
-    [enabled, fetchHistory, periodMs]
+    [enabled, fetchHistory, key, periodMs]
   );
 
   const tickRef = useRef(handleTick);
