@@ -1,7 +1,9 @@
 import { Pressable, StyleSheet, TextInput, View } from 'react-native';
 
 import { CloseIcon, SearchIcon } from '@/components/Icons';
-import { colors, radius, spacing } from '@/theme';
+import { radius, spacing } from '@/theme';
+import { useTheme } from '@/theme/ThemeProvider';
+import { createThemedStyles } from '@/theme/themedStyles';
 
 type Props = {
   value: string;
@@ -20,6 +22,8 @@ export function SearchBar({
   onSubmit,
   placeholder = 'Search coin',
 }: Props) {
+  const { colors, scheme } = useTheme();
+  const styles = useStyles();
   return (
     <View style={styles.container}>
       <View style={styles.leadingIcon}>
@@ -33,6 +37,7 @@ export function SearchBar({
         onSubmitEditing={onSubmit}
         placeholder={placeholder}
         placeholderTextColor={colors.textFaint}
+        keyboardAppearance={scheme === 'dark' ? 'dark' : 'light'}
         style={styles.input}
         autoCapitalize="none"
         autoCorrect={false}
@@ -55,25 +60,27 @@ export function SearchBar({
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.surfaceAlt,
-    borderRadius: radius.md,
-    height: 40,
-    paddingHorizontal: spacing.md,
-  },
-  leadingIcon: {
-    marginRight: spacing.sm,
-  },
-  input: {
-    flex: 1,
-    color: colors.text,
-    fontSize: 14,
-    padding: 0,
-  },
-  trailingIcon: {
-    marginLeft: spacing.sm,
-  },
-});
+const useStyles = createThemedStyles((colors) =>
+  StyleSheet.create({
+    container: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: colors.surfaceAlt,
+      borderRadius: radius.md,
+      height: 40,
+      paddingHorizontal: spacing.md,
+    },
+    leadingIcon: {
+      marginRight: spacing.sm,
+    },
+    input: {
+      flex: 1,
+      color: colors.text,
+      fontSize: 14,
+      padding: 0,
+    },
+    trailingIcon: {
+      marginLeft: spacing.sm,
+    },
+  }),
+);

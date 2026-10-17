@@ -7,7 +7,9 @@ import { StarIcon } from '@/components/Icons';
 import { RangeBar } from '@/components/RangeBar';
 import type { SpotMarket } from '@/lib/kucoin/types';
 import { useSetActiveCoin } from '@/state/activeCoin';
-import { colors, spacing } from '@/theme';
+import { spacing } from '@/theme';
+import { useTheme } from '@/theme/ThemeProvider';
+import { createThemedStyles } from '@/theme/themedStyles';
 import { formatCompact, formatPercent, formatPrice } from '@/utils/format';
 
 type Props = {
@@ -19,8 +21,10 @@ type Props = {
 };
 
 function SpotRowComponent({ market, isFavorite, onToggleFavorite, onOpen }: Props) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const isUp = market.changePercent >= 0;
-  const changeColor = isUp ? colors.up : colors.down;
+  const changeColor = isUp ? colors.upText : colors.downText;
   const volume = `Vol ${formatCompact(market.quoteVolume)} ${market.quote}`;
   const subtitle = market.baseName !== market.base ? `${market.baseName} · ${volume}` : volume;
   const setActiveCoin = useSetActiveCoin();
@@ -61,7 +65,7 @@ function SpotRowComponent({ market, isFavorite, onToggleFavorite, onOpen }: Prop
           <View
             style={[
               styles.changePill,
-              { backgroundColor: isUp ? 'rgba(35,175,137,0.14)' : 'rgba(246,70,93,0.14)' },
+              { backgroundColor: isUp ? colors.upFill : colors.downFill },
             ]}
           >
             <Text style={[styles.change, { color: changeColor }]}>
@@ -89,53 +93,55 @@ function SpotRowComponent({ market, isFavorite, onToggleFavorite, onOpen }: Prop
 
 export const SpotRow = memo(SpotRowComponent);
 
-const styles = StyleSheet.create({
-  pressable: {
-    flexDirection: 'row',
-  },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: spacing.md,
-    gap: spacing.md,
-    flex: 1,
-  },
-  identity: {
-    flex: 1,
-    gap: 2,
-  },
-  symbol: {
-    color: colors.text,
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  subtitle: {
-    color: colors.textFaint,
-    fontSize: 11,
-  },
-  priceBlock: {
-    alignItems: 'flex-end',
-    gap: 4,
-  },
-  price: {
-    color: colors.text,
-    fontSize: 15,
-    fontWeight: '600',
-    fontVariant: ['tabular-nums'],
-  },
-  changePill: {
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-    minWidth: 64,
-    alignItems: 'center',
-  },
-  change: {
-    fontSize: 11,
-    fontWeight: '600',
-    fontVariant: ['tabular-nums'],
-  },
-  star: {
-    paddingLeft: 2,
-  },
-});
+const useStyles = createThemedStyles((colors) =>
+  StyleSheet.create({
+    pressable: {
+      flexDirection: 'row',
+    },
+    row: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingVertical: spacing.md,
+      gap: spacing.md,
+      flex: 1,
+    },
+    identity: {
+      flex: 1,
+      gap: 2,
+    },
+    symbol: {
+      color: colors.text,
+      fontSize: 15,
+      fontWeight: '600',
+    },
+    subtitle: {
+      color: colors.textFaint,
+      fontSize: 11,
+    },
+    priceBlock: {
+      alignItems: 'flex-end',
+      gap: 4,
+    },
+    price: {
+      color: colors.text,
+      fontSize: 15,
+      fontWeight: '600',
+      fontVariant: ['tabular-nums'],
+    },
+    changePill: {
+      paddingHorizontal: 6,
+      paddingVertical: 2,
+      borderRadius: 4,
+      minWidth: 64,
+      alignItems: 'center',
+    },
+    change: {
+      fontSize: 11,
+      fontWeight: '600',
+      fontVariant: ['tabular-nums'],
+    },
+    star: {
+      paddingLeft: 2,
+    },
+  }),
+);

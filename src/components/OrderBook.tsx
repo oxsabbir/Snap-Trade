@@ -12,7 +12,9 @@ import { useLevel2Book } from "@/hooks/useLevel2Book";
 import { useOrderBook } from "@/hooks/useOrderBook";
 import { useSymbolRules } from "@/hooks/useSymbolRules";
 import { aggregationOptions, VISIBLE_LEVELS, type DepthRow } from "@/lib/kucoin/orderbook";
-import { colors, radius, spacing } from "@/theme";
+import { radius, spacing } from "@/theme";
+import { useTheme } from "@/theme/ThemeProvider";
+import { createThemedStyles } from "@/theme/themedStyles";
 import { decimalsFromIncrement, formatCompactSize, formatPrice } from "@/utils/format";
 
 export type OrderBookViewMode = "split" | "bids" | "asks";
@@ -44,9 +46,10 @@ const DepthRowView = memo(function DepthRowView({
   sizeDecimals,
   onPress,
 }: RowProps) {
-  const priceColor = side === "ask" ? colors.down : colors.up;
-  const fill =
-    side === "ask" ? "rgba(246,70,93,0.16)" : "rgba(35,175,137,0.16)";
+  const { colors } = useTheme();
+  const styles = useStyles();
+  const priceColor = side === "ask" ? colors.downText : colors.upText;
+  const fill = side === "ask" ? colors.downFill : colors.upFill;
   return (
     // `onPress` fires on release, not on touch-down, and that is deliberate. The rows sit
     // inside the screen's scroll view, so firing on press-in would fill the form every time
@@ -92,6 +95,8 @@ const DepthRowView = memo(function DepthRowView({
  * that subscribes to the price itself.
  */
 function OrderBookBase({ symbol, onPriceSelect }: Props) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const { snapshot } = useLevel2Book(symbol);
   const { rules } = useSymbolRules(symbol);
   const [baseCurrency = "", quoteCurrency = ""] = symbol.split("-");
@@ -267,163 +272,165 @@ function OrderBookBase({ symbol, onPriceSelect }: Props) {
 
 export const OrderBook = memo(OrderBookBase);
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  header: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingBottom: spacing.xs,
-  },
-  headerText: {
-    color: colors.textFaint,
-    fontSize: 9,
-    fontWeight: "700",
-    letterSpacing: 0.3,
-  },
-  headerRight: {
-    textAlign: "right",
-  },
-  // Each side grows into whatever height the taller column leaves it, anchored against the middle
-  // price band: asks sit on top of it and bids under it, so the extra space falls at the far
-  // edges of the column instead of opening a gap in the middle of the book.
-  asks: {
-    flex: 1,
-    justifyContent: "flex-end",
-  },
-  bids: {
-    flex: 1,
-    justifyContent: "flex-start",
-  },
-  row: {
-    height: ROW_HEIGHT,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    overflow: "hidden",
-  },
-  fill: {
-    position: "absolute",
-    right: 0,
-    top: 0,
-    bottom: 0,
-  },
-  priceText: {
-    fontSize: 12,
-    fontWeight: "600",
-    fontVariant: ["tabular-nums"],
-  },
-  totalText: {
-    color: colors.text,
-    fontSize: 12,
-    paddingRight: 2,
-    fontVariant: ["tabular-nums"],
-  },
-  percentBar: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    paddingTop: spacing.sm,
-  },
-  pctPill: {
-    paddingHorizontal: 5,
-    paddingVertical: 2,
-    borderRadius: radius.sm,
-    minWidth: 44,
-    alignItems: "center",
-  },
-  pctBid: {
-    backgroundColor: "rgba(35,175,137,0.18)",
-  },
-  pctAsk: {
-    backgroundColor: "rgba(246,70,93,0.18)",
-  },
-  pctText: {
-    color: colors.text,
-    fontSize: 9,
-    fontWeight: "700",
-    fontVariant: ["tabular-nums"],
-  },
-  percentTrack: {
-    flex: 1,
-    flexDirection: "row",
-    height: 4,
-    borderRadius: 2,
-    overflow: "hidden",
-  },
-  percentFill: {
-    height: "100%",
-  },
-  percentBid: {
-    backgroundColor: colors.up,
-  },
-  percentAsk: {
-    backgroundColor: colors.down,
-  },
-  controls: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingTop: spacing.sm,
-  },
-  stepButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    backgroundColor: colors.surfaceAlt,
-    borderRadius: radius.sm,
-    paddingHorizontal: spacing.sm,
-    height: 24,
-  },
-  stepText: {
-    color: colors.textMuted,
-    fontSize: 10,
-    fontWeight: "600",
-    fontVariant: ["tabular-nums"],
-  },
-  viewButton: {
-    width: 28,
-    height: 24,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: colors.surfaceAlt,
-    borderRadius: radius.sm,
-  },
-  backdrop: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.55)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  sheet: {
-    minWidth: 180,
-    backgroundColor: colors.surface,
-    borderRadius: radius.md,
-    paddingVertical: spacing.sm,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.border,
-  },
-  sheetTitle: {
-    color: colors.textFaint,
-    fontSize: 10,
-    fontWeight: "700",
-    letterSpacing: 0.4,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.xs,
-  },
-  option: {
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm,
-  },
-  optionText: {
-    color: colors.text,
-    fontSize: 13,
-    fontVariant: ["tabular-nums"],
-  },
-  optionActive: {
-    color: colors.accent,
-    fontWeight: "700",
-  },
-});
+const useStyles = createThemedStyles((colors) =>
+  StyleSheet.create({
+    container: {
+      flex: 1,
+    },
+    header: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      paddingBottom: spacing.xs,
+    },
+    headerText: {
+      color: colors.textFaint,
+      fontSize: 9,
+      fontWeight: "700",
+      letterSpacing: 0.3,
+    },
+    headerRight: {
+      textAlign: "right",
+    },
+    // Each side grows into whatever height the taller column leaves it, anchored against the middle
+    // price band: asks sit on top of it and bids under it, so the extra space falls at the far
+    // edges of the column instead of opening a gap in the middle of the book.
+    asks: {
+      flex: 1,
+      justifyContent: "flex-end",
+    },
+    bids: {
+      flex: 1,
+      justifyContent: "flex-start",
+    },
+    row: {
+      height: ROW_HEIGHT,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      overflow: "hidden",
+    },
+    fill: {
+      position: "absolute",
+      right: 0,
+      top: 0,
+      bottom: 0,
+    },
+    priceText: {
+      fontSize: 12,
+      fontWeight: "600",
+      fontVariant: ["tabular-nums"],
+    },
+    totalText: {
+      color: colors.text,
+      fontSize: 12,
+      paddingRight: 2,
+      fontVariant: ["tabular-nums"],
+    },
+    percentBar: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 4,
+      paddingTop: spacing.sm,
+    },
+    pctPill: {
+      paddingHorizontal: 5,
+      paddingVertical: 2,
+      borderRadius: radius.sm,
+      minWidth: 44,
+      alignItems: "center",
+    },
+    pctBid: {
+      backgroundColor: colors.upFill,
+    },
+    pctAsk: {
+      backgroundColor: colors.downFill,
+    },
+    pctText: {
+      color: colors.text,
+      fontSize: 9,
+      fontWeight: "700",
+      fontVariant: ["tabular-nums"],
+    },
+    percentTrack: {
+      flex: 1,
+      flexDirection: "row",
+      height: 4,
+      borderRadius: 2,
+      overflow: "hidden",
+    },
+    percentFill: {
+      height: "100%",
+    },
+    percentBid: {
+      backgroundColor: colors.up,
+    },
+    percentAsk: {
+      backgroundColor: colors.down,
+    },
+    controls: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      paddingTop: spacing.sm,
+    },
+    stepButton: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 4,
+      backgroundColor: colors.surfaceAlt,
+      borderRadius: radius.sm,
+      paddingHorizontal: spacing.sm,
+      height: 24,
+    },
+    stepText: {
+      color: colors.textMuted,
+      fontSize: 10,
+      fontWeight: "600",
+      fontVariant: ["tabular-nums"],
+    },
+    viewButton: {
+      width: 28,
+      height: 24,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: colors.surfaceAlt,
+      borderRadius: radius.sm,
+    },
+    backdrop: {
+      flex: 1,
+      backgroundColor: colors.overlay,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    sheet: {
+      minWidth: 180,
+      backgroundColor: colors.surface,
+      borderRadius: radius.md,
+      paddingVertical: spacing.sm,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.border,
+    },
+    sheetTitle: {
+      color: colors.textFaint,
+      fontSize: 10,
+      fontWeight: "700",
+      letterSpacing: 0.4,
+      paddingHorizontal: spacing.lg,
+      paddingVertical: spacing.xs,
+    },
+    option: {
+      paddingHorizontal: spacing.lg,
+      paddingVertical: spacing.sm,
+    },
+    optionText: {
+      color: colors.text,
+      fontSize: 13,
+      fontVariant: ["tabular-nums"],
+    },
+    optionActive: {
+      color: colors.accent,
+      fontWeight: "700",
+    },
+  }),
+);

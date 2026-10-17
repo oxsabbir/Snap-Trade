@@ -1,18 +1,55 @@
-export const colors = {
-  bg: '#0E0E0E',
-  surface: '#17181A',
-  surfaceAlt: '#1F2023',
-  border: '#242629',
-  text: '#E8E9EA',
-  textMuted: '#8A8D91',
-  textFaint: '#5C6066',
-  accent: '#23AF89',
-  /** Same hue, de-emphasised. Second segment of the wallet split bar. */
-  accentSoft: 'rgba(35,175,137,0.42)',
-  up: '#23AF89',
-  down: '#F6465D',
+export const darkColors = {
+  bg: '#121212',
+  surface: '#1A1A1A',
+  surfaceAlt: '#242424',
+  border: '#2E2E2E',
+  text: '#FFFFFF',
+  textMuted: '#838383',
+  textFaint: '#5C5C5C', // decorative only (placeholders)
+  accent: '#00B47D',
+  accentSoft: 'rgba(0,180,125,0.42)',
+  up: '#00B47D',
+  down: '#EB4D5D',
+  upText: '#00B47D',
+  downText: '#EB4D5D',
   warning: '#F0B90B',
-} as const;
+  upFill: 'rgba(0,180,125,0.08)',
+  downFill: 'rgba(235,77,93,0.08)',
+  gridLine: '#1F1F1F',
+  gridBorder: '#2E2E2E',
+  overlay: 'rgba(0,0,0,0.55)',
+  shadow: '#000000',
+  onAccent: '#FFFFFF',
+};
+
+export type ThemeColors = Record<keyof typeof darkColors, string>;
+
+export const lightColors: ThemeColors = {
+  bg: '#FFFFFF',
+  surface: '#F7F7F7',
+  surfaceAlt: '#F2F2F2',
+  border: '#E6E6E6',
+  text: '#121212',
+  textMuted: '#767676',
+  textFaint: '#B3B3B3',
+  accent: '#00B47D',
+  accentSoft: 'rgba(0,180,125,0.42)',
+  up: '#00B47D',
+  down: '#EB4D5D',
+  upText: '#00805A',
+  downText: '#CF2F44',
+  warning: '#F0B90B',
+  upFill: 'rgba(0,180,125,0.10)',
+  downFill: 'rgba(235,77,93,0.10)',
+  gridLine: '#F0F0F0',
+  gridBorder: '#E6E6E6',
+  overlay: 'rgba(0,0,0,0.4)',
+  shadow: '#000000',
+  onAccent: '#FFFFFF',
+};
+
+/** Alias so existing imports keep working during the migration. */
+export const colors: ThemeColors = darkColors;
 
 export const spacing = {
   xs: 4,

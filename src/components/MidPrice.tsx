@@ -1,7 +1,9 @@
 import { Pressable, StyleSheet, Text } from 'react-native';
 
 import { useTicker } from '@/state/ticker';
-import { colors, spacing } from '@/theme';
+import { spacing } from '@/theme';
+import { useTheme } from '@/theme/ThemeProvider';
+import { createThemedStyles } from '@/theme/themedStyles';
 import { formatPrice } from '@/utils/format';
 
 /** Currencies worth one dollar, so the mid price can carry a fiat line without a rates source. */
@@ -33,6 +35,8 @@ type Props = {
  * it there.
  */
 export function MidPrice({ symbol, priceDecimals, quoteCurrency, onPriceSelect }: Props) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const { update, direction } = useTicker(symbol);
   const hasPrice = update !== null && Number.isFinite(update.price);
   const price = hasPrice ? update.price : null;
@@ -50,7 +54,7 @@ export function MidPrice({ symbol, priceDecimals, quoteCurrency, onPriceSelect }
       <Text
         style={[
           styles.price,
-          { color: price === null ? colors.textMuted : direction === 'up' ? colors.up : colors.down },
+          { color: price === null ? colors.textMuted : direction === 'up' ? colors.upText : colors.downText },
         ]}
       >
         {price === null ? '—' : formatPrice(price, priceDecimals)}
@@ -60,22 +64,24 @@ export function MidPrice({ symbol, priceDecimals, quoteCurrency, onPriceSelect }
   );
 }
 
-const styles = StyleSheet.create({
-  middle: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: spacing.xs,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.border,
-  },
-  price: {
-    fontSize: 16,
-    fontWeight: '800',
-    fontVariant: ['tabular-nums'],
-  },
-  fiat: {
-    color: colors.textFaint,
-    fontSize: 9,
-  },
-});
+const useStyles = createThemedStyles((colors) =>
+  StyleSheet.create({
+    middle: {
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingVertical: spacing.xs,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.border,
+    },
+    price: {
+      fontSize: 16,
+      fontWeight: '800',
+      fontVariant: ['tabular-nums'],
+    },
+    fiat: {
+      color: colors.textFaint,
+      fontSize: 9,
+    },
+  }),
+);

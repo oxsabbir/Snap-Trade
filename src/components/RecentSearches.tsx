@@ -1,7 +1,9 @@
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { TrashIcon } from '@/components/Icons';
-import { colors, radius, spacing } from '@/theme';
+import { radius, spacing } from '@/theme';
+import { useTheme } from '@/theme/ThemeProvider';
+import { createThemedStyles } from '@/theme/themedStyles';
 
 /** A stored pair (canonical symbol) plus the slash form shown on its card. */
 export type RecentCoin = {
@@ -17,6 +19,8 @@ type Props = {
 };
 
 export function RecentSearches({ items, onSelect, onClear, onInteract }: Props) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   if (items.length === 0) return null;
 
   return (
@@ -30,7 +34,7 @@ export function RecentSearches({ items, onSelect, onClear, onInteract }: Props) 
           accessibilityRole="button"
           accessibilityLabel="Clear search history"
         >
-          <TrashIcon size={16} />
+          <TrashIcon size={16} color={colors.text} />
         </Pressable>
       </View>
 
@@ -58,45 +62,47 @@ export function RecentSearches({ items, onSelect, onClear, onInteract }: Props) 
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flexShrink: 1,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: spacing.lg,
-    marginBottom: spacing.sm,
-  },
-  title: {
-    color: colors.text,
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  clearButton: {
-    padding: 4,
-  },
-  cards: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    alignItems: 'flex-start',
-    gap: spacing.sm,
-    paddingHorizontal: spacing.lg,
-    paddingBottom: spacing.md,
-  },
-  card: {
-    backgroundColor: colors.surfaceAlt,
-    borderRadius: radius.md,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-  },
-  cardPressed: {
-    opacity: 0.65,
-  },
-  cardText: {
-    color: colors.text,
-    fontSize: 13,
-    fontWeight: '600',
-  },
-});
+const useStyles = createThemedStyles((colors) =>
+  StyleSheet.create({
+    container: {
+      flexShrink: 1,
+    },
+    header: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: spacing.lg,
+      marginBottom: spacing.sm,
+    },
+    title: {
+      color: colors.text,
+      fontSize: 15,
+      fontWeight: '600',
+    },
+    clearButton: {
+      padding: 4,
+    },
+    cards: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      alignItems: 'flex-start',
+      gap: spacing.sm,
+      paddingHorizontal: spacing.lg,
+      paddingBottom: spacing.md,
+    },
+    card: {
+      backgroundColor: colors.surfaceAlt,
+      borderRadius: radius.md,
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.sm,
+    },
+    cardPressed: {
+      opacity: 0.65,
+    },
+    cardText: {
+      color: colors.text,
+      fontSize: 13,
+      fontWeight: '600',
+    },
+  }),
+);

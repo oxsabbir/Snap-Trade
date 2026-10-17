@@ -2,7 +2,8 @@ import { StyleSheet, Text, View } from 'react-native';
 
 import { deriveQuote } from '@/lib/quote';
 import { useTicker } from '@/state/ticker';
-import { colors } from '@/theme';
+import { createThemedStyles } from '@/theme/themedStyles';
+import { useTheme } from '@/theme/ThemeProvider';
 import { formatPercent, formatPrice } from '@/utils/format';
 
 type Props = {
@@ -28,6 +29,8 @@ type Props = {
  * above this component changes when the price does.
  */
 export function LivePrice({ symbol, bucketOpen, fallbackPrice, decimals }: Props) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const { update } = useTicker(symbol);
   const quote = deriveQuote(update?.price ?? fallbackPrice, bucketOpen);
   if (!quote) return null;
@@ -39,10 +42,10 @@ export function LivePrice({ symbol, bucketOpen, fallbackPrice, decimals }: Props
         <View
           style={[
             styles.changePill,
-            { backgroundColor: quote.isUp ? 'rgba(35,175,137,0.14)' : 'rgba(246,70,93,0.14)' },
+            { backgroundColor: quote.isUp ? colors.upFill : colors.downFill },
           ]}
         >
-          <Text style={[styles.change, { color: quote.isUp ? colors.up : colors.down }]}>
+          <Text style={[styles.change, { color: quote.isUp ? colors.upText : colors.downText }]}>
             {formatPercent(quote.change)}
           </Text>
         </View>
@@ -51,21 +54,23 @@ export function LivePrice({ symbol, bucketOpen, fallbackPrice, decimals }: Props
   );
 }
 
-const styles = StyleSheet.create({
-  price: {
-    color: colors.text,
-    fontSize: 30,
-    fontWeight: '700',
-    fontVariant: ['tabular-nums'],
-  },
-  changePill: {
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 4,
-  },
-  change: {
-    fontSize: 12,
-    fontWeight: '600',
-    fontVariant: ['tabular-nums'],
-  },
-});
+const useStyles = createThemedStyles((colors) =>
+  StyleSheet.create({
+    price: {
+      color: colors.text,
+      fontSize: 30,
+      fontWeight: '700',
+      fontVariant: ['tabular-nums'],
+    },
+    changePill: {
+      paddingHorizontal: 8,
+      paddingVertical: 3,
+      borderRadius: 4,
+    },
+    change: {
+      fontSize: 12,
+      fontWeight: '600',
+      fontVariant: ['tabular-nums'],
+    },
+  }),
+);

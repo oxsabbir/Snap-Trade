@@ -6,7 +6,9 @@ import { OrderHistoryPanel } from "@/components/OrderHistoryPanel";
 import { TrayIcon } from "@/components/Icons";
 import { useOpenOrders, type OpenOrder } from "@/hooks/useOpenOrders";
 import { formatAmount } from "@/utils/format";
-import { colors, radius, spacing } from "@/theme";
+import { radius, spacing } from "@/theme";
+import { useTheme } from "@/theme/ThemeProvider";
+import { createThemedStyles } from "@/theme/themedStyles";
 
 type Props = {
   symbol: string;
@@ -50,13 +52,16 @@ function OrderRow({
   onCancel: () => void;
   isCancelling: boolean;
 }) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const isBuy = order.side === "buy";
   const sideColor = isBuy ? colors.up : colors.down;
+  const sideTextColor = isBuy ? colors.upText : colors.downText;
   const statusColor =
     order.status === "filled"
-      ? colors.up
+      ? colors.upText
       : order.status === "cancelled"
-        ? colors.down
+        ? colors.downText
         : order.status === "partially_filled"
           ? colors.warning
           : colors.textMuted;
@@ -76,7 +81,7 @@ function OrderRow({
       <View style={[styles.sideIndicator, { backgroundColor: sideColor }]} />
       <View style={styles.rowLeft}>
         <View style={styles.rowTop}>
-          <Text style={[styles.symbol, { color: sideColor }]}>
+          <Text style={[styles.symbol, { color: sideTextColor }]}>
             {order.symbol.replace("-", "/")}
           </Text>
           <Text style={styles.type}>
@@ -138,6 +143,8 @@ function EmptyState({
   onDeposit?: () => void;
   onTutorial?: () => void;
 }) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   return (
     <View style={styles.emptyContainer}>
       <TrayIcon size={EMPTY_TRAY_SIZE} color={colors.textFaint} />
@@ -168,6 +175,7 @@ export const OrderManagement = memo(function OrderManagement({
   onTutorial,
   available = {},
 }: Props) {
+  const styles = useStyles();
   const [activeTab, setActiveTab] = useState(0);
 
   const { orders, isLoading, error, cancelling, cancelOrder } = useOpenOrders();
@@ -247,6 +255,7 @@ function TabBar({
   activeIndex: number;
   onPress: (index: number) => void;
 }) {
+  const styles = useStyles();
   // Horizontally scrollable so adding tabs cannot squeeze the labels on a narrow phone: each tab
   // keeps a minimum width and expands to fill the bar when there is room, scrolling only when
   // there is not.
@@ -285,7 +294,7 @@ function TabBar({
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = createThemedStyles((colors) => StyleSheet.create({
   container: {
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.border,
@@ -301,7 +310,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.bg,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.border,
-    shadowColor: "#000",
+    shadowColor: colors.shadow,
     shadowOffset: { width: 0, height: 3 },
     shadowOpacity: 0.25,
     shadowRadius: 6,
@@ -337,7 +346,7 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
   tabTextActive: {
-    color: "#FFFFFF",
+    color: colors.text,
   },
   tabIndicator: {
     // Always rendered, transparent when inactive, so switching tabs cannot shift the layout. Pinned
@@ -350,16 +359,16 @@ const styles = StyleSheet.create({
     backgroundColor: "transparent",
   },
   tabIndicatorActive: {
-    backgroundColor: "#FFFFFF",
+    backgroundColor: colors.text,
   },
   errorBanner: {
     marginBottom: spacing.sm,
     padding: spacing.sm,
-    backgroundColor: "rgba(246,70,93,0.16)",
+    backgroundColor: colors.downFill,
     borderRadius: radius.sm,
   },
   errorText: {
-    color: colors.down,
+    color: colors.downText,
     fontSize: 12,
     fontWeight: "600",
   },
@@ -486,7 +495,7 @@ const styles = StyleSheet.create({
   cancelBtn: {
     paddingHorizontal: spacing.sm,
     paddingVertical: spacing.xs,
-    backgroundColor: "rgba(246,70,93,0.12)",
+    backgroundColor: colors.downFill,
     borderRadius: radius.sm,
     minWidth: 56,
     alignItems: "center",
@@ -495,7 +504,7 @@ const styles = StyleSheet.create({
     opacity: 0.5,
   },
   cancelBtnText: {
-    color: colors.down,
+    color: colors.downText,
     fontSize: 10,
     fontWeight: "700",
   },
@@ -504,4 +513,4 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: "600",
   },
-});
+}));

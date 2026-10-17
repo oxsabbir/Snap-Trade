@@ -8,7 +8,9 @@ import { useAccount } from '@/hooks/useAccount';
 import { useProfile } from '@/hooks/useProfile';
 import { useApiCredentials, type OnboardingEntry } from '@/state/apiCredentials';
 import { getKcsDiscountEnabled, setKcsDiscountEnabled } from '@/state/kcsDiscount';
-import { colors, radius, spacing } from '@/theme';
+import { radius, spacing } from '@/theme';
+import { useTheme, type ThemePreference } from '@/theme/ThemeProvider';
+import { createThemedStyles } from '@/theme/themedStyles';
 import { useState, useEffect } from 'react';
 
 function maskApiKey(apiKey: string | null): string {
@@ -16,10 +18,18 @@ function maskApiKey(apiKey: string | null): string {
   return `${apiKey.slice(0, 4)}••••••${apiKey.slice(-4)}`;
 }
 
+const THEME_OPTIONS: { value: ThemePreference; label: string }[] = [
+  { value: 'system', label: 'System' },
+  { value: 'light', label: 'Light' },
+  { value: 'dark', label: 'Dark' },
+];
+
 export default function AccountScreen() {
   const { status, portfolio, accountInfo, lastUpdated, error, refresh } = useAccount();
   const { displayName, setDisplayName } = useProfile();
   const { apiKey, disconnect } = useApiCredentials();
+  const { colors, preference, setPreference } = useTheme();
+  const styles = useStyles();
   const [accountAction, setAccountAction] = useState<OnboardingEntry | null>(null);
   const [accountActionError, setAccountActionError] = useState<string | null>(null);
   const [kcsEnabled, setKcsEnabled] = useState(false);
@@ -164,6 +174,29 @@ export default function AccountScreen() {
             </View>
           </View>
 
+          <View style={styles.themeSection}>
+            <Text style={styles.connectionLabel}>APPEARANCE</Text>
+            <View style={styles.segment}>
+              {THEME_OPTIONS.map((option) => {
+                const active = preference === option.value;
+                return (
+                  <Pressable
+                    key={option.value}
+                    onPress={() => setPreference(option.value)}
+                    style={[styles.segmentItem, active && styles.segmentItemActive]}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: active }}
+                    accessibilityLabel={`${option.label} theme`}
+                  >
+                    <Text style={[styles.segmentText, active && styles.segmentTextActive]}>
+                      {option.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
+
           <AssetList holdings={portfolio.holdings} />
         </ScrollView>
       </KeyboardAvoidingView>
@@ -172,191 +205,225 @@ export default function AccountScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: colors.bg,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.sm,
-    paddingBottom: spacing.lg,
-  },
-  title: {
-    color: colors.text,
-    fontSize: 22,
-    fontWeight: '700',
-  },
-  centered: {
-    marginTop: spacing.xl,
-  },
-  card: {
-    marginHorizontal: spacing.lg,
-    padding: spacing.lg,
-    borderRadius: radius.lg,
-    backgroundColor: colors.surface,
-    alignItems: 'center',
-    gap: spacing.sm,
-  },
-  cardIcon: {
-    width: 52,
-    height: 52,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: radius.pill,
-    backgroundColor: colors.surfaceAlt,
-    marginBottom: spacing.xs,
-  },
-  cardTitle: {
-    color: colors.text,
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  cardBody: {
-    color: colors.textMuted,
-    fontSize: 13,
-    lineHeight: 19,
-    textAlign: 'center',
-  },
-  actions: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-    marginTop: spacing.sm,
-  },
-  primaryButton: {
-    paddingHorizontal: spacing.lg,
-    height: 38,
-    justifyContent: 'center',
-    borderRadius: radius.pill,
-    backgroundColor: colors.accent,
-  },
-  primaryText: {
-    color: '#06231C',
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  secondaryButton: {
-    paddingHorizontal: spacing.md,
-    height: 38,
-    justifyContent: 'center',
-    borderRadius: radius.pill,
-    backgroundColor: colors.surfaceAlt,
-  },
-  secondaryText: {
-    color: colors.textMuted,
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  list: {
-    paddingHorizontal: spacing.lg,
-    paddingBottom: spacing.xl,
-  },
-  connection: {
-    marginTop: spacing.lg,
-    marginBottom: spacing.xl,
-    paddingTop: spacing.md,
-    borderTopColor: colors.border,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    gap: spacing.sm,
-  },
-  connectionLabel: {
-    color: colors.textFaint,
-    fontSize: 10,
-    fontWeight: '700',
-  },
-  apiKey: {
-    color: colors.text,
-    fontSize: 14,
-    fontWeight: '600',
-    fontVariant: ['tabular-nums'],
-  },
-  switchButton: {
-    minHeight: 42,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderRadius: radius.md,
-    backgroundColor: colors.surfaceAlt,
-    marginTop: spacing.xs,
-  },
-  switchButtonText: {
-    color: colors.text,
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  logoutButton: {
-    minHeight: 38,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  logoutText: {
-    color: colors.down,
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  actionDisabled: {
-    opacity: 0.45,
-  },
-  actionError: {
-    color: colors.down,
-    fontSize: 12,
-    lineHeight: 17,
-  },
-  kcsSection: {
-    marginTop: spacing.lg,
-    marginBottom: spacing.xl,
-    paddingTop: spacing.md,
-    borderTopColor: colors.border,
-    borderTopWidth: StyleSheet.hairlineWidth,
-  },
-  kcsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: spacing.xs,
-  },
-  kcsInfo: {
-    flex: 1,
-  },
-  kcsTitle: {
-    color: colors.text,
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  kcsDesc: {
-    color: colors.textMuted,
-    fontSize: 12,
-    marginTop: 2,
-  },
-  kcsToggle: {
-    width: 48,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: colors.surfaceAlt,
-    padding: 2,
-    justifyContent: 'center',
-  },
-  kcsToggleOn: {
-    backgroundColor: colors.up,
-  },
-  kcsToggleThumb: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: colors.text,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.2,
-    shadowRadius: 2,
-    elevation: 2,
-  },
-  kcsToggleThumbOn: {
-    marginLeft: 20,
-    backgroundColor: '#FFFFFF',
-  },
-  keyboardAvoidingView: {
-    flex: 1,
-  },
-});
+const useStyles = createThemedStyles((colors) =>
+  StyleSheet.create({
+    safeArea: {
+      flex: 1,
+      backgroundColor: colors.bg,
+    },
+    header: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: spacing.lg,
+      paddingTop: spacing.sm,
+      paddingBottom: spacing.lg,
+    },
+    title: {
+      color: colors.text,
+      fontSize: 22,
+      fontWeight: '700',
+    },
+    centered: {
+      marginTop: spacing.xl,
+    },
+    card: {
+      marginHorizontal: spacing.lg,
+      padding: spacing.lg,
+      borderRadius: radius.lg,
+      backgroundColor: colors.surface,
+      alignItems: 'center',
+      gap: spacing.sm,
+    },
+    cardIcon: {
+      width: 52,
+      height: 52,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderRadius: radius.pill,
+      backgroundColor: colors.surfaceAlt,
+      marginBottom: spacing.xs,
+    },
+    cardTitle: {
+      color: colors.text,
+      fontSize: 16,
+      fontWeight: '700',
+    },
+    cardBody: {
+      color: colors.textMuted,
+      fontSize: 13,
+      lineHeight: 19,
+      textAlign: 'center',
+    },
+    actions: {
+      flexDirection: 'row',
+      gap: spacing.sm,
+      marginTop: spacing.sm,
+    },
+    primaryButton: {
+      paddingHorizontal: spacing.lg,
+      height: 38,
+      justifyContent: 'center',
+      borderRadius: radius.pill,
+      backgroundColor: colors.accent,
+    },
+    primaryText: {
+      color: colors.onAccent,
+      fontSize: 13,
+      fontWeight: '700',
+    },
+    secondaryButton: {
+      paddingHorizontal: spacing.md,
+      height: 38,
+      justifyContent: 'center',
+      borderRadius: radius.pill,
+      backgroundColor: colors.surfaceAlt,
+    },
+    secondaryText: {
+      color: colors.textMuted,
+      fontSize: 12,
+      fontWeight: '600',
+    },
+    list: {
+      paddingHorizontal: spacing.lg,
+      paddingBottom: spacing.xl,
+    },
+    connection: {
+      marginTop: spacing.lg,
+      marginBottom: spacing.xl,
+      paddingTop: spacing.md,
+      borderTopColor: colors.border,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      gap: spacing.sm,
+    },
+    connectionLabel: {
+      color: colors.textFaint,
+      fontSize: 10,
+      fontWeight: '700',
+    },
+    apiKey: {
+      color: colors.text,
+      fontSize: 14,
+      fontWeight: '600',
+      fontVariant: ['tabular-nums'],
+    },
+    switchButton: {
+      minHeight: 42,
+      justifyContent: 'center',
+      alignItems: 'center',
+      borderRadius: radius.md,
+      backgroundColor: colors.surfaceAlt,
+      marginTop: spacing.xs,
+    },
+    switchButtonText: {
+      color: colors.text,
+      fontSize: 13,
+      fontWeight: '600',
+    },
+    logoutButton: {
+      minHeight: 38,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    logoutText: {
+      color: colors.downText,
+      fontSize: 13,
+      fontWeight: '600',
+    },
+    actionDisabled: {
+      opacity: 0.45,
+    },
+    actionError: {
+      color: colors.downText,
+      fontSize: 12,
+      lineHeight: 17,
+    },
+    kcsSection: {
+      marginTop: spacing.lg,
+      marginBottom: spacing.xl,
+      paddingTop: spacing.md,
+      borderTopColor: colors.border,
+      borderTopWidth: StyleSheet.hairlineWidth,
+    },
+    kcsRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingVertical: spacing.xs,
+    },
+    kcsInfo: {
+      flex: 1,
+    },
+    kcsTitle: {
+      color: colors.text,
+      fontSize: 14,
+      fontWeight: '600',
+    },
+    kcsDesc: {
+      color: colors.textMuted,
+      fontSize: 12,
+      marginTop: 2,
+    },
+    kcsToggle: {
+      width: 48,
+      height: 28,
+      borderRadius: 14,
+      backgroundColor: colors.surfaceAlt,
+      padding: 2,
+      justifyContent: 'center',
+    },
+    kcsToggleOn: {
+      backgroundColor: colors.up,
+    },
+    kcsToggleThumb: {
+      width: 24,
+      height: 24,
+      borderRadius: 12,
+      backgroundColor: colors.text,
+      shadowColor: colors.shadow,
+      shadowOffset: { width: 0, height: 1 },
+      shadowOpacity: 0.2,
+      shadowRadius: 2,
+      elevation: 2,
+    },
+    kcsToggleThumbOn: {
+      marginLeft: 20,
+      backgroundColor: colors.onAccent,
+    },
+    themeSection: {
+      marginBottom: spacing.xl,
+      paddingTop: spacing.md,
+      borderTopColor: colors.border,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      gap: spacing.sm,
+    },
+    segment: {
+      flexDirection: 'row',
+      backgroundColor: colors.surfaceAlt,
+      borderRadius: radius.md,
+      padding: 3,
+      gap: 3,
+    },
+    segmentItem: {
+      flex: 1,
+      minHeight: 36,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderRadius: radius.sm,
+    },
+    segmentItemActive: {
+      backgroundColor: colors.accent,
+    },
+    segmentText: {
+      color: colors.textMuted,
+      fontSize: 13,
+      fontWeight: '600',
+    },
+    segmentTextActive: {
+      color: colors.onAccent,
+    },
+    keyboardAvoidingView: {
+      flex: 1,
+    },
+  }),
+);

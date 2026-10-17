@@ -4,7 +4,9 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { AssetRow, type AssetScope } from '@/components/AssetRow';
 import { EyeIcon } from '@/components/Icons';
 import type { Holding, WalletKind } from '@/lib/kucoin/types';
-import { colors, radius, spacing } from '@/theme';
+import { radius, spacing } from '@/theme';
+import { useTheme } from '@/theme/ThemeProvider';
+import { createThemedStyles } from '@/theme/themedStyles';
 
 /** Below this USD value a holding is leftover dust rather than a position. */
 const DUST_USD = 1;
@@ -20,6 +22,8 @@ type Props = {
 };
 
 export function AssetList({ holdings }: Props) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const [scope, setScope] = useState<AssetScope>('all');
   const [hideDust, setHideDust] = useState(false);
 
@@ -111,7 +115,8 @@ function emptyCopy(total: number, scope: AssetScope, hideDust: boolean, hiddenCo
   return 'No holdings to show.';
 }
 
-const styles = StyleSheet.create({
+const useStyles = createThemedStyles((colors) =>
+  StyleSheet.create({
   section: {
     marginBottom: spacing.lg,
   },
@@ -149,8 +154,8 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
   },
   dustToggleOn: {
-    borderColor: 'rgba(35,175,137,0.4)',
-    backgroundColor: 'rgba(35,175,137,0.1)',
+    borderColor: colors.accentSoft,
+    backgroundColor: colors.upFill,
   },
   dustText: {
     color: colors.textFaint,
@@ -174,8 +179,8 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
   },
   chipActive: {
-    backgroundColor: 'rgba(35,175,137,0.14)',
-    borderColor: 'rgba(35,175,137,0.4)',
+    backgroundColor: colors.upFill,
+    borderColor: colors.accentSoft,
   },
   chipText: {
     color: colors.textMuted,
@@ -198,4 +203,5 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.lg,
     paddingHorizontal: spacing.sm,
   },
-});
+  }),
+);

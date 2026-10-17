@@ -6,7 +6,8 @@ import {
   TradePanel,
   type ExternalPriceSelection,
 } from "@/components/TradePanel";
-import { colors, spacing } from "@/theme";
+import { spacing } from "@/theme";
+import { createThemedStyles } from "@/theme/themedStyles";
 
 type Props = {
   symbol: string;
@@ -33,6 +34,7 @@ type Props = {
  * list nested inside a list, competing for the same gesture.
  */
 export const TradeScreen = memo(function TradeScreen({ symbol }: Props) {
+  const styles = useStyles();
   const [selection, setSelection] = useState<ExternalPriceSelection | null>(
     null,
   );
@@ -60,7 +62,7 @@ export const TradeScreen = memo(function TradeScreen({ symbol }: Props) {
   );
 });
 
-const styles = StyleSheet.create({
+const useStyles = createThemedStyles((colors) => StyleSheet.create({
   container: {
     // A hairline separates the ordering UI from the chart above it. It is drawn on this section
     // rather than on either column, so it spans the full width and reads as one boundary.
@@ -82,4 +84,4 @@ const styles = StyleSheet.create({
   panel: {
     flex: 5,
   },
-});
+}));

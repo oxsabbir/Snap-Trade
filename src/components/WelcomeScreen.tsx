@@ -2,9 +2,11 @@ import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Animated, { FadeOutUp } from 'react-native-reanimated';
 
-import { colors, radius, spacing } from '@/theme';
+import { radius, spacing } from '@/theme';
+import { createThemedStyles } from '@/theme/themedStyles';
 
 export function WelcomeScreen({ onSetup }: { onSetup: () => void }) {
+  const styles = useStyles();
   return (
     <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
       <Animated.View exiting={FadeOutUp.duration(240)} style={styles.content}>
@@ -36,7 +38,7 @@ export function WelcomeScreen({ onSetup }: { onSetup: () => void }) {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = createThemedStyles((colors) => StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: colors.bg,
@@ -91,8 +93,8 @@ const styles = StyleSheet.create({
     opacity: 0.82,
   },
   buttonText: {
-    color: '#06231C',
+    color: colors.onAccent,
     fontSize: 15,
     fontWeight: '700',
   },
-});
+}));

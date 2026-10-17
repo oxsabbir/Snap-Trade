@@ -21,7 +21,9 @@ import {
   LINE_TIMEFRAME,
   type TimeframeOrLine,
 } from "@/lib/kucoin/candles";
-import { colors, radius, spacing } from "@/theme";
+import { radius, spacing } from "@/theme";
+import { useTheme } from "@/theme/ThemeProvider";
+import { createThemedStyles } from "@/theme/themedStyles";
 
 type Props = {
   symbol: string;
@@ -82,6 +84,8 @@ const ChartChrome = memo(function ChartChrome({
   onOpenInfo,
   periodLabel,
 }: ChromeProps) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const base = symbol.split("-")[0] ?? "";
 
   return (
@@ -128,6 +132,8 @@ const ChartChrome = memo(function ChartChrome({
 });
 
 export function CoinDetail({ symbol, name, decimals }: Props) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const [timeframeKey, setTimeframeKey] = useState(DEFAULT_TIMEFRAME_KEY);
   const [infoOpen, setInfoOpen] = useState(false);
   const [visibleCount, setVisibleCount] = useState<number | null>(null);
@@ -288,7 +294,8 @@ export function CoinDetail({ symbol, name, decimals }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = createThemedStyles((colors) =>
+  StyleSheet.create({
   section: {
     // Content-sized: this is one section of the screen's scroll view, not the screen itself.
   },
@@ -388,4 +395,5 @@ const styles = StyleSheet.create({
     marginLeft: spacing.xs,
     borderRadius: radius.pill,
   },
-});
+  }),
+);

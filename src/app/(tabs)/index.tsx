@@ -27,7 +27,9 @@ import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { searchMarkets, type QuoteFilter } from "@/lib/kucoin/market";
 import type { SpotMarket } from "@/lib/kucoin/types";
 import { useSetActiveCoin } from "@/state/activeCoin";
-import { colors, spacing } from "@/theme";
+import { spacing } from "@/theme";
+import { useTheme } from "@/theme/ThemeProvider";
+import { createThemedStyles } from "@/theme/themedStyles";
 import { formatPairSymbol, formatTime } from "@/utils/format";
 
 const POPULAR_COUNT = 10;
@@ -83,6 +85,8 @@ const MarketsList = memo(function MarketsList({
   toggleFavorite: (symbol: string) => void;
   onOpenMarket: (symbol: string) => void;
 }) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   // Stable renderItem with isFavorite computed from passed favorites Set
   const renderRow = useCallback<ListRenderItem<SpotMarket>>(
     ({ item }) => (
@@ -149,6 +153,7 @@ export default function MarketsScreen() {
     clear: clearRecents,
   } = useRecentSearches();
   const setActiveCoin = useSetActiveCoin();
+  const styles = useStyles();
   const [search, setSearch] = useState("");
   const [tab, setTab] = useState<TabValue>("All");
   const [favorites, setFavorites] = useState<Set<string>>(() => new Set());
@@ -345,6 +350,7 @@ export default function MarketsScreen() {
 }
 
 function Separator() {
+  const styles = useStyles();
   return <View style={styles.separator} />;
 }
 
@@ -357,6 +363,7 @@ function EmptyState({
   hasSearch: boolean;
   error: string | null;
 }) {
+  const styles = useStyles();
   if (error) {
     return (
       <View style={styles.empty}>
@@ -388,73 +395,75 @@ function EmptyState({
   );
 }
 
-const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: colors.bg,
-  },
-  body: {
-    flex: 1,
-  },
-  /** The list fills the space; the suggestion panel above it keeps its natural height. */
-  listLayer: {
-    flex: 1,
-  },
-  /** Hidden but mounted, so switching panels never rebuilds the list. */
-  hidden: {
-    display: "none",
-  },
-  header: {
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.sm,
-    paddingBottom: spacing.md,
-    gap: spacing.md,
-  },
-  titleRow: {
-    flexDirection: "row",
-    alignItems: "baseline",
-    gap: spacing.sm,
-  },
-  title: {
-    color: colors.text,
-    fontSize: 26,
-    fontWeight: "700",
-  },
-  subtitle: {
-    color: colors.textFaint,
-    fontSize: 12,
-  },
-  tabs: {
-    paddingBottom: spacing.md,
-  },
-  listContent: {
-    paddingHorizontal: spacing.lg,
-  },
-  separator: {
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: colors.border,
-  },
-  footer: {
-    height: spacing.xl,
-  },
-  empty: {
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: spacing.xl * 2,
-    gap: spacing.sm,
-  },
-  emptyTitle: {
-    color: colors.text,
-    fontSize: 15,
-    fontWeight: "600",
-  },
-  emptyBody: {
-    color: colors.textMuted,
-    fontSize: 13,
-    textAlign: "center",
-  },
-  emptyHint: {
-    color: colors.textFaint,
-    fontSize: 12,
-  },
-});
+const useStyles = createThemedStyles((colors) =>
+  StyleSheet.create({
+    safeArea: {
+      flex: 1,
+      backgroundColor: colors.bg,
+    },
+    body: {
+      flex: 1,
+    },
+    /** The list fills the space; the suggestion panel above it keeps its natural height. */
+    listLayer: {
+      flex: 1,
+    },
+    /** Hidden but mounted, so switching panels never rebuilds the list. */
+    hidden: {
+      display: "none",
+    },
+    header: {
+      paddingHorizontal: spacing.lg,
+      paddingTop: spacing.sm,
+      paddingBottom: spacing.md,
+      gap: spacing.md,
+    },
+    titleRow: {
+      flexDirection: "row",
+      alignItems: "baseline",
+      gap: spacing.sm,
+    },
+    title: {
+      color: colors.text,
+      fontSize: 26,
+      fontWeight: "700",
+    },
+    subtitle: {
+      color: colors.textFaint,
+      fontSize: 12,
+    },
+    tabs: {
+      paddingBottom: spacing.md,
+    },
+    listContent: {
+      paddingHorizontal: spacing.lg,
+    },
+    separator: {
+      height: StyleSheet.hairlineWidth,
+      backgroundColor: colors.border,
+    },
+    footer: {
+      height: spacing.xl,
+    },
+    empty: {
+      alignItems: "center",
+      justifyContent: "center",
+      paddingVertical: spacing.xl * 2,
+      gap: spacing.sm,
+    },
+    emptyTitle: {
+      color: colors.text,
+      fontSize: 15,
+      fontWeight: "600",
+    },
+    emptyBody: {
+      color: colors.textMuted,
+      fontSize: 13,
+      textAlign: "center",
+    },
+    emptyHint: {
+      color: colors.textFaint,
+      fontSize: 12,
+    },
+  }),
+);

@@ -12,7 +12,8 @@ import { OrderManagement } from '@/components/OrderManagement';
 import { TradeScreen } from '@/components/TradeScreen';
 import { useAccountBalance } from '@/hooks/useAccountBalance';
 import { loadMoreOrderHistory } from '@/state/orderHistory';
-import { colors, spacing } from '@/theme';
+import { spacing } from '@/theme';
+import { createThemedStyles } from '@/theme/themedStyles';
 
 type Props = {
   symbol: string;
@@ -31,6 +32,7 @@ const HISTORY_LOAD_MORE_THRESHOLD = 320;
  * symbol supplied by the tab route that owns the screen's only scroll view.
  */
 export function TradeRouteView({ symbol, name, decimals }: Props) {
+  const styles = useStyles();
   // The order form reads this from the shared store too, so this is one `/accounts` request
   // shared by both consumers rather than one each.
   const { available } = useAccountBalance();
@@ -80,7 +82,7 @@ export function TradeRouteView({ symbol, name, decimals }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = createThemedStyles((colors) => StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: colors.bg,
@@ -94,4 +96,4 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     paddingBottom: spacing.lg,
   },
-});
+}));

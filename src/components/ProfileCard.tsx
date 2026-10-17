@@ -12,7 +12,9 @@ import {
 import { EyeIcon, EyeOffIcon } from '@/components/Icons';
 import type { Portfolio } from '@/lib/kucoin/account';
 import type { AccountInfo } from '@/lib/kucoin/types';
-import { colors, radius, spacing } from '@/theme';
+import { radius, spacing } from '@/theme';
+import { useTheme } from '@/theme/ThemeProvider';
+import { createThemedStyles } from '@/theme/themedStyles';
 import { formatPrice, formatTime, hashToHue } from '@/utils/format';
 
 type Props = {
@@ -33,6 +35,8 @@ function initialsFor(name: string): string {
 }
 
 function ProfileCardComponent({ displayName, onRename, accountInfo, portfolio, lastUpdated }: Props) {
+  const { colors, scheme } = useTheme();
+  const styles = useStyles();
   const [isEditing, setIsEditing] = useState(false);
   const [isHidden, setIsHidden] = useState(false);
   const [draft, setDraft] = useState(displayName);
@@ -92,6 +96,7 @@ function ProfileCardComponent({ displayName, onRename, accountInfo, portfolio, l
                 style={styles.nameInput}
                 placeholder="Display name"
                 placeholderTextColor={colors.textFaint}
+                keyboardAppearance={scheme === 'dark' ? 'dark' : 'light'}
                 accessibilityLabel="Display name"
               />
             ) : (
@@ -172,6 +177,7 @@ function ProfileCardComponent({ displayName, onRename, accountInfo, portfolio, l
 }
 
 function WalletPill({ label, amount, count }: { label: string; amount: string; count: number }) {
+  const styles = useStyles();
   return (
     <View style={styles.pill}>
       <Text style={styles.pillLabel}>{label}</Text>
@@ -187,7 +193,7 @@ function WalletPill({ label, amount, count }: { label: string; amount: string; c
 
 export const ProfileCard = memo(ProfileCardComponent);
 
-const styles = StyleSheet.create({
+const useStyles = createThemedStyles((colors) => StyleSheet.create({
   card: {
     borderRadius: radius.lg,
     borderWidth: StyleSheet.hairlineWidth,
@@ -220,7 +226,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.12)',
+    borderColor: colors.border,
   },
   avatarLabel: {
     color: colors.text,
@@ -256,7 +262,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: radius.sm,
-    backgroundColor: 'rgba(35,175,137,0.14)',
+    backgroundColor: colors.upFill,
   },
   vipText: {
     color: colors.accent,
@@ -329,4 +335,4 @@ const styles = StyleSheet.create({
   footerWarn: {
     color: colors.warning,
   },
-});
+}));

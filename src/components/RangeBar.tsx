@@ -1,6 +1,7 @@
 import { StyleSheet, View } from 'react-native';
 
-import { colors } from '@/theme';
+import { createThemedStyles } from '@/theme/themedStyles';
+import { useTheme } from '@/theme/ThemeProvider';
 
 type Props = {
   low: number;
@@ -11,6 +12,8 @@ type Props = {
 
 /** Shows where the last price sits inside the 24h low/high range. */
 export function RangeBar({ low, high, last, width = 44 }: Props) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const span = high - low;
   const ratio = span > 0 ? (last - low) / span : 0.5;
   const position = Math.min(Math.max(Number.isFinite(ratio) ? ratio : 0.5, 0), 1);
@@ -26,27 +29,29 @@ export function RangeBar({ low, high, last, width = 44 }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    height: 10,
-    justifyContent: 'center',
-  },
-  track: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    height: 3,
-    borderRadius: 2,
-    backgroundColor: colors.border,
-  },
-  fill: {
-    height: 3,
-    borderRadius: 2,
-  },
-  marker: {
-    position: 'absolute',
-    width: 3,
-    height: 9,
-    borderRadius: 1.5,
-  },
-});
+const useStyles = createThemedStyles((colors) =>
+  StyleSheet.create({
+    container: {
+      height: 10,
+      justifyContent: 'center',
+    },
+    track: {
+      position: 'absolute',
+      left: 0,
+      right: 0,
+      height: 3,
+      borderRadius: 2,
+      backgroundColor: colors.border,
+    },
+    fill: {
+      height: 3,
+      borderRadius: 2,
+    },
+    marker: {
+      position: 'absolute',
+      width: 3,
+      height: 9,
+      borderRadius: 1.5,
+    },
+  }),
+);

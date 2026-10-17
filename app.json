@@ -5,15 +5,17 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/branding/app-icon.png",
-    "userInterfaceStyle": "dark",
+    "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.oxsabbir.snaptrade",
-      "buildNumber": "1"
+      "buildNumber": "1",
+      "userInterfaceStyle": "automatic"
     },
     "android": {
       "package": "com.oxsabbir.snaptrade",
       "versionCode": 1,
+      "userInterfaceStyle": "automatic",
       "adaptiveIcon": {
         "backgroundColor": "#4782FF",
         "foregroundImage": "./assets/branding/adaptive-foreground.png"
@@ -26,13 +28,25 @@
     "plugins": [
       "expo-router",
       "expo-secure-store",
+      "expo-system-ui",
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#061950",
+          "backgroundColor": "#FFFFFF",
           "image": "./assets/branding/app-icon.png",
           "imageWidth": 240,
-          "resizeMode": "contain"
+          "resizeMode": "contain",
+          "dark": {
+            "backgroundColor": "#121212",
+            "image": "./assets/branding/app-icon.png"
+          }
+        }
+      ],
+      [
+        "expo-navigation-bar",
+        {
+          "enforceContrast": false,
+          "hidden": false
         }
       ]
     ]

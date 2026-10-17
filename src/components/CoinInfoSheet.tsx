@@ -15,7 +15,9 @@ import { CloseIcon } from '@/components/Icons';
 import { Stat } from '@/components/Stat';
 import { useCoinDescription, type CoinDescriptionState } from '@/hooks/useCoinDescription';
 import { useCoinInfo } from '@/hooks/useCoinInfo';
-import { colors, radius, spacing } from '@/theme';
+import { radius, spacing } from '@/theme';
+import { useTheme } from '@/theme/ThemeProvider';
+import { createThemedStyles } from '@/theme/themedStyles';
 import { formatCompact, formatPrice, formatRate, parseNumber } from '@/utils/format';
 
 /** Past this length the paragraph collapses behind a "Read more" toggle. */
@@ -34,6 +36,8 @@ function flag(enabled: boolean | undefined): { label: string; tone: 'up' | 'down
 }
 
 function CoinInfoSheetComponent({ symbol, visible, onClose, decimals }: Props) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const insets = useSafeAreaInsets();
   const { stats, symbolInfo, currency, isLoading, error, refresh } = useCoinInfo(symbol, visible);
   const description = useCoinDescription(symbol, visible);
@@ -213,6 +217,7 @@ function CoinInfoSheetComponent({ symbol, visible, onClose, decimals }: Props) {
 }
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  const styles = useStyles();
   return (
     <View style={styles.section}>
       <Text style={styles.sectionTitle}>{title}</Text>
@@ -232,6 +237,8 @@ function formatAmount2(value: string | undefined): string {
  * toggle and the attribution link opens the source page.
  */
 function AboutSection({ base, state }: { base?: string; state: CoinDescriptionState }) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const [expanded, setExpanded] = useState(false);
   const { description, isLoading, isLoaded, error, refresh } = state;
 
@@ -274,14 +281,15 @@ function AboutSection({ base, state }: { base?: string; state: CoinDescriptionSt
 
 export const CoinInfoSheet = memo(CoinInfoSheetComponent);
 
-const styles = StyleSheet.create({
+const useStyles = createThemedStyles((colors) =>
+  StyleSheet.create({
   backdrop: {
     position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.6)',
+    backgroundColor: colors.overlay,
   },
   sheet: {
     position: 'absolute',
@@ -428,4 +436,5 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.xl,
   },
-});
+  }),
+);

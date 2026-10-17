@@ -1,7 +1,8 @@
 import { memo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
-import { colors, radius } from '@/theme';
+import { radius } from '@/theme';
+import { createThemedStyles } from '@/theme/themedStyles';
 import { hashToHue } from '@/utils/format';
 
 type Props = {
@@ -10,6 +11,7 @@ type Props = {
 };
 
 function CoinAvatarComponent({ symbol, size = 36 }: Props) {
+  const styles = useStyles();
   const label = symbol.slice(0, symbol.length > 4 ? 3 : 2);
   const hue = hashToHue(symbol);
 
@@ -34,17 +36,19 @@ function CoinAvatarComponent({ symbol, size = 36 }: Props) {
 
 export const CoinAvatar = memo(CoinAvatarComponent);
 
-const styles = StyleSheet.create({
-  avatar: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radius.pill,
-  },
-  label: {
-    color: colors.text,
-    fontWeight: '700',
-    letterSpacing: 0.2,
-  },
-});
+const useStyles = createThemedStyles((colors) =>
+  StyleSheet.create({
+    avatar: {
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: radius.pill,
+    },
+    label: {
+      color: colors.onAccent,
+      fontWeight: '700',
+      letterSpacing: 0.2,
+    },
+  }),
+);

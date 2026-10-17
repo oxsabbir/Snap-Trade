@@ -1,7 +1,8 @@
 import { ScrollView, Pressable, StyleSheet, Text } from 'react-native';
 
 import { QUOTE_FILTERS, type QuoteFilter } from '@/lib/kucoin/market';
-import { colors, radius, spacing } from '@/theme';
+import { radius, spacing } from '@/theme';
+import { createThemedStyles } from '@/theme/themedStyles';
 
 export const FAVORITES_TAB = 'Favorites' as const;
 export type TabValue = typeof FAVORITES_TAB | QuoteFilter;
@@ -13,6 +14,7 @@ type Props = {
 };
 
 export function QuoteTabs({ value, onChange, favoritesCount }: Props) {
+  const styles = useStyles();
   const tabs: TabValue[] = [FAVORITES_TAB, ...QUOTE_FILTERS];
 
   return (
@@ -41,7 +43,7 @@ export function QuoteTabs({ value, onChange, favoritesCount }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = createThemedStyles((colors) => StyleSheet.create({
   content: {
     paddingHorizontal: spacing.lg,
     gap: spacing.sm,
@@ -62,6 +64,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   chipTextActive: {
-    color: '#06231C',
+    color: colors.onAccent,
   },
-});
+}));

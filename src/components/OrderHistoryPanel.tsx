@@ -11,7 +11,9 @@ import { OrderHistoryCard } from "@/components/OrderHistoryCard";
 import { TrayIcon } from "@/components/Icons";
 import { useOrderHistory } from "@/hooks/useOrderHistory";
 import { useSymbolRules } from "@/hooks/useSymbolRules";
-import { colors, radius, spacing } from "@/theme";
+import { radius, spacing } from "@/theme";
+import { useTheme } from "@/theme/ThemeProvider";
+import { createThemedStyles } from "@/theme/themedStyles";
 import { decimalsFromIncrement } from "@/utils/format";
 
 type Props = {
@@ -27,6 +29,8 @@ const EMPTY_TRAY_SIZE = 48;
  * endpoints the rest of the screen uses; nothing here is mocked.
  */
 function OrderHistoryPanelComponent({ symbol }: Props) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const { orders, isLoading, isLoadingMore, error, refresh } = useOrderHistory(symbol);
   // The card prints the numbers at the pair's own precision, using the same `/symbols` increments
   // the order book and trade panel already read, rather than a hardcoded decimal count.
@@ -97,7 +101,8 @@ function OrderHistoryPanelComponent({ symbol }: Props) {
 
 export const OrderHistoryPanel = memo(OrderHistoryPanelComponent);
 
-const styles = StyleSheet.create({
+const useStyles = createThemedStyles((colors) =>
+  StyleSheet.create({
   loading: {
     alignItems: "center",
     paddingVertical: spacing.xl,
@@ -109,17 +114,17 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     marginBottom: spacing.sm,
     padding: spacing.sm,
-    backgroundColor: "rgba(246,70,93,0.16)",
+    backgroundColor: colors.downFill,
     borderRadius: radius.sm,
   },
   errorText: {
     flex: 1,
-    color: colors.down,
+    color: colors.downText,
     fontSize: 12,
     fontWeight: "600",
   },
   retryText: {
-    color: colors.down,
+    color: colors.downText,
     fontSize: 12,
     fontWeight: "700",
   },
@@ -136,4 +141,5 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingVertical: spacing.sm,
   },
-});
+  }),
+);

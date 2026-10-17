@@ -1,7 +1,8 @@
 import { Pressable, ScrollView, StyleSheet, Text } from 'react-native';
 
 import { LINE_TIMEFRAME, TIMEFRAMES, type TimeframeOrLine } from '@/lib/kucoin/candles';
-import { colors, radius, spacing } from '@/theme';
+import { radius, spacing } from '@/theme';
+import { createThemedStyles } from '@/theme/themedStyles';
 
 type Props = {
   value: string;
@@ -9,6 +10,7 @@ type Props = {
 };
 
 export function TimeframeTabs({ value, onChange }: Props) {
+  const styles = useStyles();
   // Line first: it is the widest possible range, so it reads as the leftmost option.
   // The row is a horizontal ScrollView, so the extra chip costs nothing at narrow widths.
   const options: TimeframeOrLine[] = [LINE_TIMEFRAME, ...TIMEFRAMES];
@@ -37,7 +39,7 @@ export function TimeframeTabs({ value, onChange }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = createThemedStyles((colors) => StyleSheet.create({
   content: {
     paddingHorizontal: spacing.lg,
     gap: spacing.sm,
@@ -58,6 +60,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   chipTextActive: {
-    color: '#06231C',
+    color: colors.onAccent,
   },
-});
+}));

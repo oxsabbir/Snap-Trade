@@ -5,7 +5,9 @@ import { runOnJS, useDerivedValue, useSharedValue, withSpring } from 'react-nati
 import { Canvas, Line, PaintStyle, Picture, Skia, StrokeCap, StrokeJoin, TileMode, vec } from '@shopify/react-native-skia';
 
 import type { Candle, ChartMode } from '@/lib/kucoin/types';
-import { colors, radius, spacing } from '@/theme';
+import { radius, spacing } from '@/theme';
+import { useTheme } from '@/theme/ThemeProvider';
+import { createThemedStyles } from '@/theme/themedStyles';
 import { formatAmount, formatPercent, formatPrice } from '@/utils/format';
 
 const PAD_TOP = 8;
@@ -138,6 +140,8 @@ function formatAxisTime(timestamp: number, spanMs: number): string {
 }
 
 function PriceChartComponent({ candles, mode, height = 250, decimals, defaultSpan, resetKey, onVisibleRangeChange }: Props) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const [width, setWidth] = useState(0);
   // The viewport the user last settled on, tagged with the series and length it was
   // settled against so the render pass can tell a new candle from a new series.
@@ -243,10 +247,10 @@ function PriceChartComponent({ candles, mode, height = 250, decimals, defaultSpa
     const border = Skia.Paint();
     grid.setStyle(PaintStyle.Stroke);
     grid.setStrokeWidth(HAIRLINE);
-    grid.setColor(Skia.Color('#FFFFFF12'));
+    grid.setColor(Skia.Color(colors.gridLine));
     border.setStyle(PaintStyle.Stroke);
     border.setStrokeWidth(HAIRLINE);
-    border.setColor(Skia.Color('#FFFFFF1F'));
+    border.setColor(Skia.Color(colors.gridBorder));
 
     for (let line = 1; line < GRID_LINES; line++) {
       const y = PAD_TOP + (line / GRID_LINES) * priceHeight;
@@ -280,7 +284,7 @@ function PriceChartComponent({ candles, mode, height = 250, decimals, defaultSpa
     const picture = recorder.finishRecordingAsPicture();
     recorder.dispose();
     return picture;
-  }, [count, innerWidth, priceHeight, settledSpan, settledStart]);
+  }, [colors.gridBorder, colors.gridLine, count, innerWidth, priceHeight, settledSpan, settledStart]);
 
   const onLayout = useCallback((event: LayoutChangeEvent) => setWidth(event.nativeEvent.layout.width), []);
 
@@ -441,7 +445,7 @@ function PriceChartComponent({ candles, mode, height = 250, decimals, defaultSpa
     recorder.dispose();
     for (let index = 0; index < scratch.length; index++) scratch[index]!.dispose();
     return picture;
-  }, [countValue, lineValue, packed, plotHeight, plotWidth, spanValue, startValue]);
+  }, [colors.down, colors.up, countValue, lineValue, packed, plotHeight, plotWidth, spanValue, startValue]);
 
   const panAnchor = useSharedValue(0);
   const pinchSpan = useSharedValue(0);
@@ -548,13 +552,16 @@ function PriceChartComponent({ candles, mode, height = 250, decimals, defaultSpa
 }
 
 function Readout({ candle, decimals }: { candle: Candle; decimals?: number }) {
+  const styles = useStyles();
   return <View style={styles.readout} pointerEvents="none"><Text style={styles.readoutTime}>{new Date(candle.time).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</Text><View style={styles.readoutGrid}><OhlcCell label="O" value={formatPrice(candle.open, decimals)} /><OhlcCell label="H" value={formatPrice(candle.high, decimals)} /><OhlcCell label="L" value={formatPrice(candle.low, decimals)} /><OhlcCell label="C" value={formatPrice(candle.close, decimals)} /></View><Text style={styles.readoutVolume}>Vol {formatAmount(candle.volume)}{candle.open !== 0 ? `  ${formatPercent(((candle.close - candle.open) / candle.open) * 100)}` : ''}</Text></View>;
 }
-function OhlcCell({ label, value }: { label: string; value: string }) { return <View style={styles.ohlcCell}><Text style={styles.ohlcLabel}>{label}</Text><Text style={styles.ohlcValue}>{value}</Text></View>; }
+function OhlcCell({ label, value }: { label: string; value: string }) { const styles = useStyles(); return <View style={styles.ohlcCell}><Text style={styles.ohlcLabel}>{label}</Text><Text style={styles.ohlcValue}>{value}</Text></View>; }
 
 export const PriceChart = memo(PriceChartComponent);
 
-const styles = StyleSheet.create({
-  container: { flexDirection: 'row', position: 'relative' }, canvas: { flex: 1 }, axisLabel: { color: colors.textFaint, fontSize: 10, textAlign: 'right' }, timeLabel: { position: 'absolute', bottom: 2, color: colors.textFaint, fontSize: 10, width: TIME_LABEL_WIDTH, textAlign: 'center' },
-  readout: { position: 'absolute', top: spacing.xs, left: spacing.xs, backgroundColor: 'rgba(23,24,26,0.94)', borderRadius: radius.sm, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border, paddingHorizontal: spacing.sm, paddingVertical: 6, gap: 3 }, readoutTime: { color: colors.textMuted, fontSize: 10, fontWeight: '600' }, readoutGrid: { flexDirection: 'row', gap: spacing.md }, ohlcCell: { flexDirection: 'row', alignItems: 'center', gap: 3 }, ohlcLabel: { color: colors.textFaint, fontSize: 10, fontWeight: '700' }, ohlcValue: { color: colors.text, fontSize: 10, fontWeight: '600', fontVariant: ['tabular-nums'] }, readoutVolume: { color: colors.textMuted, fontSize: 10, fontVariant: ['tabular-nums'] },
-});
+const useStyles = createThemedStyles((colors) =>
+  StyleSheet.create({
+    container: { flexDirection: 'row', position: 'relative' }, canvas: { flex: 1 }, axisLabel: { color: colors.textFaint, fontSize: 10, textAlign: 'right' }, timeLabel: { position: 'absolute', bottom: 2, color: colors.textFaint, fontSize: 10, width: TIME_LABEL_WIDTH, textAlign: 'center' },
+    readout: { position: 'absolute', top: spacing.xs, left: spacing.xs, backgroundColor: colors.surface, borderRadius: radius.sm, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border, paddingHorizontal: spacing.sm, paddingVertical: 6, gap: 3 }, readoutTime: { color: colors.textMuted, fontSize: 10, fontWeight: '600' }, readoutGrid: { flexDirection: 'row', gap: spacing.md }, ohlcCell: { flexDirection: 'row', alignItems: 'center', gap: 3 }, ohlcLabel: { color: colors.textFaint, fontSize: 10, fontWeight: '700' }, ohlcValue: { color: colors.text, fontSize: 10, fontWeight: '600', fontVariant: ['tabular-nums'] }, readoutVolume: { color: colors.textMuted, fontSize: 10, fontVariant: ['tabular-nums'] },
+  }),
+);

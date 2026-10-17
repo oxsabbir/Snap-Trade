@@ -11,7 +11,9 @@ import { CoinAvatar } from "@/components/CoinAvatar";
 import { ChevronRightIcon } from "@/components/Icons";
 import { useAccountBalance } from "@/hooks/useAccountBalance";
 import { useTicker } from "@/state/ticker";
-import { colors, radius, spacing } from "@/theme";
+import { radius, spacing } from "@/theme";
+import { useTheme } from "@/theme/ThemeProvider";
+import { createThemedStyles } from "@/theme/themedStyles";
 import { formatAmount, formatPrice } from "@/utils/format";
 
 type Props = {
@@ -55,6 +57,8 @@ function AssetSection({
   locked,
   usdValue,
 }: SectionProps) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   return (
     <View style={styles.section}>
       <View style={styles.header}>
@@ -117,6 +121,8 @@ function AssetSection({
  * repaints this panel and nothing above it.
  */
 function AssetsPanelComponent({ symbol }: Props) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const { available, holds, isLoading, error, refresh } = useAccountBalance();
   const { update } = useTicker(symbol);
 
@@ -185,7 +191,8 @@ export const AssetsPanel = memo(AssetsPanelComponent);
 
 const SECTION_PADDING = 20;
 
-const styles = StyleSheet.create({
+const useStyles = createThemedStyles((colors) =>
+  StyleSheet.create({
   // Pulls out over the order view's own 12px gutter so each section is genuinely full-width and the
   // dividers run edge to edge; the gutter is restored inside each section instead.
   panel: {
@@ -203,17 +210,17 @@ const styles = StyleSheet.create({
     marginHorizontal: SECTION_PADDING,
     marginBottom: spacing.sm,
     padding: spacing.sm,
-    backgroundColor: "rgba(246,70,93,0.16)",
+    backgroundColor: colors.downFill,
     borderRadius: radius.sm,
   },
   errorText: {
     flex: 1,
-    color: colors.down,
+    color: colors.downText,
     fontSize: 12,
     fontWeight: "600",
   },
   retryText: {
-    color: colors.down,
+    color: colors.downText,
     fontSize: 12,
     fontWeight: "700",
   },
@@ -276,4 +283,5 @@ const styles = StyleSheet.create({
     height: StyleSheet.hairlineWidth,
     backgroundColor: colors.border,
   },
-});
+  }),
+);

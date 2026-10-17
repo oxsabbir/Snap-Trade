@@ -1,7 +1,9 @@
 import { memo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
-import { colors, spacing } from '@/theme';
+import { spacing } from '@/theme';
+import { useTheme } from '@/theme/ThemeProvider';
+import { createThemedStyles } from '@/theme/themedStyles';
 
 type Props = {
   label: string;
@@ -14,7 +16,9 @@ type Props = {
 };
 
 function StatComponent({ label, value, columns = 2, hint, tone = 'default' }: Props) {
-  const valueColor = tone === 'up' ? colors.up : tone === 'down' ? colors.down : colors.text;
+  const { colors } = useTheme();
+  const styles = useStyles();
+  const valueColor = tone === 'up' ? colors.upText : tone === 'down' ? colors.downText : colors.text;
 
   return (
     <View style={[styles.stat, columns === 1 ? styles.full : styles.half]}>
@@ -35,30 +39,32 @@ function StatComponent({ label, value, columns = 2, hint, tone = 'default' }: Pr
 
 export const Stat = memo(StatComponent);
 
-const styles = StyleSheet.create({
-  stat: {
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.md,
-    gap: 3,
-  },
-  half: {
-    width: '50%',
-  },
-  full: {
-    width: '100%',
-  },
-  statLabel: {
-    color: colors.textFaint,
-    fontSize: 11,
-  },
-  statValue: {
-    color: colors.text,
-    fontSize: 14,
-    fontWeight: '600',
-    fontVariant: ['tabular-nums'],
-  },
-  statHint: {
-    color: colors.textFaint,
-    fontSize: 10,
-  },
-});
+const useStyles = createThemedStyles((colors) =>
+  StyleSheet.create({
+    stat: {
+      paddingHorizontal: spacing.lg,
+      paddingVertical: spacing.md,
+      gap: 3,
+    },
+    half: {
+      width: '50%',
+    },
+    full: {
+      width: '100%',
+    },
+    statLabel: {
+      color: colors.textFaint,
+      fontSize: 11,
+    },
+    statValue: {
+      color: colors.text,
+      fontSize: 14,
+      fontWeight: '600',
+      fontVariant: ['tabular-nums'],
+    },
+    statHint: {
+      color: colors.textFaint,
+      fontSize: 10,
+    },
+  }),
+);

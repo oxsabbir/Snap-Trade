@@ -3,7 +3,9 @@ import { StyleSheet, Text, View } from 'react-native';
 
 import { CoinAvatar } from '@/components/CoinAvatar';
 import type { Holding, WalletKind } from '@/lib/kucoin/types';
-import { colors, spacing } from '@/theme';
+import { spacing } from '@/theme';
+import { useTheme } from '@/theme/ThemeProvider';
+import { createThemedStyles } from '@/theme/themedStyles';
 import { formatAmount, formatPrice } from '@/utils/format';
 
 /** `all` shows the rolled-up row; a wallet kind shows only that wallet's slice. */
@@ -20,6 +22,8 @@ type Props = {
 };
 
 function AssetRowComponent({ holding, scope }: Props) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const slice = scope === 'all' ? null : holding[scope];
   const balance = slice ? slice.balance : holding.balance;
   const value = slice ? slice.value : holding.value;
@@ -88,7 +92,8 @@ function AssetRowComponent({ holding, scope }: Props) {
 
 export const AssetRow = memo(AssetRowComponent);
 
-const styles = StyleSheet.create({
+const useStyles = createThemedStyles((colors) =>
+  StyleSheet.create({
   row: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -134,4 +139,5 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontVariant: ['tabular-nums'],
   },
-});
+  }),
+);

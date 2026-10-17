@@ -3,10 +3,12 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 
 import { TradeRouteView } from "@/components/TradeRouteView";
 import { useActiveCoin } from "@/state/activeCoin";
-import { colors, radius, spacing } from "@/theme";
+import { radius, spacing } from "@/theme";
+import { createThemedStyles } from "@/theme/themedStyles";
 
 export default function TradeScreenRoute() {
   const coin = useActiveCoin();
+  const styles = useStyles();
 
   if (!coin) {
     return (
@@ -36,36 +38,38 @@ export default function TradeScreenRoute() {
   );
 }
 
-const styles = StyleSheet.create({
-  empty: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: colors.bg,
-    paddingHorizontal: spacing.xl,
-    gap: spacing.sm,
-  },
-  emptyTitle: {
-    color: colors.text,
-    fontSize: 16,
-    fontWeight: "600",
-  },
-  emptyBody: {
-    color: colors.textMuted,
-    fontSize: 13,
-    textAlign: "center",
-  },
-  cta: {
-    marginTop: spacing.md,
-    paddingHorizontal: spacing.lg,
-    height: 38,
-    justifyContent: "center",
-    borderRadius: radius.pill,
-    backgroundColor: colors.accent,
-  },
-  ctaText: {
-    color: "#06231C",
-    fontSize: 13,
-    fontWeight: "700",
-  },
-});
+const useStyles = createThemedStyles((colors) =>
+  StyleSheet.create({
+    empty: {
+      flex: 1,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: colors.bg,
+      paddingHorizontal: spacing.xl,
+      gap: spacing.sm,
+    },
+    emptyTitle: {
+      color: colors.text,
+      fontSize: 16,
+      fontWeight: "600",
+    },
+    emptyBody: {
+      color: colors.textMuted,
+      fontSize: 13,
+      textAlign: "center",
+    },
+    cta: {
+      marginTop: spacing.md,
+      paddingHorizontal: spacing.lg,
+      height: 38,
+      justifyContent: "center",
+      borderRadius: radius.pill,
+      backgroundColor: colors.accent,
+    },
+    ctaText: {
+      color: colors.onAccent,
+      fontSize: 13,
+      fontWeight: "700",
+    },
+  }),
+);

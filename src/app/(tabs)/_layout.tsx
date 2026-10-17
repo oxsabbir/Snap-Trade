@@ -3,13 +3,17 @@ import { Tabs } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AccountIcon, HomeIcon, TradeIcon } from "@/components/Icons";
-import { colors, spacing } from "@/theme";
+import { spacing } from "@/theme";
+import { useTheme } from "@/theme/ThemeProvider";
+import { createThemedStyles } from "@/theme/themedStyles";
 
 /** Icon + label only. The bottom inset is added on top of this. */
 const TAB_BAR_HEIGHT = 65;
 
 export default function TabsLayout() {
   const insets = useSafeAreaInsets();
+  const { colors } = useTheme();
+  const styles = useStyles();
 
   return (
     <Tabs
@@ -57,14 +61,16 @@ export default function TabsLayout() {
   );
 }
 
-const styles = StyleSheet.create({
-  bar: {
-    backgroundColor: colors.surface,
-    borderTopColor: colors.border,
-    borderTopWidth: StyleSheet.hairlineWidth,
-  },
-  label: {
-    fontSize: 11,
-    fontWeight: "600",
-  },
-});
+const useStyles = createThemedStyles((colors) =>
+  StyleSheet.create({
+    bar: {
+      backgroundColor: colors.surface,
+      borderTopColor: colors.border,
+      borderTopWidth: StyleSheet.hairlineWidth,
+    },
+    label: {
+      fontSize: 11,
+      fontWeight: "600",
+    },
+  }),
+);

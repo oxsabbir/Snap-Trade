@@ -39,7 +39,9 @@ import {
   totalFromSize,
   type FillPercent,
 } from "@/lib/trade";
-import { colors, radius, spacing } from "@/theme";
+import { radius, spacing } from "@/theme";
+import { useTheme } from "@/theme/ThemeProvider";
+import { createThemedStyles } from "@/theme/themedStyles";
 import { trackPlacedOrder } from "@/state/openOrders";
 import { formatAmount } from "@/utils/format";
 
@@ -84,6 +86,8 @@ function PercentChips({
   enabled,
   side,
 }: PercentChipsProps) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const accentColor = side === "buy" ? colors.up : colors.down;
 
   return (
@@ -125,6 +129,8 @@ function TradePanelBase({
   testMode = TEST_MODE,
   priceSelection,
 }: Props) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const [baseCurrency = "", quoteCurrency = ""] = symbol.split("-");
 
   const {
@@ -673,7 +679,7 @@ function TradePanelBase({
         accessibilityLabel={`${side === "buy" ? "Buy" : "Sell"} ${baseCurrency}`}
       >
         {isSubmitting ? (
-          <ActivityIndicator color="#FFFFFF" />
+          <ActivityIndicator color={colors.onAccent} />
         ) : (
           <Text style={styles.actionText}>
             {side === "buy" ? "Buy" : "Sell"} {baseCurrency}
@@ -714,6 +720,8 @@ function AmountField({
   onStepDown,
   labelAction,
 }: AmountFieldProps) {
+  const { colors, scheme } = useTheme();
+  const styles = useStyles();
   return (
     <View style={styles.field}>
       <View style={styles.fieldLabelRow}>
@@ -727,6 +735,7 @@ function AmountField({
           placeholder={placeholder}
           placeholderTextColor={colors.textFaint}
           style={styles.input}
+          keyboardAppearance={scheme === 'dark' ? 'dark' : 'light'}
           keyboardType="decimal-pad"
           editable={editable}
           autoCapitalize="none"
@@ -761,7 +770,7 @@ function AmountField({
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = createThemedStyles((colors) => StyleSheet.create({
   // The parent owns the padding, and this column is stretched to the height of the taller one
   // beside it, so the content spreads to fill rather than sitting in a scroll view of its own.
   content: {
@@ -774,10 +783,10 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   toastOk: {
-    backgroundColor: "rgba(35,175,137,0.16)",
+    backgroundColor: colors.upFill,
   },
   toastError: {
-    backgroundColor: "rgba(246,70,93,0.16)",
+    backgroundColor: colors.downFill,
   },
   toastText: {
     color: colors.text,
@@ -810,10 +819,10 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
   tabTextBuy: {
-    color: "#FFFFFF",
+    color: colors.onAccent,
   },
   tabTextSell: {
-    color: "#FFFFFF",
+    color: colors.onAccent,
   },
   field: {
     gap: 4,
@@ -922,7 +931,7 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
   },
   chipTextActive: {
-    color: "#FFFFFF",
+    color: colors.onAccent,
   },
   chipTextDisabled: {
     color: colors.textFaint,
@@ -953,10 +962,10 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "rgba(35,175,137,0.16)",
+    backgroundColor: colors.upFill,
   },
   error: {
-    color: colors.down,
+    color: colors.downText,
     fontSize: 11,
     lineHeight: 15,
   },
@@ -980,11 +989,11 @@ const styles = StyleSheet.create({
     opacity: 0.4,
   },
   actionText: {
-    color: "#FFFFFF",
+    color: colors.onAccent,
     fontSize: 14,
     fontWeight: "700",
   },
   rulesLoader: {
     marginTop: 2,
   },
-});
+}));

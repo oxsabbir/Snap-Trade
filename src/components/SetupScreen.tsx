@@ -17,7 +17,9 @@ import Animated, { FadeInDown } from 'react-native-reanimated';
 import { CheckIcon, EyeIcon, EyeOffIcon } from '@/components/Icons';
 import { KuCoinApiError } from '@/lib/kucoin/client';
 import type { KuCoinCredentials } from '@/lib/kucoin/types';
-import { colors, radius, spacing } from '@/theme';
+import { radius, spacing } from '@/theme';
+import { useTheme } from '@/theme/ThemeProvider';
+import { createThemedStyles } from '@/theme/themedStyles';
 
 type Props = {
   onConnect: (credentials: KuCoinCredentials) => Promise<void>;
@@ -59,6 +61,8 @@ function connectionError(error: unknown): string {
 }
 
 export function SetupScreen({ onConnect, onConnected }: Props) {
+  const { colors, scheme } = useTheme();
+  const styles = useStyles();
   const [values, setValues] = useState<KuCoinCredentials>(EMPTY_CREDENTIALS);
   const [showSecret, setShowSecret] = useState(false);
   const [showPassphrase, setShowPassphrase] = useState(false);
@@ -160,6 +164,7 @@ export function SetupScreen({ onConnect, onConnected }: Props) {
                             }
                             placeholder={field.placeholder}
                             placeholderTextColor={colors.textFaint}
+                            keyboardAppearance={scheme === 'dark' ? 'dark' : 'light'}
                             style={styles.input}
                             secureTextEntry={field.secure && !isVisible}
                             autoCapitalize="none"
@@ -207,7 +212,7 @@ export function SetupScreen({ onConnect, onConnected }: Props) {
                     accessibilityLabel={isSubmitting ? 'Connecting to KuCoin' : 'Connect'}
                   >
                     {isSubmitting ? (
-                      <ActivityIndicator color="#06231C" />
+                      <ActivityIndicator color={colors.onAccent} />
                     ) : (
                       <Text style={styles.buttonText}>Connect</Text>
                     )}
@@ -222,7 +227,7 @@ export function SetupScreen({ onConnect, onConnected }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = createThemedStyles((colors) => StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: colors.bg,
@@ -303,7 +308,7 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
   error: {
-    color: colors.down,
+    color: colors.downText,
     fontSize: 12,
     lineHeight: 17,
   },
@@ -318,7 +323,7 @@ const styles = StyleSheet.create({
     opacity: 0.42,
   },
   buttonText: {
-    color: '#06231C',
+    color: colors.onAccent,
     fontSize: 14,
     fontWeight: '700',
   },
@@ -334,7 +339,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: radius.pill,
-    backgroundColor: 'rgba(35,175,137,0.14)',
+    backgroundColor: colors.upFill,
   },
   successTitle: {
     color: colors.text,
@@ -345,4 +350,4 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     fontSize: 13,
   },
-});
+}));

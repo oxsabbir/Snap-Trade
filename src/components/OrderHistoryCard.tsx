@@ -3,7 +3,9 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 
 import { ChevronRightIcon } from "@/components/Icons";
 import type { OrderHistoryEntry } from "@/hooks/useOrderHistory";
-import { colors, radius, spacing } from "@/theme";
+import { radius, spacing } from "@/theme";
+import { useTheme } from "@/theme/ThemeProvider";
+import { createThemedStyles } from "@/theme/themedStyles";
 import { decimalsFromPrice, formatDateTime, formatPrice } from "@/utils/format";
 
 type Props = {
@@ -21,10 +23,6 @@ type Props = {
   /** Opens the order's detail screen. Only wired once that screen exists. */
   onPress?: (entry: OrderHistoryEntry) => void;
 };
-
-/** The buy/sell tag fills, from the same green and red the rest of the app already uses. */
-const TAG_BUY_BG = "rgba(35,175,137,0.16)";
-const TAG_SELL_BG = "rgba(246,70,93,0.16)";
 
 /**
  * The card is drawn at 85% of the reference sizes: at full size the rows read a touch heavy beside
@@ -67,6 +65,8 @@ function OrderHistoryCardComponent({
   sizeDecimals,
   onPress,
 }: Props) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const isBuy = entry.side === "buy";
   const isFilled = entry.status === "filled";
 
@@ -160,7 +160,8 @@ function OrderHistoryCardComponent({
 
 export const OrderHistoryCard = memo(OrderHistoryCardComponent);
 
-const styles = StyleSheet.create({
+const useStyles = createThemedStyles((colors) =>
+  StyleSheet.create({
   card: {
     paddingVertical: scaled(spacing.lg),
     borderBottomWidth: StyleSheet.hairlineWidth,
@@ -200,20 +201,20 @@ const styles = StyleSheet.create({
     paddingVertical: scaled(2),
   },
   tagBuy: {
-    backgroundColor: TAG_BUY_BG,
+    backgroundColor: colors.upFill,
   },
   tagSell: {
-    backgroundColor: TAG_SELL_BG,
+    backgroundColor: colors.downFill,
   },
   tagText: {
     fontSize: scaled(12),
     fontWeight: "600",
   },
   tagTextBuy: {
-    color: colors.up,
+    color: colors.upText,
   },
   tagTextSell: {
-    color: colors.down,
+    color: colors.downText,
   },
   time: {
     flexShrink: 1,
@@ -245,4 +246,5 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     fontWeight: "400",
   },
-});
+  }),
+);
