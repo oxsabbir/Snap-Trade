@@ -1,12 +1,9 @@
-import { useCallback, useEffect } from 'react';
+import { useCallback } from 'react';
 import {
   type NativeScrollEvent,
   type NativeSyntheticEvent,
-  Pressable,
   ScrollView,
   StyleSheet,
-  Text,
-  View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -14,16 +11,13 @@ import { CoinDetail } from '@/components/CoinDetail';
 import { OrderManagement } from '@/components/OrderManagement';
 import { TradeScreen } from '@/components/TradeScreen';
 import { useAccountBalance } from '@/hooks/useAccountBalance';
-import { snapLog } from '@/lib/snapLog';
 import { loadMoreOrderHistory } from '@/state/orderHistory';
-import { colors, radius, spacing } from '@/theme';
+import { colors, spacing } from '@/theme';
 
 type Props = {
   symbol: string;
   name: string;
   decimals: number;
-  /** Shown only when the screen is a pushed route rather than a tab. */
-  onBack?: () => void;
 };
 
 /**
@@ -33,18 +27,13 @@ type Props = {
 const HISTORY_LOAD_MORE_THRESHOLD = 320;
 
 /**
- * The trade screen's content, shared by the tab route and the signal deep-link route. The two
- * differ only in how they learn the symbol — the tab reads the active coin, the deep link reads
- * the URL — so the layout lives here rather than in each route.
+ * The trade screen's content: the chart, the order form, and the order management section, with the
+ * symbol supplied by the tab route that owns the screen's only scroll view.
  */
-export function TradeRouteView({ symbol, name, decimals, onBack }: Props) {
+export function TradeRouteView({ symbol, name, decimals }: Props) {
   // The order form reads this from the shared store too, so this is one `/accounts` request
   // shared by both consumers rather than one each.
   const { available } = useAccountBalance();
-
-  useEffect(() => {
-    snapLog('TradeScreenFirstRender', symbol);
-  }, [symbol]);
 
   // The route owns the screen's only scroll view, so the History tab cannot detect its own end:
   // this polls how far the page has scrolled and pokes the history store, which ignores the signal
@@ -63,19 +52,6 @@ export function TradeRouteView({ symbol, name, decimals, onBack }: Props) {
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
-      {onBack ? (
-        <View style={styles.header}>
-          <Pressable
-            onPress={onBack}
-            hitSlop={12}
-            style={styles.back}
-            accessibilityRole="button"
-            accessibilityLabel="Back to markets"
-          >
-            <Text style={styles.backText}>‹ Back</Text>
-          </Pressable>
-        </View>
-      ) : null}
       {/* One scroll view for the whole screen, so the sections below the chart are added as
           siblings here rather than each bringing its own scrolling. Nothing below may nest a
           scroll view of its own; a section that outgrows the screen grows this one instead. */}
@@ -108,22 +84,6 @@ const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: colors.bg,
-  },
-  header: {
-    paddingHorizontal: spacing.md,
-    paddingTop: spacing.sm,
-  },
-  back: {
-    alignSelf: 'flex-start',
-    paddingVertical: spacing.xs,
-    paddingHorizontal: spacing.sm,
-    borderRadius: radius.pill,
-    backgroundColor: colors.surfaceAlt,
-  },
-  backText: {
-    color: colors.text,
-    fontSize: 13,
-    fontWeight: '600',
   },
   scroll: {
     flex: 1,
