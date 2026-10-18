@@ -67,7 +67,7 @@ src/app/               ROUTES — every file here is a screen
   (tabs)/trade.tsx     Trade: chart for the currently selected coin
   (tabs)/account.tsx   Account: connect form, total value, asset list
 src/components/        presentational only, no data fetching
-  SearchBar  QuoteTabs  PopularSearches  RecentSearches  SpotRow  AssetRow  CoinAvatar  RangeBar
+  SearchBar  QuoteTabs  PopularSearches  SpotRow  AssetRow  CoinAvatar  RangeBar
   Icons  TimeframeTabs
   PriceChart             interactive chart: drag to pan, pinch to zoom, latching crosshair
   CoinDetail           shared chart view used by the Trade tab
@@ -78,7 +78,7 @@ src/components/        presentational only, no data fetching
   ConnectAccountForm   API key / secret / passphrase entry
 src/hooks/
   useSpotMarkets.ts    list data — REST fetch, 10s poll, AppState, pull-to-refresh
-  useRecentSearches.ts AsyncStorage-backed recent search history (max 8)
+  useDebouncedValue.ts  debounced query for search
   useLiveCandles.ts    chart data — REST history + WebSocket live price
   useLifetimeSeries.ts lifetime line series — paged 1week walk, symbol cache, live endpoint
   useCoinInfo.ts       coin info sheet data, fetched only while the sheet is open
