@@ -5,8 +5,7 @@ import {
   useMemo,
   useRef,
   useState } from "react";
-import { View } from '@/components/AppLayout';
-import { StyleSheet, type LayoutChangeEvent } from 'react-native';
+import { StyleSheet, View, type LayoutChangeEvent } from 'react-native';
 import { Text } from '@/components/AppText';
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import {

@@ -4,6 +4,7 @@ import { StyleSheet } from 'react-native';
 import Svg, { Circle, Defs, LinearGradient, Path, RadialGradient, Stop } from 'react-native-svg';
 
 import { createThemedStyles } from '@/theme/themedStyles';
+import { useFontScale } from '@/theme/FontScaleProvider';
 import { hashToHue } from '@/utils/format';
 
 type Props = {
@@ -19,13 +20,14 @@ type Props = {
  */
 function AvatarComponent({ name = '', size = 46 }: Props) {
   const styles = useStyles();
+  const { scale } = useFontScale();
   const hue = hashToHue(name || 'kucoin');
   const fillId = `avatar-fill-${hue}`;
   const glowId = `avatar-glow-${hue}`;
 
   return (
     <View style={[styles.wrap, { width: size, height: size, borderRadius: size / 2 }]}>
-      <Svg width={size} height={size} viewBox="0 0 48 48">
+      <Svg width={size * scale} height={size * scale} viewBox="0 0 48 48">
         <Defs>
           <LinearGradient id={fillId} x1="0" y1="0" x2="1" y2="1">
             <Stop offset="0" stopColor={`hsl(${hue}, 78%, 64%)`} />

@@ -39,6 +39,7 @@ import { useTheme } from "@/theme/ThemeProvider";
 import { createThemedStyles } from "@/theme/themedStyles";
 import { trackPlacedOrder } from "@/state/openOrders";
 import { formatAmount } from "@/utils/format";
+import { useFontScale } from "@/theme/FontScaleProvider";
 
 type Props = {
   symbol: string;
@@ -82,11 +83,13 @@ function PercentChips({
   side,
 }: PercentChipsProps) {
   const { colors } = useTheme();
+  const { scale } = useFontScale();
   const styles = useStyles();
   const accentColor = side === "buy" ? colors.up : colors.down;
+  const compact = scale >= 1.075;
 
   return (
-    <View style={styles.chipContainer}>
+    <View style={[styles.chipContainer, compact && styles.chipContainerCompact]}>
       {PERCENT_CHIPS.map((chip) => {
         const isActive = activeChip === chip;
         return (
@@ -97,6 +100,7 @@ function PercentChips({
             hitSlop={8}
             style={[
               styles.chip,
+              compact && styles.chipCompact,
               isActive ? styles.chipActive : styles.chipInactive,
               isActive && { backgroundColor: accentColor },
             ]}
@@ -104,8 +108,10 @@ function PercentChips({
             accessibilityState={{ selected: isActive, disabled: !enabled }}
           >
             <Text
+              numberOfLines={1}
               style={[
                 styles.chipText,
+                compact && styles.chipTextCompact,
                 isActive ? styles.chipTextActive : styles.chipTextInactive,
                 !enabled && styles.chipTextDisabled,
               ]}
@@ -900,13 +906,25 @@ const useStyles = createThemedStyles((colors) => StyleSheet.create({
     gap: 4,
     width: "100%",
   },
+  chipContainerCompact: {
+    padding: 3,
+    gap: 2,
+  },
   chip: {
     flex: 1,
-    height: 36,
+    minWidth: 0,
+    minHeight: 36,
     paddingHorizontal: 8,
+    paddingVertical: 8,
     alignItems: "center",
     justifyContent: "center",
-    borderRadius: radius.pill,
+    // Match the radius to half the height; the global scaler grows both together so the
+    // selected chip remains a capsule instead of relying on an oversized pill radius.
+    borderRadius: 18,
+  },
+  chipCompact: {
+    paddingHorizontal: 2,
+    paddingVertical: 2,
   },
   chipInactive: {
     backgroundColor: "transparent",
@@ -921,6 +939,9 @@ const useStyles = createThemedStyles((colors) => StyleSheet.create({
     fontSize: 12,
     fontWeight: "600",
     fontVariant: ["tabular-nums"],
+  },
+  chipTextCompact: {
+    letterSpacing: -0.2,
   },
   chipTextInactive: {
     color: colors.textMuted,

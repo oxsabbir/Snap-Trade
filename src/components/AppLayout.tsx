@@ -24,6 +24,7 @@ const SCALED_LAYOUT_KEYS: (keyof ViewStyle)[] = [
   'gap', 'rowGap', 'columnGap', 'borderRadius', 'borderTopLeftRadius',
   'borderTopRightRadius', 'borderBottomLeftRadius', 'borderBottomRightRadius',
   'borderWidth', 'borderTopWidth', 'borderBottomWidth', 'borderLeftWidth', 'borderRightWidth',
+  'top', 'right', 'bottom', 'left', 'start', 'end',
 ];
 
 function scaleLayoutStyle(style: StyleProp<ViewStyle>, scale: number): StyleProp<ViewStyle> {
