@@ -39,8 +39,7 @@ function formatFilledDisplay(order: OpenOrder): string {
   if (!Number.isFinite(total) || total <= 0) {
     return `${formatAmount(Number(order.filledSize) || 0)} / —`;
   }
-  const pct = Math.round(filledFraction(order) * 100);
-  return `${formatAmount(Number(order.filledSize) || 0)} / ${formatAmount(total)} · ${pct}%`;
+  return `${formatAmount(Number(order.filledSize) || 0)} / ${formatAmount(total)}`;
 }
 
 function OrderRow({
@@ -57,77 +56,77 @@ function OrderRow({
   const isBuy = order.side === "buy";
   const sideColor = isBuy ? colors.up : colors.down;
   const sideTextColor = isBuy ? colors.upText : colors.downText;
-  const statusColor =
-    order.status === "filled"
-      ? colors.upText
-      : order.status === "cancelled"
-        ? colors.downText
-        : order.status === "partially_filled"
-          ? colors.warning
-          : colors.textMuted;
-
   const progress = filledFraction(order);
-  const hasProgress = progress > 0;
-  const isDone = order.status === "filled" || order.status === "cancelled";
+  const percent = Math.round(progress * 100);
+  const isPartiallyFilled = progress > 0;
+  const statusLabel = isPartiallyFilled ? "Partially filled" : "Open";
+  const remaining = Math.max(0, Number(order.size) - Number(order.filledSize));
 
   return (
-    <View
-      style={[
-        styles.row,
-        isDone && styles.rowDone,
-        isCancelling && styles.rowCancelling,
-      ]}
-    >
-      <View style={[styles.sideIndicator, { backgroundColor: sideColor }]} />
-      <View style={styles.rowLeft}>
-        <View style={styles.rowTop}>
-          <Text style={[styles.symbol, { color: sideTextColor }]}>
+    <View style={[styles.row, isCancelling && styles.rowCancelling]}>
+      <View style={styles.rowHeader}>
+        <View style={styles.identity}>
+          <View style={[styles.sideDot, { backgroundColor: sideColor }]} />
+          <Text style={[styles.symbol, { color: colors.text }]} numberOfLines={1}>
             {order.symbol.replace("-", "/")}
           </Text>
-          <Text style={styles.type}>
-            {order.type === "limit" ? "Limit" : "Market"}
-          </Text>
-        </View>
-        <View style={styles.rowBottom}>
-          <Text style={styles.price}>
-            Price: {formatAmount(Number(order.price))}
-          </Text>
-          <Text style={styles.filled}>{formatFilledDisplay(order)}</Text>
-        </View>
-        {hasProgress ? (
-          <View style={styles.progressTrack}>
-            <View
-              style={[
-                styles.progressFill,
-                {
-                  width: `${Math.round(progress * 100)}%`,
-                  backgroundColor: sideColor,
-                },
-              ]}
-            />
+          <View style={[styles.sideBadge, { backgroundColor: isBuy ? colors.upFill : colors.downFill }]}>
+            <Text style={[styles.sideBadgeText, { color: sideTextColor }]}>
+              {order.side.toUpperCase()}
+            </Text>
           </View>
-        ) : null}
+        </View>
+        <View
+          style={[
+            styles.statusBadge,
+            isPartiallyFilled && { backgroundColor: isBuy ? colors.upFill : colors.downFill },
+          ]}
+        >
+          <Text style={[styles.status, isPartiallyFilled && { color: sideTextColor }]}>
+            {statusLabel}
+          </Text>
+        </View>
       </View>
-      <View style={styles.rowRight}>
-        <Text style={[styles.status, { color: statusColor }]}>
-          {order.status.replace("_", " ")}
+
+      <View style={styles.orderMeta}>
+        <Text style={styles.type}>{order.type === "limit" ? "LIMIT" : "MARKET"}</Text>
+        <Text style={styles.metaDivider}>·</Text>
+        <Text style={styles.price} numberOfLines={1}>
+          {order.type === "market" ? "Market price" : `${formatAmount(Number(order.price))} USDT`}
         </Text>
+      </View>
+
+      <View style={styles.progressHeader}>
+        <Text style={styles.progressTitle}>Filled</Text>
+        <Text style={[styles.progressPercent, { color: sideTextColor }]}>{percent}%</Text>
+      </View>
+      <View
+        style={styles.progressTrack}
+        accessibilityRole="progressbar"
+        accessibilityValue={{ min: 0, max: 100, now: percent }}
+      >
+        <View
+          style={[
+            styles.progressFill,
+            { width: `${percent}%`, backgroundColor: sideColor },
+          ]}
+        />
+      </View>
+
+      <View style={styles.rowFooter}>
+        <View style={styles.fillDetails}>
+          <Text style={styles.filled}>{formatFilledDisplay(order)} {order.symbol.split("-")[0]}</Text>
+          <Text style={styles.remaining}>Remaining {formatAmount(remaining)}</Text>
+        </View>
         <Pressable
           onPress={onCancel}
-          disabled={isCancelling || isDone}
-          style={[
-            styles.cancelBtn,
-            (isCancelling || isDone) && styles.cancelBtnDisabled,
-          ]}
+          disabled={isCancelling}
+          style={[styles.cancelBtn, isCancelling && styles.cancelBtnDisabled]}
           accessibilityRole="button"
           accessibilityLabel={`Cancel order ${order.orderId.slice(0, 8)}`}
           hitSlop={8}
         >
-          {isCancelling ? (
-            <Text style={styles.cancelBtnTextLoading}>Cancelling…</Text>
-          ) : (
-            <Text style={styles.cancelBtnText}>Cancel</Text>
-          )}
+          <Text style={styles.cancelBtnText}>{isCancelling ? "Cancelling…" : "Cancel order"}</Text>
         </Pressable>
       </View>
     </View>
@@ -182,7 +181,10 @@ export const OrderManagement = memo(function OrderManagement({
 
   const usdtBalance = available["USDT"] ?? "0";
 
-  const visibleOrders = useMemo(() => orders, [orders]);
+  const visibleOrders = useMemo(
+    () => orders.filter((order) => order.status === "open" || order.status === "partially_filled"),
+    [orders],
+  );
 
   const handleCancel = useCallback(
     (orderId: string) => {
@@ -401,111 +403,148 @@ const useStyles = createThemedStyles((colors) => StyleSheet.create({
     fontWeight: "600",
   },
   list: {
-    gap: spacing.xs,
+    gap: spacing.sm,
   },
   row: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.xs,
-    paddingVertical: spacing.xs,
-    paddingHorizontal: spacing.sm,
+    gap: spacing.sm,
+    padding: spacing.md,
     backgroundColor: colors.surface,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.border,
-    borderRadius: radius.sm,
+    borderRadius: radius.md,
   },
-  // A finished order stays on screen just long enough to read, so it is dimmed rather than
-  // dropped while it lingers.
-  rowDone: {
-    opacity: 0.55,
-  },
-  // The row holds its place while the cancel is in flight so the spinner has something to show
-  // on, and so a refused cancel leaves the order visible instead of silently swallowing it.
   rowCancelling: {
-    opacity: 0.6,
+    borderColor: colors.warning,
+    opacity: 0.75,
   },
-  sideIndicator: {
-    width: 3,
-    alignSelf: "stretch",
-    borderRadius: 1.5,
-    minHeight: 30,
+  rowHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: spacing.sm,
   },
-  rowLeft: {
-    flex: 1,
-    gap: 2,
-  },
-  rowTop: {
+  identity: {
     flexDirection: "row",
     alignItems: "center",
     gap: spacing.xs,
+    flex: 1,
+    minWidth: 0,
   },
   symbol: {
-    color: colors.text,
-    fontSize: 12,
+    flexShrink: 1,
+    fontSize: 15,
     fontWeight: "700",
     fontVariant: ["tabular-nums"],
   },
-  type: {
-    color: colors.textFaint,
+  sideDot: {
+    width: 7,
+    height: 7,
+    borderRadius: radius.pill,
+  },
+  sideBadge: {
+    paddingHorizontal: spacing.xs,
+    paddingVertical: 2,
+    borderRadius: radius.pill,
+  },
+  sideBadgeText: {
     fontSize: 9,
-    fontWeight: "600",
-    textTransform: "uppercase",
+    lineHeight: 12,
+    fontWeight: "800",
     letterSpacing: 0.3,
   },
-  rowBottom: {
+  statusBadge: {
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    borderRadius: radius.pill,
+    backgroundColor: colors.surfaceAlt,
+  },
+  status: {
+    color: colors.textMuted,
+    fontSize: 10,
+    fontWeight: "700",
+  },
+  orderMeta: {
     flexDirection: "row",
     alignItems: "center",
     gap: spacing.xs,
   },
+  type: {
+    color: colors.textFaint,
+    fontSize: 10,
+    fontWeight: "700",
+  },
   price: {
     color: colors.text,
+    flexShrink: 1,
     fontSize: 11,
     fontWeight: "600",
     fontVariant: ["tabular-nums"],
   },
-  filled: {
+  metaDivider: {
+    color: colors.textFaint,
+    fontSize: 12,
+  },
+  progressHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginTop: spacing.xs,
+  },
+  progressTitle: {
     color: colors.textMuted,
-    fontSize: 10,
+    fontSize: 11,
+    fontWeight: "600",
+  },
+  progressPercent: {
+    fontSize: 12,
+    fontWeight: "800",
     fontVariant: ["tabular-nums"],
   },
   progressTrack: {
-    height: 2,
-    borderRadius: 1,
+    height: 5,
+    borderRadius: radius.pill,
     backgroundColor: colors.surfaceAlt,
     overflow: "hidden",
   },
   progressFill: {
-    height: 2,
-    borderRadius: 1,
+    height: 5,
+    borderRadius: radius.pill,
   },
-  rowRight: {
+  rowFooter: {
     flexDirection: "row",
     alignItems: "center",
+    justifyContent: "space-between",
     gap: spacing.sm,
   },
-  status: {
+  fillDetails: {
+    flex: 1,
+    gap: 2,
+  },
+  filled: {
+    color: colors.text,
+    fontSize: 11,
+    fontWeight: "700",
+    fontVariant: ["tabular-nums"],
+  },
+  remaining: {
+    color: colors.textMuted,
     fontSize: 10,
-    fontWeight: "600",
+    fontVariant: ["tabular-nums"],
   },
   cancelBtn: {
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.xs,
-    backgroundColor: colors.downFill,
-    borderRadius: radius.sm,
-    minWidth: 56,
+    minHeight: 40,
+    paddingHorizontal: spacing.md,
+    justifyContent: "center",
     alignItems: "center",
+    backgroundColor: colors.downFill,
+    borderRadius: radius.md,
   },
   cancelBtnDisabled: {
     opacity: 0.5,
   },
   cancelBtnText: {
     color: colors.downText,
-    fontSize: 10,
+    fontSize: 11,
     fontWeight: "700",
-  },
-  cancelBtnTextLoading: {
-    color: colors.textFaint,
-    fontSize: 10,
-    fontWeight: "600",
   },
 }));

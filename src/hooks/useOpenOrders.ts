@@ -55,8 +55,7 @@ export function useOpenOrders(): UseOpenOrders {
 
   return {
     orders: state.orders,
-    // A filled or cancelled row stays visible briefly so the outcome can be read, but it is no
-    // longer an open order and must not inflate the tab's count.
+    // Terminal rows are removed by the store immediately and never count as open.
     openCount: state.orders.filter((order) => !isTerminalStatus(order.status)).length,
     isLoading: state.isLoading,
     error: state.error,

@@ -57,9 +57,6 @@ const INITIAL_STATE: OpenOrdersState = {
 /** How long a locally inserted order is kept if the exchange has not listed it yet. */
 const UNCONFIRMED_TTL_MS = 20_000;
 
-/** How long a filled or cancelled row stays on screen, so the outcome is readable. */
-const TERMINAL_LINGER_MS = 2500;
-
 let state: OpenOrdersState = INITIAL_STATE;
 const listeners = new Set<() => void>();
 
@@ -70,8 +67,12 @@ const listeners = new Set<() => void>();
  */
 const unconfirmed = new Map<string, OpenOrder>();
 
-/** Pending auto-removal of terminal rows, keyed by order id so a cancel can pre-empt one. */
-const removals = new Map<string, ReturnType<typeof setTimeout>>();
+/**
+ * IDs retired by a terminal WebSocket event. A REST active-order request can have started before
+ * that event and return its older snapshot afterward; these IDs stop that response resurrecting a
+ * filled/cancelled row. They are discarded once REST confirms the order is no longer active.
+ */
+const terminalOrderIds = new Set<string>();
 
 let inFlight: Promise<void> | null = null;
 
@@ -172,12 +173,21 @@ export function loadOpenOrders(force = false): Promise<void> {
           // it — the classic response never carries one.
           normalizeOrder(raw, index >= classic.length ? 'trade_hf' : 'trade')
         )
-        .filter((order): order is OpenOrder => order !== null);
+        .filter((order): order is OpenOrder => order !== null)
+        // Active-order endpoints can briefly return an order whose final fill has already
+        // completed. Never put terminal exchange data back into the open-orders store.
+        .filter((order) => !isTerminalStatus(order.status));
+
+      const restIds = new Set(rest.map((order) => order.orderId));
+      for (const orderId of terminalOrderIds) {
+        if (!restIds.has(orderId)) terminalOrderIds.delete(orderId);
+      }
+      const activeRest = rest.filter((order) => !terminalOrderIds.has(order.orderId));
 
       // A snapshot can predate a fill that arrived over the socket while the request was in
       // flight, so an order already on screen keeps whichever value is further along.
       const known = new Map(state.orders.map((order) => [order.orderId, order]));
-      const merged = rest.map((order) => {
+      const merged = activeRest.map((order) => {
         const previous = known.get(order.orderId);
         return previous ? mergeRestSnapshot(previous, order) : order;
       });
@@ -228,6 +238,7 @@ export function trackPlacedOrder(
     updatedAt: Date.now(),
   };
 
+  terminalOrderIds.delete(order.orderId);
   unconfirmed.set(order.orderId, order);
   emit({
     orders: [order, ...state.orders.filter((o) => o.orderId !== order.orderId)],
@@ -236,18 +247,6 @@ export function trackPlacedOrder(
 
   // Placing freezes the funds straight away, so the spendable balance has already moved.
   refreshBalance();
-}
-
-function scheduleRemoval(orderId: string): void {
-  if (removals.has(orderId)) return;
-  removals.set(
-    orderId,
-    setTimeout(() => {
-      removals.delete(orderId);
-      unconfirmed.delete(orderId);
-      emit({ orders: state.orders.filter((o) => o.orderId !== orderId) });
-    }, TERMINAL_LINGER_MS)
-  );
 }
 
 /**
@@ -268,8 +267,10 @@ export function applyOrderUpdate(message: unknown): void {
   const index = state.orders.findIndex((o) => o.orderId === incoming.orderId);
   if (index === -1) {
     // Adopt an order the app did not place only while it is live: a terminal frame for an unknown
-    // order has nothing to update and would add a row that lingers and then disappears.
-    if (!isTerminalStatus(incoming.status)) {
+    // order must not create a completed row in Open Orders.
+    if (isTerminalStatus(incoming.status)) {
+      terminalOrderIds.add(incoming.orderId);
+    } else {
       emit({ orders: [incoming, ...state.orders] });
     }
     return;
@@ -278,16 +279,20 @@ export function applyOrderUpdate(message: unknown): void {
   const existing = state.orders[index]!;
   const { order: merged, filledChanged } = mergeOrderUpdate(existing, raw);
 
-  const orders = [...state.orders];
-  orders[index] = merged;
-  emit({ orders });
-
-  // Keep the pre-confirmation copy current, or the next refresh would carry a stale row back in
-  // over the update that just arrived.
-  if (unconfirmed.has(merged.orderId)) unconfirmed.set(merged.orderId, merged);
-
   if (isTerminalStatus(merged.status)) {
-    scheduleRemoval(merged.orderId);
+    // This is the Open Orders list: once KuCoin says the order is filled or cancelled, remove it
+    // immediately instead of retaining terminal data in the shared store for a display linger.
+    terminalOrderIds.add(merged.orderId);
+    unconfirmed.delete(merged.orderId);
+    emit({ orders: state.orders.filter((order) => order.orderId !== merged.orderId) });
+  } else {
+    const orders = [...state.orders];
+    orders[index] = merged;
+    emit({ orders });
+
+    // Keep the pre-confirmation copy current, or the next refresh would carry a stale row back in
+    // over the update that just arrived.
+    if (unconfirmed.has(merged.orderId)) unconfirmed.set(merged.orderId, merged);
   }
 
   // Any fill moves money — a partial one just as much as a complete one — and a cancellation or
@@ -312,12 +317,6 @@ export async function cancelOpenOrder(orderId: string): Promise<boolean> {
   if (state.cancelling.has(orderId)) return false;
   const order = state.orders.find((o) => o.orderId === orderId);
   if (!order) return false;
-
-  const pendingRemoval = removals.get(orderId);
-  if (pendingRemoval) {
-    clearTimeout(pendingRemoval);
-    removals.delete(orderId);
-  }
 
   emit({ cancelling: new Set([...state.cancelling, orderId]), error: null });
 
