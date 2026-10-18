@@ -78,25 +78,37 @@ export const OLDER_PAGE_SIZE = 100;
 export const MAX_HISTORY_CANDLES = 1500;
 
 /**
- * The newest `INITIAL_CANDLES` candles, bounded by a `startAt` window rather than the endpoint's
- * own default so first paint packs and draws a smaller series.
+ * The newest candles, bounded by a window rather than the endpoint's own default so first paint
+ * packs and draws a smaller series. If no trades occurred inside the initial window, widen it
+ * gradually (3h, 6h, 12h, 24h) to capture older buckets for illiquid pairs, falling back to the
+ * unbounded query as a last resort.
  */
 export function fetchInitialCandles(symbol: string, timeframe: Timeframe): Promise<Candle[]> {
-  const endAt = Math.floor(Date.now() / 1000);
-  const startAt = endAt - INITIAL_CANDLES * timeframe.seconds;
   const intervalMs = timeframe.seconds * 1000;
-  return fetchCandleWindow(symbol, timeframe.key, startAt, endAt)
-    .then((rows) => {
-      if (rows.length === 0) {
-        // Nothing traded inside the window, so the bounded query comes back empty and the chart
-        // would render nothing. The unbounded query still returns the recent buckets, ending at
-        // the last trade; showing them as-is keeps a real candle (and a non-degenerate price band)
-        return fetchCandleWindow(symbol, timeframe.key).then((recent) =>
-          fillCandleGaps(recent, intervalMs)
-        );
-      }
-      return fillCandleGaps(rows, intervalMs);
-    });
+  const now = Math.floor(Date.now() / 1000);
+  const windows = [
+    INITIAL_CANDLES * timeframe.seconds,
+    3 * 3600,
+    6 * 3600,
+    12 * 3600,
+    24 * 3600,
+  ];
+
+  async function tryWindow(size: number): Promise<Candle[]> {
+    const startAt = now - size;
+    const rows = await fetchCandleWindow(symbol, timeframe.key, startAt, now);
+    if (rows.length > 0) return rows;
+    return [];
+  }
+
+  return (async () => {
+    for (const w of windows) {
+      const rows = await tryWindow(w);
+      if (rows.length > 0) return fillCandleGaps(rows, intervalMs);
+    }
+    const recent = await fetchCandleWindow(symbol, timeframe.key);
+    return fillCandleGaps(recent, intervalMs);
+  })();
 }
 
 /**
