@@ -45,7 +45,7 @@ type Props = {
   // children?: ReactNode;
   /** Shown as a back affordance in the title row when this screen is a pushed route. */
   onBack?: () => void;
-  /** TP1 from a TP-format signal; centres a TP1/CMP readout in the title while it is present. */
+  /** TP1 from a TP-format signal; shows a TP1/CMP readout under the title while it is present. */
   signalTp1?: string | null;
 };
 
@@ -75,15 +75,16 @@ type ChromeProps = {
    */
   onBack?: () => void;
   /**
-   * TP1 carried by the signal. When present, a TP1/CMP readout is centred in the title row —
-   * the signal's target next to the live market price. Absent on the tab and for gem posts.
+   * TP1 carried by the signal. When present, a TP1/CMP readout sits in its own row under the
+   * title — the signal's target next to the live market price. Absent on the tab and for gem posts.
    */
   signalTp1?: string | null;
 };
 
 /**
- * The signal's TP1 next to the live market price, centred in the title row ("TP1: 0.0034" over
- * "CMP: 0.0007320" — the signal's target read against where the market actually is).
+ * The signal's TP1 next to the live market price, in its own row under the title ("TP1: 0.0034"
+ * and "CMP: 0.0007320" side by side — the signal's target read against where the market actually
+ * is).
  *
  * A leaf that subscribes to the price itself, so the tick re-renders this line and nothing above
  * it. TP1 is a plain prop and sits still; CMP falls back to the last candle's close until the
