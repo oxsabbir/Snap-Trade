@@ -19,6 +19,7 @@
 import { describeError, isOrderGoneError } from '@/lib/kucoin/errors';
 import {
   cancelOrder,
+  fetchSpotOrderById,
   fetchClassicOpenOrders,
   fetchHighFrequencyOpenOrders,
   fetchHighFrequencyOrderSymbols,
@@ -56,6 +57,7 @@ const INITIAL_STATE: OpenOrdersState = {
 
 /** How long a locally inserted order is kept if the exchange has not listed it yet. */
 const UNCONFIRMED_TTL_MS = 20_000;
+const PLACED_ORDER_RECHECK_DELAYS_MS = [450, 1_200, 2_500] as const;
 
 let state: OpenOrdersState = INITIAL_STATE;
 const listeners = new Set<() => void>();
@@ -247,6 +249,46 @@ export function trackPlacedOrder(
 
   // Placing freezes the funds straight away, so the spendable balance has already moved.
   refreshBalance();
+  schedulePlacedOrderReconciliation(order.orderId);
+}
+
+/**
+ * The active-order endpoint can omit an order that filled immediately, while the private socket
+ * may not deliver its terminal frame before the user opens this panel. Check the order itself a
+ * few times after placement; `active: false` / `isActive: false` is authoritative and removes the
+ * optimistic row, while an active detail refreshes the partial-fill progress.
+ */
+function schedulePlacedOrderReconciliation(orderId: string): void {
+  let attempt = 0;
+
+  const check = async () => {
+    const order = state.orders.find((candidate) => candidate.orderId === orderId);
+    if (!order || !unconfirmed.has(orderId)) return;
+
+    try {
+      const detail = await fetchSpotOrderById(orderId, {
+        wallet: order.wallet,
+        symbol: order.symbol,
+      });
+      applyOrderUpdate({ ...detail, orderId, symbol: detail.symbol || order.symbol });
+    } catch {
+      // The active-list refresh remains the fallback if this order-detail endpoint is unavailable
+      // for an account or has not indexed the newly accepted order yet.
+    }
+
+    attempt += 1;
+    const current = state.orders.find((candidate) => candidate.orderId === orderId);
+    if (current && unconfirmed.has(orderId) && attempt < PLACED_ORDER_RECHECK_DELAYS_MS.length) {
+      setTimeout(check, PLACED_ORDER_RECHECK_DELAYS_MS[attempt]);
+    } else if (current && unconfirmed.has(orderId)) {
+      // Refresh the authoritative active list after the short detail-check window. This keeps
+      // genuinely open orders visible while allowing the regular reconciliation path to retire
+      // any order that disappeared between the detail lookup and this snapshot.
+      void loadOpenOrders(true);
+    }
+  };
+
+  setTimeout(check, PLACED_ORDER_RECHECK_DELAYS_MS[0]);
 }
 
 /**

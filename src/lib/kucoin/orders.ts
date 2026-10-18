@@ -125,6 +125,28 @@ export async function fetchHighFrequencyOpenOrders(symbol: string): Promise<unkn
   return asOrderList(data);
 }
 
+/**
+ * Reads one order after placement so a marketable limit order that fills before it appears in the
+ * active-orders snapshot can be retired immediately. The HF endpoint requires its symbol query;
+ * the classic endpoint is account/order-id scoped.
+ */
+export async function fetchSpotOrderById(
+  orderId: string,
+  { wallet = 'trade', symbol }: CancelOrderOptions = {}
+): Promise<Record<string, unknown>> {
+  const path = wallet === 'trade_hf'
+    ? `/hf/orders/${encodeURIComponent(orderId)}`
+    : `/orders/${encodeURIComponent(orderId)}`;
+  const data = await request<unknown>(path, {
+    signed: true,
+    ...(wallet === 'trade_hf' && symbol ? { query: { symbol } } : {}),
+  });
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    throw new Error('KuCoin returned an invalid order detail.');
+  }
+  return data as Record<string, unknown>;
+}
+
 /** Pairs with at least one active HF order, so no per-symbol request is spent on a quiet pair. */
 export async function fetchHighFrequencyOrderSymbols(): Promise<string[]> {
   const data = await request<unknown>('/hf/orders/active/symbols', { signed: true });
