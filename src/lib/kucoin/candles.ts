@@ -1,4 +1,5 @@
 import { request } from './client';
+import { fillCandleGaps } from './candleSeries';
 import type { Candle, CandleTuple } from './types';
 
 export const TIMEFRAMES = [
@@ -83,7 +84,15 @@ export const MAX_HISTORY_CANDLES = 1500;
 export function fetchInitialCandles(symbol: string, timeframe: Timeframe): Promise<Candle[]> {
   const endAt = Math.floor(Date.now() / 1000);
   const startAt = endAt - INITIAL_CANDLES * timeframe.seconds;
-  return fetchCandleWindow(symbol, timeframe.key, startAt, endAt);
+  return fetchCandleWindow(symbol, timeframe.key, startAt, endAt).then(
+    (rows) =>
+      // Always hand back a full window: a quiet pair returns only the buckets that traded, and
+      // the chart's default view would otherwise shrink to those few candles.
+      fillCandleGaps(rows, timeframe.seconds * 1000, {
+        endMs: endAt * 1000,
+        target: INITIAL_CANDLES,
+      })
+  );
 }
 
 /**
@@ -98,7 +107,11 @@ export function fetchOlderCandles(
 ): Promise<Candle[]> {
   const endAt = Math.floor(before / 1000);
   const startAt = endAt - count * timeframe.seconds;
-  return fetchCandleWindow(symbol, timeframe.key, startAt, endAt);
+  return fetchCandleWindow(symbol, timeframe.key, startAt, endAt).then((rows) =>
+    // Only fill gaps *between* the returned rows, so paging stops at the listing instead of
+    // fabricating a flat history in front of it.
+    fillCandleGaps(rows, timeframe.seconds * 1000)
+  );
 }
 
 /** Rows per `/market/candles` call. Also the short-page test that ends the walk. */

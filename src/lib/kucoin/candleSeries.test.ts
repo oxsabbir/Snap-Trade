@@ -10,6 +10,7 @@
  */
 import type { Candle } from '@/lib/kucoin/types';
 import {
+  fillCandleGaps,
   mergeInitialCandles,
   prependOlderCandles,
   type CandleSeries,
@@ -116,7 +117,62 @@ test('an older page for a different pair leaves the series untouched', () => {
   eq(times(merged).join(','), '40,50,60');
 });
 
-// --- runner -------------------------------------------------------------------------------------
+// --- gap filling --------------------------------------------------------------------------------
+
+function bar(time: number, open: number, close: number, volume = 1): Candle {
+  return { time, open, high: Math.max(open, close), low: Math.min(open, close), close, volume, turnover: 0 };
+}
+
+test('gaps between returned rows are filled flat at the previous close', () => {
+  const rows = [
+    { time: 0, open: 10, close: 10, high: 10, low: 10, volume: 5, turnover: 0 },
+    { time: 3000, open: 20, close: 25, high: 26, low: 19, volume: 9, turnover: 0 },
+  ];
+  const filled = fillCandleGaps(rows, 1000);
+  eq(filled.length, 4);
+  eq(
+    filled.map((c) => c.time).join(','),
+    '0,1000,2000,3000'
+  );
+  // The two synthetic buckets carry the previous close (10), with no volume.
+  eq(filled[1]!.close, 10);
+  eq(filled[1]!.open, 10);
+  eq(filled[1]!.volume, 0);
+  eq(filled[2]!.close, 10);
+  // The real rows are untouched.
+  eq(filled[3]!.close, 25);
+  eq(filled[3]!.volume, 9);
+});
+
+test('an empty page stays empty rather than fabricating a price', () => {
+  eq(fillCandleGaps([], 1000).length, 0);
+});
+
+test('target extends the quiet tail up to the aligned end bucket', () => {
+  const rows = [bar(0, 5, 6), bar(3000, 18, 20)];
+  // Now is 10s; a 3-bucket window therefore ends at the 10s bucket.
+  const filled = fillCandleGaps(rows, 1000, { endMs: 10_000, target: 3 });
+  eq(
+    filled.map((c) => c.time).join(','),
+    '8000,9000,10000'
+  );
+  // All three are synthetic forward from the last real close, so a stalled pair still fills
+  // the window instead of collapsing to the two candles it traded.
+  eq(filled.map((c) => c.close).join(','), '20,20,20');
+  eq(filled.every((c) => c.volume === 0), true);
+});
+
+test('leading gaps fill from the first open so the left edge is not blank', () => {
+  const rows = [bar(5000, 7, 9)];
+  const filled = fillCandleGaps(rows, 1000, { endMs: 7000, target: 5 });
+  eq(
+    filled.map((c) => c.time).join(','),
+    '3000,4000,5000,6000,7000'
+  );
+  eq(filled.map((c) => c.close).join(','), '7,7,9,9,9');
+});
+
+
 
 let failures = 0;
 for (const { name, run } of tests) {
