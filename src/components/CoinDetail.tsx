@@ -22,11 +22,9 @@ import {
   LINE_TIMEFRAME,
   type TimeframeOrLine,
 } from "@/lib/kucoin/candles";
-import { useTicker } from "@/state/ticker";
 import { radius, spacing } from "@/theme";
 import { useTheme } from "@/theme/ThemeProvider";
 import { createThemedStyles } from "@/theme/themedStyles";
-import { formatPrice } from "@/utils/format";
 
 type Props = {
   symbol: string;
@@ -45,8 +43,13 @@ type Props = {
   // children?: ReactNode;
   /** Shown as a back affordance in the title row when this screen is a pushed route. */
   onBack?: () => void;
-  /** TP1 from a TP-format signal; shows a TP1/CMP readout under the title while it is present. */
+  /**
+   * Signal readout carried by a signal deep link, shown centred in the title row. TP posts (first
+   * influencer) carry `signalTp1`; gem posts (second influencer) carry `signalEntry`. The two are
+   * mutually exclusive, so only one is ever shown. Null on the tab.
+   */
   signalTp1?: string | null;
+  signalEntry?: string | null;
 };
 
 /** Timeframe a freshly opened pair starts on. */
@@ -75,49 +78,32 @@ type ChromeProps = {
    */
   onBack?: () => void;
   /**
-   * TP1 carried by the signal. When present, a TP1/CMP readout sits in its own row under the
-   * title — the signal's target next to the live market price. Absent on the tab and for gem posts.
+   * Signal readout, centred in the title row. A TP post (first influencer) supplies `signalTp1`
+   * and nothing else; a gem post (second influencer) supplies `signalEntry` (its posted market
+   * price). Mutually exclusive, so the row shows "TP1: …" or "CMP: …", never both.
    */
   signalTp1?: string | null;
+  signalEntry?: string | null;
 };
 
 /**
- * The signal's TP1 next to the live market price, in its own row under the title ("TP1: 0.0034"
- * and "CMP: 0.0007320" side by side — the signal's target read against where the market actually
- * is).
- *
- * A leaf that subscribes to the price itself, so the tick re-renders this line and nothing above
- * it. TP1 is a plain prop and sits still; CMP falls back to the last candle's close until the
- * socket's first tick lands.
+ * The signal's target, centred in the title row: "TP1: 0.0034" for a TP post or "CMP: 0.0007320"
+ * for a gem post. One line, one value — the two formats never arrive together.
  */
-const SignalTargets = memo(function SignalTargets({
-  symbol,
-  tp1,
-  fallbackPrice,
-  decimals,
-}: {
-  symbol: string;
-  tp1: string;
-  fallbackPrice?: number;
-  decimals?: number;
-}) {
+function SignalReadout({ tp1, entry }: { tp1?: string | null; entry?: string | null }) {
   const styles = useStyles();
-  const { update } = useTicker(symbol);
-  const price = update?.price ?? fallbackPrice;
+  const value = tp1 ?? entry;
+  if (!value) return null;
 
   return (
-    <View style={styles.signalTargets}>
-      <Text style={styles.signalStat}>
-        <Text style={styles.signalStatLabel}>TP1: </Text>
-        {tp1}
-      </Text>
-      <Text style={styles.signalStat}>
-        <Text style={styles.signalStatLabel}>CMP: </Text>
-        {price === undefined ? "—" : formatPrice(price, decimals)}
+    <View style={styles.signalCenter} pointerEvents="none">
+      <Text style={styles.signalStat} numberOfLines={1}>
+        <Text style={styles.signalStatLabel}>{tp1 ? "TP1: " : "CMP: "}</Text>
+        {value}
       </Text>
     </View>
   );
-});
+}
 
 /**
  * Everything above the chart: the pair's name, its price, the timeframe tabs and the caption.
@@ -138,6 +124,7 @@ const ChartChrome = memo(function ChartChrome({
   onOpenInfo,
   onBack,
   signalTp1,
+  signalEntry,
 }: ChromeProps) {
   const { colors } = useTheme();
   const styles = useStyles();
@@ -152,6 +139,8 @@ const ChartChrome = memo(function ChartChrome({
             <Text style={styles.name}>{name}</Text>
           ) : null}
         </View>
+        {/* Centred across the row, before the back affordance: the posted signal value. */}
+        <SignalReadout tp1={signalTp1} entry={signalEntry} />
         <View style={styles.headerActions}>
           {onBack ? (
             <Pressable
@@ -176,17 +165,6 @@ const ChartChrome = memo(function ChartChrome({
         </View>
       </View>
 
-      {signalTp1 ? (
-        <View style={styles.signalRow}>
-          <SignalTargets
-            symbol={symbol}
-            tp1={signalTp1}
-            fallbackPrice={seedPrice ?? undefined}
-            decimals={decimals}
-          />
-        </View>
-      ) : null}
-
       <View style={styles.priceBlock}>
         <LivePrice
           symbol={symbol}
@@ -208,7 +186,7 @@ const ChartChrome = memo(function ChartChrome({
   );
 });
 
-export function CoinDetail({ symbol, name, decimals, signalTp1, onBack }: Props) {
+export function CoinDetail({ symbol, name, decimals, signalTp1, signalEntry, onBack }: Props) {
   const { colors } = useTheme();
   const styles = useStyles();
   const [timeframeKey, setTimeframeKey] = useState(DEFAULT_TIMEFRAME_KEY);
@@ -298,6 +276,7 @@ export function CoinDetail({ symbol, name, decimals, signalTp1, onBack }: Props)
         onOpenInfo={onOpenInfo}
         onBack={onBack}
         signalTp1={signalTp1}
+        signalEntry={signalEntry}
       />
 
       <View style={styles.chartWrap}>
@@ -385,17 +364,16 @@ const useStyles = createThemedStyles((colors) =>
       flexDirection: "row",
       alignItems: "center",
     },
-    // The signal readout's own row, directly under the title: TP1 and CMP side by side, centred
-    // across the content width.
-    signalRow: {
+    // Overlays the title row so the readout is centred across the full width regardless of how
+    // wide the pair name is; it ignores touches, so the back and info buttons stay tappable.
+    signalCenter: {
+      position: "absolute",
+      top: 0,
+      bottom: 0,
+      left: 0,
+      right: 0,
       alignItems: "center",
-      paddingHorizontal: spacing.lg,
-      paddingBottom: spacing.sm,
-    },
-    signalTargets: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: spacing.lg,
+      justifyContent: "center",
     },
     signalStat: {
       color: colors.text,

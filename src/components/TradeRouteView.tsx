@@ -19,7 +19,9 @@ type Props = {
   symbol: string;
   name: string;
   decimals: number;
-  /** TP1 from a TP-format signal; shown under the title until the user leaves the pair. */
+  /** CMP the second-influencer (gem) post carried; shown in the title while the user is here. */
+  signalEntry?: string | null;
+  /** TP1 from a first-influencer (TP) signal; shown in the title while the user is here. */
   signalTp1?: string | null;
   /** Shown only when the screen is a pushed route rather than a tab. */
   onBack?: () => void;
@@ -35,7 +37,7 @@ const HISTORY_LOAD_MORE_THRESHOLD = 320;
  * The trade screen's content: the chart, the order form, and the order management section, with the
  * symbol supplied by the tab route that owns the screen's only scroll view.
  */
-export function TradeRouteView({ symbol, name, decimals, signalTp1, onBack }: Props) {
+export function TradeRouteView({ symbol, name, decimals, signalEntry, signalTp1, onBack }: Props) {
   const styles = useStyles();
   // The order form reads this from the shared store too, so this is one `/accounts` request
   // shared by both consumers rather than one each.
@@ -77,6 +79,7 @@ export function TradeRouteView({ symbol, name, decimals, signalTp1, onBack }: Pr
           symbol={symbol}
           name={name}
           decimals={decimals}
+          signalEntry={signalEntry}
           signalTp1={signalTp1}
           onBack={onBack}
         />

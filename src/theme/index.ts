@@ -85,9 +85,9 @@ export const radius = {
  * both look like the change did nothing on some screen.
  */
 export const CHART_HEIGHT_RATIO = 0.266;
-export const CHART_HEIGHT_REDUCTION = 40;
-export const CHART_MIN_HEIGHT = 170;
-export const CHART_MAX_HEIGHT = 198;
+export const CHART_HEIGHT_REDUCTION = 20;
+export const CHART_MIN_HEIGHT = 190;
+export const CHART_MAX_HEIGHT = 218;
 
 export function standardChartHeight(windowHeight: number): number {
   // Guard the degenerate cases rather than letting them through: Math.round(NaN) is NaN, and

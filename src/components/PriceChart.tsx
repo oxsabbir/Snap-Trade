@@ -27,6 +27,12 @@ import { formatAmount, formatPercent, formatPrice } from "@/utils/format";
 
 const PAD_TOP = 8;
 const PAD_BOTTOM = 18;
+/**
+ * Gap between the top and bottom of the value band and the grid's border. Without it the
+ * highest high and lowest low of the window sit flush against the grid line they touch, which
+ * reads as the series being clipped rather than contained.
+ */
+const PLOT_PAD = 5;
 const AXIS_WIDTH = 54;
 const TIME_LABEL_WIDTH = 44;
 const BAND_STEPS = 4;
@@ -333,6 +339,10 @@ function PriceChartComponent({
   const lastTime = count > 0 ? candles[count - 1]!.time : 0;
   const innerWidth = Math.max(width - AXIS_WIDTH, 0);
   const priceHeight = Math.max(height - PAD_TOP - PAD_BOTTOM, 1);
+  // The populated band inside the grid: the value axis maps into this, inset from the border so
+  // the extremes never touch it.
+  const plotTop = PAD_TOP + PLOT_PAD;
+  const plotInner = Math.max(priceHeight - PLOT_PAD * 2, 1);
   const activeIndex =
     selection !== null && selection.key === resetKey ? selection.index : null;
 
@@ -545,12 +555,12 @@ function PriceChartComponent({
     (value: number) => {
       if (!domain) return 0;
       return (
-        PAD_TOP +
+        plotTop +
         (1 - (value - domain.lower) / (domain.upper - domain.lower)) *
-          priceHeight
+          plotInner
       );
     },
-    [domain, priceHeight],
+    [domain, plotInner, plotTop],
   );
 
   // Static plot grid: depends on layout and the settled window only, never on live candle values.
@@ -570,7 +580,7 @@ function PriceChartComponent({
     border.setColor(Skia.Color(colors.gridBorder));
 
     for (const tick of axis?.ticks ?? []) {
-      const y = PAD_TOP + (1 - tick.fraction) * priceHeight;
+      const y = plotTop + (1 - tick.fraction) * plotInner;
       canvas.drawLine(0, y, innerWidth, y, grid);
     }
 
@@ -610,6 +620,8 @@ function PriceChartComponent({
     colors.gridLine,
     count,
     innerWidth,
+    plotInner,
+    plotTop,
     priceHeight,
     settledSpan,
     settledStart,
@@ -727,8 +739,10 @@ function PriceChartComponent({
     const step = span <= 1 ? widthValue : widthValue / span;
     const xOf = (index: number) =>
       span <= 1 ? widthValue / 2 : (index - offset + 0.5) * step;
+    const plotTop = PAD_TOP + PLOT_PAD;
+    const plotInner = Math.max(heightValue - PLOT_PAD * 2, 1);
     const yOf = (value: number) =>
-      PAD_TOP + (1 - (value - band.lower) / range) * heightValue;
+      plotTop + (1 - (value - band.lower) / range) * plotInner;
     const to = Math.min(total, start + span);
     const closeOf = (index: number) => series[index * 4 + 3];
 
@@ -752,8 +766,8 @@ function PriceChartComponent({
         }
       }
       if (to - start > 1) {
-        areaPath.lineTo(xOf(to - 1), PAD_TOP + heightValue);
-        areaPath.lineTo(xOf(start), PAD_TOP + heightValue);
+        areaPath.lineTo(xOf(to - 1), plotTop + plotInner);
+        areaPath.lineTo(xOf(start), plotTop + plotInner);
         areaPath.close();
       }
 
@@ -762,8 +776,8 @@ function PriceChartComponent({
       scratch.push(fill, stroke);
       fill.setShader(
         Skia.Shader.MakeLinearGradient(
-          Skia.Point(0, PAD_TOP),
-          Skia.Point(0, PAD_TOP + heightValue),
+          Skia.Point(0, plotTop),
+          Skia.Point(0, plotTop + plotInner),
           [Skia.Color(tint), Skia.Color(`${tint}00`)],
           null,
           TileMode.Clamp,
@@ -1028,8 +1042,8 @@ function PriceChartComponent({
             {active ? (
               <>
                 <Line
-                  p1={vec(activeX, PAD_TOP)}
-                  p2={vec(activeX, PAD_TOP + priceHeight)}
+                  p1={vec(activeX, plotTop)}
+                  p2={vec(activeX, plotTop + plotInner)}
                   color={colors.textMuted}
                   strokeWidth={1}
                 />
@@ -1047,7 +1061,7 @@ function PriceChartComponent({
       <View style={{ width: AXIS_WIDTH, height }}>
         {axis?.ticks.map((tick) => {
           const top = clamp(
-            PAD_TOP + (1 - tick.fraction) * priceHeight - AXIS_LABEL_HEIGHT / 2,
+            plotTop + (1 - tick.fraction) * plotInner - AXIS_LABEL_HEIGHT / 2,
             0,
             Math.max(height - AXIS_LABEL_HEIGHT, 0),
           );
