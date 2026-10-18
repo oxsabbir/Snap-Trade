@@ -1,4 +1,5 @@
-import { StyleSheet, View } from 'react-native';
+import { View } from '@/components/AppLayout';
+import { StyleSheet } from 'react-native';
 
 import { createThemedStyles } from '@/theme/themedStyles';
 import { useTheme } from '@/theme/ThemeProvider';

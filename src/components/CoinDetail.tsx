@@ -3,12 +3,8 @@ import {
   useCallback,
   useMemo,
   useState } from "react";
-import {
-  ActivityIndicator,
-  Pressable,
-  StyleSheet,
-  View
-} from "react-native";
+import { Pressable, View } from '@/components/AppLayout';
+import { ActivityIndicator, StyleSheet } from 'react-native';
 import { Text } from '@/components/AppText';
 
 import { CoinInfoSheet } from "@/components/CoinInfoSheet";

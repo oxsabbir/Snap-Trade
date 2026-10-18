@@ -1,13 +1,5 @@
-import {
-  ActivityIndicator,
-  KeyboardAvoidingView,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Switch,
-  View
-} from 'react-native';
+import { Pressable, ScrollView, View } from '@/components/AppLayout';
+import { ActivityIndicator, KeyboardAvoidingView, Platform, StyleSheet, Switch } from 'react-native';
 import { Text, TextInput } from '@/components/AppText';
 import { SafeAreaView } from 'react-native-safe-area-context';
 

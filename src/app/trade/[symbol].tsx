@@ -1,9 +1,7 @@
 import {
   useEffect } from 'react';
-import { Pressable,
-  StyleSheet,
-  View
-} from 'react-native';
+import { Pressable, View } from '@/components/AppLayout';
+import { StyleSheet } from 'react-native';
 import { Text } from '@/components/AppText';
 import { Redirect, router, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';

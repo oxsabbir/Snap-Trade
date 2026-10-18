@@ -3,15 +3,8 @@ import {
   useCallback,
   useMemo,
   useState } from "react";
-import {
-  ActivityIndicator,
-  FlatList,
-  Keyboard,
-  RefreshControl,
-  type ListRenderItem,
-  StyleSheet,
-  View
-} from "react-native";
+import { View } from '@/components/AppLayout';
+import { ActivityIndicator, FlatList, Keyboard, RefreshControl, type ListRenderItem, StyleSheet } from 'react-native';
 import { Text } from '@/components/AppText';
 import { useIsFocused } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";

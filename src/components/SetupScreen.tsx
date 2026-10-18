@@ -2,16 +2,8 @@ import {
   useEffect,
   useRef,
   useState } from 'react';
-import {
-  ActivityIndicator,
-  Image,
-  KeyboardAvoidingView,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  View
-} from 'react-native';
+import { Image, Pressable, ScrollView, View } from '@/components/AppLayout';
+import { ActivityIndicator, KeyboardAvoidingView, Platform, StyleSheet } from 'react-native';
 import { Text, TextInput } from '@/components/AppText';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Animated, { FadeInDown } from 'react-native-reanimated';

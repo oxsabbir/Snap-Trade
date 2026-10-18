@@ -1,9 +1,7 @@
 import {
   router } from "expo-router";
-import { Pressable,
-  StyleSheet,
-  View
-} from "react-native";
+import { Pressable, View } from '@/components/AppLayout';
+import { StyleSheet } from 'react-native';
 import { Text } from '@/components/AppText';
 
 import { TradeRouteView } from "@/components/TradeRouteView";

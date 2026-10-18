@@ -1,10 +1,8 @@
 import {
   useMemo,
   useState } from 'react';
-import { Pressable,
-  StyleSheet,
-  View
-} from 'react-native';
+import { Pressable, View } from '@/components/AppLayout';
+import { StyleSheet } from 'react-native';
 import { Text } from '@/components/AppText';
 
 import { AssetRow, type AssetScope } from '@/components/AssetRow';

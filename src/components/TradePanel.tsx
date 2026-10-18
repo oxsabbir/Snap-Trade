@@ -7,12 +7,8 @@ import {
   useState,
   type ReactNode,
   } from "react";
-import {
-  ActivityIndicator,
-  Pressable,
-  StyleSheet,
-  View
-} from "react-native";
+import { Pressable, View } from '@/components/AppLayout';
+import { ActivityIndicator, StyleSheet } from 'react-native';
 import { Text, TextInput } from '@/components/AppText';
 
 import { PlusIcon } from "@/components/Icons";

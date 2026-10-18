@@ -1,11 +1,8 @@
 import {
   Redirect,
   router } from 'expo-router';
-import { Pressable,
-  ScrollView,
-  StyleSheet,
-  View
-} from 'react-native';
+import { Pressable, ScrollView, View } from '@/components/AppLayout';
+import { StyleSheet } from 'react-native';
 import { Text } from '@/components/AppText';
 import { SafeAreaView } from 'react-native-safe-area-context';
 

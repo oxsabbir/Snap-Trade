@@ -1,5 +1,6 @@
 import { memo } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { View } from '@/components/AppLayout';
+import { StyleSheet } from 'react-native';
 import Svg, { Circle, Defs, LinearGradient, Path, RadialGradient, Stop } from 'react-native-svg';
 
 import { createThemedStyles } from '@/theme/themedStyles';

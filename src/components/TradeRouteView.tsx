@@ -1,10 +1,6 @@
 import { useCallback } from 'react';
-import {
-  type NativeScrollEvent,
-  type NativeSyntheticEvent,
-  ScrollView,
-  StyleSheet,
-} from 'react-native';
+import { ScrollView } from '@/components/AppLayout';
+import { type NativeScrollEvent, type NativeSyntheticEvent, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { CoinDetail } from '@/components/CoinDetail';

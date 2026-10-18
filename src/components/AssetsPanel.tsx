@@ -1,11 +1,7 @@
 import {
   memo } from "react";
-import {
-  ActivityIndicator,
-  Pressable,
-  StyleSheet,
-  View
-} from "react-native";
+import { Pressable, View } from '@/components/AppLayout';
+import { ActivityIndicator, StyleSheet } from 'react-native';
 import { Text } from '@/components/AppText';
 
 import { CoinAvatar } from "@/components/CoinAvatar";

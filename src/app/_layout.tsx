@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, DeviceEventEmitter, Platform, StyleSheet, View } from 'react-native';
+import { View } from '@/components/AppLayout';
+import { ActivityIndicator, DeviceEventEmitter, Platform, StyleSheet } from 'react-native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { NavigationBar } from 'expo-navigation-bar';

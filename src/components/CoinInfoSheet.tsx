@@ -1,15 +1,8 @@
 import {
   memo,
   useState } from 'react';
-import {
-  ActivityIndicator,
-  Linking,
-  Modal,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  View
-} from 'react-native';
+import { Pressable, ScrollView, View } from '@/components/AppLayout';
+import { ActivityIndicator, Linking, Modal, StyleSheet } from 'react-native';
 import { Text } from '@/components/AppText';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 

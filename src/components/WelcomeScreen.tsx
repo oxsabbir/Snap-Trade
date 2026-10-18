@@ -1,9 +1,5 @@
-import {
-  Image,
-  Pressable,
-  StyleSheet,
-  View
-} from 'react-native';
+import { Image, Pressable, View } from '@/components/AppLayout';
+import { StyleSheet } from 'react-native';
 import { Text } from '@/components/AppText';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Animated, { FadeOutUp } from 'react-native-reanimated';

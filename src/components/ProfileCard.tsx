@@ -3,14 +3,8 @@ import {
   useCallback,
   useRef,
   useState } from 'react';
-import {
-  Pressable,
-  StyleSheet,
-  View,
-  type NativeSyntheticEvent,
-  type TextInput as NativeTextInput,
-  type TextInputSubmitEditingEventData,
-} from 'react-native';
+import { Pressable, View } from '@/components/AppLayout';
+import { StyleSheet, type NativeSyntheticEvent, type TextInput as NativeTextInput, type TextInputSubmitEditingEventData } from 'react-native';
 import { Text, TextInput } from '@/components/AppText';
 
 import { Avatar } from '@/components/Avatar';

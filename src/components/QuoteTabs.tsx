@@ -1,8 +1,5 @@
-import {
-  ScrollView,
-  Pressable,
-  StyleSheet
-} from 'react-native';
+import { ScrollView, Pressable } from '@/components/AppLayout';
+import { StyleSheet } from 'react-native';
 import { Text } from '@/components/AppText';
 
 import { QUOTE_FILTERS, type QuoteFilter } from '@/lib/kucoin/market';

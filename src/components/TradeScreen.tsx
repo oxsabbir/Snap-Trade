@@ -1,5 +1,6 @@
 import { memo, useCallback, useState } from "react";
-import { StyleSheet, View } from "react-native";
+import { View } from '@/components/AppLayout';
+import { StyleSheet } from 'react-native';
 
 import { OrderBook } from "@/components/OrderBook";
 import {
