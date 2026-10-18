@@ -63,7 +63,6 @@ type ChromeProps = {
   timeframeKey: string;
   onSelectTimeframe: (next: TimeframeOrLine) => void;
   onOpenInfo: () => void;
-  periodLabel?: string;
 };
 
 /**
@@ -83,7 +82,6 @@ const ChartChrome = memo(function ChartChrome({
   timeframeKey,
   onSelectTimeframe,
   onOpenInfo,
-  periodLabel,
 }: ChromeProps) {
   const { colors } = useTheme();
   const styles = useStyles();
@@ -125,12 +123,6 @@ const ChartChrome = memo(function ChartChrome({
 
       <View style={styles.timeframeRow}>
         <TimeframeTabs value={timeframeKey} onChange={onSelectTimeframe} />
-      </View>
-
-      <View style={styles.toolbar}>
-        <Text style={styles.periodLabel} numberOfLines={1}>
-          {periodLabel}
-        </Text>
       </View>
     </>
   );
@@ -197,31 +189,21 @@ export function CoinDetail({ symbol, name, decimals }: Props) {
     (visible: number) => setVisibleCount(visible),
     [],
   );
-  const isZoomed = visibleCount !== null && visibleCount < candles.length;
 
-  // "466 weeks · since 2017-10-19" reads as a lifetime at a glance. Absolute dates, not
-  // "8 years ago", per the no-relative-date convention. Keyed on the two values it reads
-  // rather than the array, so a forming candle does not recompute it every tick.
+  // Corner caption: the window and how much history is loaded. "40-160 × 1m" reads as forty
+  // one-minute candles on screen out of the hundred and sixty loaded; the second number grows as
+  // older pages arrive. Keyed on the values it reads rather than the array, so a forming candle
+  // does not recompute it every tick.
   const firstCandle = candles[0];
-  const periodLabel = useMemo(() => {
+  const candleLabel = useMemo(() => {
     if (isLine) {
-      if (!firstCandle) return "Line · loading history";
+      if (!firstCandle) return "Loading history";
       const pad = (value: number) => value.toString().padStart(2, "0");
       const since = new Date(firstCandle.time);
-      return `Line · ${candles.length} weeks · since ${since.getFullYear()}-${pad(since.getMonth() + 1)}-${pad(since.getDate())}`;
+      return `${candles.length} weeks · since ${since.getFullYear()}-${pad(since.getMonth() + 1)}-${pad(since.getDate())}`;
     }
-    if (isZoomed) {
-      return `${visibleCount} of ${candles.length} · pan, pinch, double tap to reset`;
-    }
-    return `${candles.length} × ${timeframe.label} · drag to pan, pinch to zoom`;
-  }, [
-    candles.length,
-    firstCandle,
-    isLine,
-    isZoomed,
-    timeframe.label,
-    visibleCount,
-  ]);
+    return `${visibleCount ?? candles.length}-${candles.length} × ${timeframe.label}`;
+  }, [candles.length, firstCandle, isLine, timeframe.label, visibleCount]);
 
   return (
     <View style={styles.section}>
@@ -234,7 +216,6 @@ export function CoinDetail({ symbol, name, decimals }: Props) {
         timeframeKey={timeframeKey}
         onSelectTimeframe={onSelectTimeframe}
         onOpenInfo={onOpenInfo}
-        periodLabel={periodLabel}
       />
 
       <View style={styles.chartWrap}>
@@ -255,6 +236,7 @@ export function CoinDetail({ symbol, name, decimals }: Props) {
           resetKey={`${symbol}:${timeframe.key}`}
           onVisibleRangeChange={onVisibleRangeChange}
           onLoadOlder={isLine ? undefined : live.loadOlder}
+          caption={candles.length > 0 ? candleLabel : undefined}
         />
 
         {candles.length === 0 ? (
@@ -335,21 +317,6 @@ const useStyles = createThemedStyles((colors) =>
     },
     timeframeRow: {
       flexGrow: 0,
-    },
-    toolbar: {
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "space-between",
-      paddingHorizontal: spacing.lg,
-      paddingTop: spacing.lg,
-      paddingBottom: spacing.sm,
-    },
-    periodLabel: {
-      color: colors.textFaint,
-      fontSize: 11,
-      fontWeight: "600",
-      letterSpacing: 0.4,
-      flexShrink: 1,
     },
     chartWrap: {
       justifyContent: "center",

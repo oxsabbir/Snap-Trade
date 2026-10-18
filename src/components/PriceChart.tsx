@@ -95,6 +95,8 @@ type Props = {
   onVisibleRangeChange?: (visible: number, total: number) => void;
   /** Asked for more older candles when the window reaches the left edge of the loaded series. */
   onLoadOlder?: () => void;
+  /** Faint caption pinned to the grid's bottom-left corner, e.g. "40 × 1m". */
+  caption?: string;
 };
 type Viewport = { start: number; span: number };
 type Committed = Viewport & {
@@ -305,6 +307,7 @@ function PriceChartComponent({
   resetKey,
   onVisibleRangeChange,
   onLoadOlder,
+  caption,
 }: Props) {
   const { colors } = useTheme();
   const styles = useStyles();
@@ -1085,6 +1088,11 @@ function PriceChartComponent({
           </Text>
         );
       })}
+      {caption ? (
+        <Text style={styles.caption} numberOfLines={1}>
+          {caption}
+        </Text>
+      ) : null}
       {active ? <Readout candle={active} decimals={decimals} /> : null}
     </View>
   );
@@ -1146,6 +1154,17 @@ const useStyles = createThemedStyles((colors) =>
       fontSize: 10,
       width: TIME_LABEL_WIDTH,
       textAlign: "center",
+    },
+    // Pinned inside the grid, just above the time-label strip, so it never collides with it.
+    caption: {
+      position: "absolute",
+      left: 5,
+      bottom: PAD_BOTTOM + 5,
+      color: colors.textFaint,
+      fontSize: 10,
+      fontWeight: "600",
+      letterSpacing: 0.4,
+      opacity: 0.6,
     },
     readout: {
       position: "absolute",
