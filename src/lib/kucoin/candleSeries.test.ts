@@ -148,28 +148,10 @@ test('an empty page stays empty rather than fabricating a price', () => {
   eq(fillCandleGaps([], 1000).length, 0);
 });
 
-test('target extends the quiet tail up to the aligned end bucket', () => {
+test('the series ends at the newest row, never extending past it', () => {
   const rows = [bar(0, 5, 6), bar(3000, 18, 20)];
-  // Now is 10s; a 3-bucket window therefore ends at the 10s bucket.
-  const filled = fillCandleGaps(rows, 1000, { endMs: 10_000, target: 3 });
-  eq(
-    filled.map((c) => c.time).join(','),
-    '8000,9000,10000'
-  );
-  // All three are synthetic forward from the last real close, so a stalled pair still fills
-  // the window instead of collapsing to the two candles it traded.
-  eq(filled.map((c) => c.close).join(','), '20,20,20');
-  eq(filled.every((c) => c.volume === 0), true);
-});
-
-test('leading gaps fill from the first open so the left edge is not blank', () => {
-  const rows = [bar(5000, 7, 9)];
-  const filled = fillCandleGaps(rows, 1000, { endMs: 7000, target: 5 });
-  eq(
-    filled.map((c) => c.time).join(','),
-    '3000,4000,5000,6000,7000'
-  );
-  eq(filled.map((c) => c.close).join(','), '7,7,9,9,9');
+  const filled = fillCandleGaps(rows, 1000);
+  eq(filled[filled.length - 1]!.time, 3000);
 });
 
 

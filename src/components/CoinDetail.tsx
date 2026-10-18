@@ -376,14 +376,15 @@ const useStyles = createThemedStyles((colors) =>
       justifyContent: "center",
     },
     signalStat: {
-      color: colors.text,
-      fontSize: 12,
-      fontWeight: "700",
+      color: colors.up,
+      fontSize: 13,
+      fontWeight: "800",
       fontVariant: ["tabular-nums"],
     },
     signalStatLabel: {
-      color: colors.textFaint,
-      fontWeight: "600",
+      color: colors.up,
+      fontWeight: "700",
+      opacity: 0.72,
     },
     symbol: {
       color: colors.text,

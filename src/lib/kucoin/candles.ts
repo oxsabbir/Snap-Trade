@@ -84,15 +84,19 @@ export const MAX_HISTORY_CANDLES = 1500;
 export function fetchInitialCandles(symbol: string, timeframe: Timeframe): Promise<Candle[]> {
   const endAt = Math.floor(Date.now() / 1000);
   const startAt = endAt - INITIAL_CANDLES * timeframe.seconds;
-  return fetchCandleWindow(symbol, timeframe.key, startAt, endAt).then(
-    (rows) =>
-      // Always hand back a full window: a quiet pair returns only the buckets that traded, and
-      // the chart's default view would otherwise shrink to those few candles.
-      fillCandleGaps(rows, timeframe.seconds * 1000, {
-        endMs: endAt * 1000,
-        target: INITIAL_CANDLES,
-      })
-  );
+  const intervalMs = timeframe.seconds * 1000;
+  return fetchCandleWindow(symbol, timeframe.key, startAt, endAt)
+    .then((rows) => {
+      if (rows.length === 0) {
+        // Nothing traded inside the window, so the bounded query comes back empty and the chart
+        // would render nothing. The unbounded query still returns the recent buckets, ending at
+        // the last trade; showing them as-is keeps a real candle (and a non-degenerate price band)
+        return fetchCandleWindow(symbol, timeframe.key).then((recent) =>
+          fillCandleGaps(recent, intervalMs)
+        );
+      }
+      return fillCandleGaps(rows, intervalMs);
+    });
 }
 
 /**
