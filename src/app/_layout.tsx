@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Platform, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, DeviceEventEmitter, Platform, StyleSheet, View } from 'react-native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { NavigationBar } from 'expo-navigation-bar';
@@ -41,6 +41,30 @@ function RootNavigator() {
   // resolved by the router before this mounts. No-ops (and is tree-shaken) when the feature is
   // stripped from the build.
   useSignalDeepLink();
+
+  // Prints the native notification payload in Metro while the JS runtime is alive, which makes
+  // it possible to compare the fields Android supplies for X posts and adb test notifications.
+  useEffect(() => {
+    if (Platform.OS !== 'android' || !SIGNAL_DETECTION_ENABLED) return;
+
+    const subscription = DeviceEventEmitter.addListener('NotificationPosted', (notification) => {
+      const packageName = notification?.packageName;
+      if (packageName !== 'com.twitter.android' && packageName !== 'com.android.shell') return;
+
+      console.log('[SignalNotification] received', {
+        packageName,
+        id: notification?.id,
+        postTime: notification?.postTime,
+        title: notification?.title,
+        text: notification?.text,
+        bigText: notification?.bigText,
+        textLines: notification?.textLines,
+        subText: notification?.subText,
+      });
+    });
+
+    return () => subscription.remove();
+  }, []);
 
   // Keeps the root view (behind the navigator, and visible during transitions) in step with the
   // active scheme so no wrong-coloured edge flashes when a screen animates.

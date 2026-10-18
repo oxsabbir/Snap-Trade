@@ -44,6 +44,7 @@ class NotificationListener : NotificationListenerService() {
 
         /** X reposts and then updates the same notification; don't relaunch for the same coin. */
         private const val DEDUPE_WINDOW_MS = 10_000L
+        private const val MAX_LOG_FIELD_CHARS = 2_000
 
         private val lastLaunchByTicker = ConcurrentHashMap<String, Long>()
 
@@ -75,9 +76,9 @@ class NotificationListener : NotificationListenerService() {
     private val tpAltPattern =
         Pattern.compile("(?i)(?:TP|T\\.P)\\s*(\\d+)\\s+([\\d,.]+)(?![=:])")
 
-    // Gem-post marker: `Buying this GEM on #KuCoin` (constant across the source's posts).
-    private val gemMarkerPattern =
-        Pattern.compile("(?i)buying\\s+this\\s+gem\\s+on\\s+#?kucoin")
+    // Gem-post marker: compare only letters/digits so newlines, emoji and X formatting between
+    // the words do not change recognition of `Buying this GEM on #KuCoin`.
+    private val gemMarker = "buyingthisgemonkucoin"
 
     // `Current market price - 0.0007306 $` — value kept as a plain string, not a Double,
     // so the deep link carries the exact posted decimal (no scientific notation).
@@ -95,6 +96,7 @@ class NotificationListener : NotificationListenerService() {
 
         val packageName = sbn.packageName
         log("ListenerFired", "package=$packageName")
+        logNotificationFields(sbn)
 
         // Keep the JS debug listeners fed while the runtime happens to be alive. The decision
         // below is entirely native and does not depend on this succeeding.
@@ -116,10 +118,25 @@ class NotificationListener : NotificationListenerService() {
         val extras = sbn.notification.extras
         val text = extras?.getCharSequence(Notification.EXTRA_TEXT)?.toString() ?: ""
         val bigText = extras?.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString() ?: ""
-        val primaryText = if (bigText.isNotBlank()) bigText else text
+        // X may expose the expanded post in BIG_TEXT or as separate TEXT_LINES. Keep BIG_TEXT
+        // first so ticker extraction retains the existing behavior when the fields overlap.
+        val textLines = extras?.getCharSequenceArray(Notification.EXTRA_TEXT_LINES)
+            ?.joinToString("\n") { it.toString() }
+            .orEmpty()
+        val primaryText = listOf(bigText, text, textLines)
+            .filter { it.isNotBlank() }
+            .distinct()
+            .joinToString("\n")
 
         val ticker = extractTicker(primaryText)
         val tps = extractTps(primaryText)
+        val hasGemMarker = hasGemMarker(primaryText)
+        val entryPrice = if (tps.size < 3) extractGemPrice(primaryText) else null
+        log(
+            "SignalParse",
+            "ticker=${ticker ?: "none"}, tps=${tps.size}, gemMarker=$hasGemMarker, " +
+                "gemPrice=${entryPrice ?: "none"}, inputChars=${primaryText.length}"
+        )
         if (ticker == null) {
             log("Decision", "not signal (ticker=none, tps=${tps.size})")
             return
@@ -129,9 +146,12 @@ class NotificationListener : NotificationListenerService() {
         // Format 2 (gem posts): a cashtag plus the marker phrase and a market price line.
         // The trailing cashtag list in gem posts is a decoy — only the first cashtag is
         // ever taken as the ticker.
-        val entryPrice = if (tps.size < 3) extractGemPrice(primaryText) else null
         if (tps.size < 3 && entryPrice == null) {
-            log("Decision", "not signal (ticker=$ticker, tps=${tps.size}, gem=false)")
+            log(
+                "Decision",
+                "not signal (ticker=$ticker, tps=${tps.size}, " +
+                    "gemMarker=$hasGemMarker, gemPrice=${entryPrice ?: "none"})"
+            )
             return
         }
 
@@ -264,7 +284,7 @@ class NotificationListener : NotificationListenerService() {
      */
     private fun extractGemPrice(text: String): String? {
         if (text.isBlank()) return null
-        if (!gemMarkerPattern.matcher(text).find()) return null
+        if (!hasGemMarker(text)) return null
 
         val matcher = gemPricePattern.matcher(text)
         if (!matcher.find()) return null
@@ -276,6 +296,11 @@ class NotificationListener : NotificationListenerService() {
         } catch (e: NumberFormatException) {
             null
         }
+    }
+
+    private fun hasGemMarker(text: String): Boolean {
+        val normalized = text.lowercase().filter { it.isLetterOrDigit() }
+        return gemMarker in normalized
     }
 
     private fun launchTradeScreen(ticker: String, entryPrice: String? = null, tp1: String? = null) {
@@ -308,4 +333,28 @@ class NotificationListener : NotificationListenerService() {
     private fun log(stage: String, message: String) {
         Log.d(TAG, "${System.currentTimeMillis()} $stage $message")
     }
+
+    /** Logs the exact notification extras that feed signal detection, with line breaks visible. */
+    private fun logNotificationFields(sbn: StatusBarNotification) {
+        val extras = sbn.notification.extras
+        fun visible(value: CharSequence?): String =
+            value?.toString()
+                ?.replace("\\", "\\\\")
+                ?.replace("\r", "\\r")
+                ?.replace("\n", "\\n")
+                ?.replace("\t", "\\t")
+                ?.take(MAX_LOG_FIELD_CHARS)
+                ?: ""
+
+        log("NotificationFields", "title=${visible(extras?.getCharSequence(Notification.EXTRA_TITLE))}")
+        log("NotificationFields", "text=${visible(extras?.getCharSequence(Notification.EXTRA_TEXT))}")
+        log("NotificationFields", "bigText=${visible(extras?.getCharSequence(Notification.EXTRA_BIG_TEXT))}")
+        log("NotificationFields", "subText=${visible(extras?.getCharSequence(Notification.EXTRA_SUB_TEXT))}")
+        val textLines = extras?.getCharSequenceArray(Notification.EXTRA_TEXT_LINES)
+        log(
+            "NotificationFields",
+            "textLines=${textLines?.joinToString(" | ") { visible(it) } ?: ""}"
+        )
+    }
+
 }

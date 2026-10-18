@@ -49,6 +49,9 @@ class NotificationListenerModule(reactContext: ReactApplicationContext) :
         val text = extras?.getCharSequence("android.text")?.toString() ?: "no text"
         val bigText = extras?.getCharSequence("android.bigText")?.toString() ?: ""
         val subText = extras?.getCharSequence("android.subText")?.toString() ?: ""
+        val textLines = extras?.getCharSequenceArray("android.textLines")
+            ?.joinToString("\n") { it.toString() }
+            .orEmpty()
 
         val params = Arguments.createMap()
         params.putString("packageName", sbn.packageName)
@@ -56,6 +59,7 @@ class NotificationListenerModule(reactContext: ReactApplicationContext) :
         params.putString("text", text)
         params.putString("bigText", bigText)
         params.putString("subText", subText)
+        params.putString("textLines", textLines)
         params.putLong("postTime", sbn.postTime)
         params.putInt("id", sbn.id)
 
