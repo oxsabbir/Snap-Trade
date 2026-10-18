@@ -2,7 +2,6 @@ import { useCallback } from 'react';
 import {
   type NativeScrollEvent,
   type NativeSyntheticEvent,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -61,19 +60,6 @@ export function TradeRouteView({ symbol, name, decimals, signalEntry, onBack }: 
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
-      {onBack ? (
-        <View style={styles.header}>
-          <Pressable
-            onPress={onBack}
-            hitSlop={12}
-            style={styles.back}
-            accessibilityRole="button"
-            accessibilityLabel="Back to markets"
-          >
-            <Text style={styles.backText}>‹ Back</Text>
-          </Pressable>
-        </View>
-      ) : null}
       {signalEntry ? (
         // Pinned above the chart so the posted price stays in view while the user sizes the
         // order — the whole point of carrying it off the notification.
@@ -100,7 +86,12 @@ export function TradeRouteView({ symbol, name, decimals, signalEntry, onBack }: 
         onScroll={handleScroll}
         scrollEventThrottle={16}
       >
-        <CoinDetail symbol={symbol} name={name} decimals={decimals} />
+        <CoinDetail
+          symbol={symbol}
+          name={name}
+          decimals={decimals}
+          onBack={onBack}
+        />
         <TradeScreen symbol={symbol} />
         <OrderManagement
           symbol={symbol}
@@ -117,22 +108,6 @@ const useStyles = createThemedStyles((colors) => StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: colors.bg,
-  },
-  header: {
-    paddingHorizontal: spacing.md,
-    paddingTop: spacing.sm,
-  },
-  back: {
-    alignSelf: 'flex-start',
-    paddingVertical: spacing.xs,
-    paddingHorizontal: spacing.sm,
-    borderRadius: radius.pill,
-    backgroundColor: colors.surfaceAlt,
-  },
-  backText: {
-    color: colors.text,
-    fontSize: 13,
-    fontWeight: '600',
   },
   signalBanner: {
     flexDirection: 'row',

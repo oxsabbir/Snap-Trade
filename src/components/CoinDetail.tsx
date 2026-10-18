@@ -8,7 +8,7 @@ import {
 } from "react-native";
 
 import { CoinInfoSheet } from "@/components/CoinInfoSheet";
-import { InfoIcon } from "@/components/Icons";
+import { BackIcon, InfoIcon } from "@/components/Icons";
 import { LiveBadge } from "@/components/LiveBadge";
 import { LivePrice } from "@/components/LivePrice";
 import { PositionPnlChip } from "@/components/PositionPnlChip";
@@ -41,6 +41,8 @@ type Props = {
    * displayed — so there is nothing left to pass down.
    */
   // children?: ReactNode;
+  /** Shown as a back affordance in the title row when this screen is a pushed route. */
+  onBack?: () => void;
 };
 
 /** Timeframe a freshly opened pair starts on. */
@@ -63,6 +65,11 @@ type ChromeProps = {
   timeframeKey: string;
   onSelectTimeframe: (next: TimeframeOrLine) => void;
   onOpenInfo: () => void;
+  /**
+   * Rendered as an icon just before the info button. Only supplied when this screen is a pushed
+   * route (a signal deep link); the tab has nothing to go back to.
+   */
+  onBack?: () => void;
 };
 
 /**
@@ -82,6 +89,7 @@ const ChartChrome = memo(function ChartChrome({
   timeframeKey,
   onSelectTimeframe,
   onOpenInfo,
+  onBack,
 }: ChromeProps) {
   const { colors } = useTheme();
   const styles = useStyles();
@@ -96,15 +104,28 @@ const ChartChrome = memo(function ChartChrome({
             <Text style={styles.name}>{name}</Text>
           ) : null}
         </View>
-        <Pressable
-          onPress={onOpenInfo}
-          hitSlop={12}
-          style={styles.infoButton}
-          accessibilityRole="button"
-          accessibilityLabel={`About ${symbol}`}
-        >
-          <InfoIcon size={17} color={colors.textMuted} />
-        </Pressable>
+        <View style={styles.headerActions}>
+          {onBack ? (
+            <Pressable
+              onPress={onBack}
+              hitSlop={12}
+              style={styles.iconButton}
+              accessibilityRole="button"
+              accessibilityLabel="Go back"
+            >
+              <BackIcon size={17} color={colors.textMuted} />
+            </Pressable>
+          ) : null}
+          <Pressable
+            onPress={onOpenInfo}
+            hitSlop={12}
+            style={styles.infoButton}
+            accessibilityRole="button"
+            accessibilityLabel={`About ${symbol}`}
+          >
+            <InfoIcon size={17} color={colors.textMuted} />
+          </Pressable>
+        </View>
       </View>
 
       <View style={styles.priceBlock}>
@@ -128,7 +149,7 @@ const ChartChrome = memo(function ChartChrome({
   );
 });
 
-export function CoinDetail({ symbol, name, decimals }: Props) {
+export function CoinDetail({ symbol, name, decimals, onBack }: Props) {
   const { colors } = useTheme();
   const styles = useStyles();
   const [timeframeKey, setTimeframeKey] = useState(DEFAULT_TIMEFRAME_KEY);
@@ -216,6 +237,7 @@ export function CoinDetail({ symbol, name, decimals }: Props) {
         timeframeKey={timeframeKey}
         onSelectTimeframe={onSelectTimeframe}
         onOpenInfo={onOpenInfo}
+        onBack={onBack}
       />
 
       <View style={styles.chartWrap}>
@@ -299,6 +321,10 @@ const useStyles = createThemedStyles((colors) =>
       flex: 1,
       gap: 1,
     },
+    headerActions: {
+      flexDirection: "row",
+      alignItems: "center",
+    },
     symbol: {
       color: colors.text,
       fontSize: 17,
@@ -366,6 +392,10 @@ const useStyles = createThemedStyles((colors) =>
     infoButton: {
       padding: spacing.xs,
       marginLeft: spacing.xs,
+      borderRadius: radius.pill,
+    },
+    iconButton: {
+      padding: spacing.xs,
       borderRadius: radius.pill,
     },
   }),

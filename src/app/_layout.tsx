@@ -48,6 +48,15 @@ function RootNavigator() {
     void SystemUI.setBackgroundColorAsync(colors.bg);
   }, [colors.bg]);
 
+  // Drives the Android navigation-bar button color from the active scheme. Imperative rather than
+  // the <NavigationBar> component: the component fires a native setHidden on unmount, which rejects
+  // ("the current activity is no longer available") when a Metro/dev-client reload tears the tree
+  // down after the Activity is gone. setStyle has no unmount path, so nothing is called on teardown.
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    NavigationBar.setStyle(scheme === 'dark' ? 'dark' : 'light');
+  }, [scheme]);
+
   const screenOptions = useMemo(
     () => ({
       headerShown: false,
@@ -60,9 +69,6 @@ function RootNavigator() {
   return (
     <View style={styles.root}>
       <StatusBar style={scheme === 'dark' ? 'light' : 'dark'} />
-      {Platform.OS === 'android' ? (
-        <NavigationBar style={scheme === 'dark' ? 'dark' : 'light'} />
-      ) : null}
       <Stack screenOptions={screenOptions}>
         <Stack.Protected guard={isLoading || isConnected}>
           <Stack.Screen name="(tabs)" />
