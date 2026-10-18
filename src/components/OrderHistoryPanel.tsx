@@ -1,11 +1,13 @@
-import { memo, useCallback } from "react";
+import {
+  memo,
+  useCallback } from "react";
 import {
   ActivityIndicator,
   Pressable,
   StyleSheet,
-  Text,
-  View,
+  View
 } from "react-native";
+import { Text } from '@/components/AppText';
 
 import { OrderHistoryCard } from "@/components/OrderHistoryCard";
 import { TrayIcon } from "@/components/Icons";

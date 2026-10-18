@@ -1,4 +1,10 @@
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import {
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  View
+} from 'react-native';
+import { Text } from '@/components/AppText';
 
 import { radius, spacing } from '@/theme';
 import { createThemedStyles } from '@/theme/themedStyles';

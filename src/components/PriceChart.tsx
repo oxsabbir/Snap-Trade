@@ -1,5 +1,15 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { StyleSheet, Text, View, type LayoutChangeEvent } from "react-native";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState } from "react";
+import { StyleSheet,
+  View,
+  type LayoutChangeEvent
+} from "react-native";
+import { Text } from '@/components/AppText';
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import {
   runOnJS,

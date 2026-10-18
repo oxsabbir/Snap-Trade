@@ -1,4 +1,8 @@
-import { Pressable, StyleSheet, Text } from 'react-native';
+import {
+  Pressable,
+  StyleSheet
+} from 'react-native';
+import { Text } from '@/components/AppText';
 
 import { useTicker } from '@/state/ticker';
 import { spacing } from '@/theme';

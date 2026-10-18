@@ -1,4 +1,8 @@
-import { memo, useCallback, useMemo, useState } from "react";
+import {
+  memo,
+  useCallback,
+  useMemo,
+  useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -6,9 +10,9 @@ import {
   RefreshControl,
   type ListRenderItem,
   StyleSheet,
-  Text,
-  View,
+  View
 } from "react-native";
+import { Text } from '@/components/AppText';
 import { useIsFocused } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 

@@ -13,6 +13,7 @@ import { SIGNAL_DETECTION_ENABLED } from '@/lib/featureFlags';
 
 import { ActiveCoinProvider } from '@/state/activeCoin';
 import { ApiCredentialsProvider, useApiCredentials } from '@/state/apiCredentials';
+import { FontScaleProvider } from '@/theme/FontScaleProvider';
 import { ThemeProvider, useTheme } from '@/theme/ThemeProvider';
 import { createThemedStyles } from '@/theme/themedStyles';
 
@@ -21,11 +22,13 @@ export default function RootLayout() {
     <GestureHandlerRootView style={styles.gestureRoot}>
       <SafeAreaProvider initialMetrics={initialWindowMetrics}>
         <ThemeProvider>
-          <ActiveCoinProvider>
-            <ApiCredentialsProvider>
-              <RootNavigator />
-            </ApiCredentialsProvider>
-          </ActiveCoinProvider>
+          <FontScaleProvider>
+            <ActiveCoinProvider>
+              <ApiCredentialsProvider>
+                <RootNavigator />
+              </ApiCredentialsProvider>
+            </ActiveCoinProvider>
+          </FontScaleProvider>
         </ThemeProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>

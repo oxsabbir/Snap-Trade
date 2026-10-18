@@ -1,4 +1,9 @@
-import { Pressable, StyleSheet, TextInput, View } from 'react-native';
+import {
+  Pressable,
+  StyleSheet,
+  View
+} from 'react-native';
+import { TextInput } from '@/components/AppText';
 
 import { CloseIcon, SearchIcon } from '@/components/Icons';
 import { radius, spacing } from '@/theme';

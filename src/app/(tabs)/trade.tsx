@@ -1,5 +1,10 @@
-import { router } from "expo-router";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import {
+  router } from "expo-router";
+import { Pressable,
+  StyleSheet,
+  View
+} from "react-native";
+import { Text } from '@/components/AppText';
 
 import { TradeRouteView } from "@/components/TradeRouteView";
 import { useActiveCoin } from "@/state/activeCoin";

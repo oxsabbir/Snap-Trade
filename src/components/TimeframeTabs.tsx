@@ -1,4 +1,9 @@
-import { Pressable, ScrollView, StyleSheet, Text } from 'react-native';
+import {
+  Pressable,
+  ScrollView,
+  StyleSheet
+} from 'react-native';
+import { Text } from '@/components/AppText';
 
 import { LINE_TIMEFRAME, TIMEFRAMES, type TimeframeOrLine } from '@/lib/kucoin/candles';
 import { radius, spacing } from '@/theme';

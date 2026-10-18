@@ -1,5 +1,13 @@
-import { memo, useMemo, useState } from "react";
-import { Modal, Pressable, StyleSheet, Text, View } from "react-native";
+import {
+  memo,
+  useMemo,
+  useState } from "react";
+import { Modal,
+  Pressable,
+  StyleSheet,
+  View
+} from "react-native";
+import { Text } from '@/components/AppText';
 
 import {
   CaretDownIcon,

@@ -1,5 +1,9 @@
-import { memo } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import {
+  memo } from 'react';
+import { StyleSheet,
+  View
+} from 'react-native';
+import { Text } from '@/components/AppText';
 
 import { spacing } from '@/theme';
 import { useTheme } from '@/theme/ThemeProvider';

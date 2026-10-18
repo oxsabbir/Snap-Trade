@@ -1,5 +1,11 @@
-import { memo, useCallback } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import {
+  memo,
+  useCallback } from 'react';
+import { Pressable,
+  StyleSheet,
+  View
+} from 'react-native';
+import { Text } from '@/components/AppText';
 import { router } from 'expo-router';
 
 import { CoinAvatar } from '@/components/CoinAvatar';

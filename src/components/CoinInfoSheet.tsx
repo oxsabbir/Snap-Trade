@@ -1,4 +1,6 @@
-import { memo, useState } from 'react';
+import {
+  memo,
+  useState } from 'react';
 import {
   ActivityIndicator,
   Linking,
@@ -6,9 +8,9 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
-  Text,
-  View,
+  View
 } from 'react-native';
+import { Text } from '@/components/AppText';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { CloseIcon } from '@/components/Icons';

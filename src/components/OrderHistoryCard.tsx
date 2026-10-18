@@ -1,5 +1,10 @@
-import { memo } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import {
+  memo } from "react";
+import { Pressable,
+  StyleSheet,
+  View
+} from "react-native";
+import { Text } from '@/components/AppText';
 
 import { ChevronRightIcon } from "@/components/Icons";
 import type { OrderHistoryEntry } from "@/hooks/useOrderHistory";

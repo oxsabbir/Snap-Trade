@@ -1,11 +1,12 @@
-import { memo } from "react";
+import {
+  memo } from "react";
 import {
   ActivityIndicator,
   Pressable,
   StyleSheet,
-  Text,
-  View,
+  View
 } from "react-native";
+import { Text } from '@/components/AppText';
 
 import { CoinAvatar } from "@/components/CoinAvatar";
 import { ChevronRightIcon } from "@/components/Icons";

@@ -1,13 +1,17 @@
-import { memo, useCallback, useRef, useState } from 'react';
+import {
+  memo,
+  useCallback,
+  useRef,
+  useState } from 'react';
 import {
   Pressable,
   StyleSheet,
-  Text,
-  TextInput,
   View,
   type NativeSyntheticEvent,
+  type TextInput as NativeTextInput,
   type TextInputSubmitEditingEventData,
 } from 'react-native';
+import { Text, TextInput } from '@/components/AppText';
 
 import { Avatar } from '@/components/Avatar';
 import { EyeIcon, EyeOffIcon } from '@/components/Icons';
@@ -35,7 +39,7 @@ function ProfileCardComponent({ displayName, onRename, accountInfo, portfolio, l
   const [isEditing, setIsEditing] = useState(false);
   const [isHidden, setIsHidden] = useState(false);
   const [draft, setDraft] = useState(displayName);
-  const inputRef = useRef<TextInput>(null);
+  const inputRef = useRef<NativeTextInput>(null);
 
   const commit = useCallback(() => {
     onRename?.(draft);

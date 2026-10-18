@@ -1,11 +1,15 @@
-import { memo, useCallback, useMemo, useState } from "react";
+import {
+  memo,
+  useCallback,
+  useMemo,
+  useState } from "react";
 import {
   ActivityIndicator,
   Pressable,
   StyleSheet,
-  Text,
-  View,
+  View
 } from "react-native";
+import { Text } from '@/components/AppText';
 
 import { CoinInfoSheet } from "@/components/CoinInfoSheet";
 import { BackIcon, InfoIcon } from "@/components/Icons";

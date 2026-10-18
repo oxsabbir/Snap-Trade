@@ -6,15 +6,14 @@ import {
   useRef,
   useState,
   type ReactNode,
-} from "react";
+  } from "react";
 import {
   ActivityIndicator,
   Pressable,
   StyleSheet,
-  Text,
-  TextInput,
-  View,
+  View
 } from "react-native";
+import { Text, TextInput } from '@/components/AppText';
 
 import { PlusIcon } from "@/components/Icons";
 import { useAccountBalance } from "@/hooks/useAccountBalance";

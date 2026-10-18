@@ -1,5 +1,11 @@
-import { useMemo, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import {
+  useMemo,
+  useState } from 'react';
+import { Pressable,
+  StyleSheet,
+  View
+} from 'react-native';
+import { Text } from '@/components/AppText';
 
 import { AssetRow, type AssetScope } from '@/components/AssetRow';
 import { EyeIcon } from '@/components/Icons';

@@ -1,4 +1,8 @@
-import { StyleSheet, Text, View } from 'react-native';
+import {
+  StyleSheet,
+  View
+} from 'react-native';
+import { Text } from '@/components/AppText';
 
 import { useTickerStatus } from '@/state/ticker';
 import { radius, spacing } from '@/theme';

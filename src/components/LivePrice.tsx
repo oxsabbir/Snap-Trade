@@ -1,4 +1,8 @@
-import { StyleSheet, Text, View } from 'react-native';
+import {
+  StyleSheet,
+  View
+} from 'react-native';
+import { Text } from '@/components/AppText';
 
 import { deriveQuote } from '@/lib/quote';
 import { useTicker } from '@/state/ticker';

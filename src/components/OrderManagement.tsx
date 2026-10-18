@@ -1,5 +1,15 @@
-import { memo, useCallback, useMemo, useState, type ReactNode } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import {
+  memo,
+  useCallback,
+  useMemo,
+  useState,
+  type ReactNode } from "react";
+import { Pressable,
+  ScrollView,
+  StyleSheet,
+  View
+} from "react-native";
+import { Text } from '@/components/AppText';
 
 import { AssetsPanel } from "@/components/AssetsPanel";
 import { OrderHistoryPanel } from "@/components/OrderHistoryPanel";

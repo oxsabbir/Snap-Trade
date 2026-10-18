@@ -1,4 +1,14 @@
-import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import {
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  View
+} from 'react-native';
+import { Text, TextInput } from '@/components/AppText';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AssetList } from '@/components/AssetList';
@@ -10,6 +20,7 @@ import { useSignalSource } from '@/hooks/useSignalSource';
 import { SIGNAL_DETECTION_ENABLED } from '@/lib/featureFlags';
 import { useApiCredentials, type OnboardingEntry } from '@/state/apiCredentials';
 import { getKcsDiscountEnabled, setKcsDiscountEnabled } from '@/state/kcsDiscount';
+import { FONT_SIZE_OPTIONS, useFontScale } from '@/theme/FontScaleProvider';
 import { radius, spacing } from '@/theme';
 import { useTheme, type ThemePreference } from '@/theme/ThemeProvider';
 import { createThemedStyles } from '@/theme/themedStyles';
@@ -34,6 +45,7 @@ export default function AccountScreen() {
   const signal = useSignalSource();
   const { apiKey, disconnect } = useApiCredentials();
   const { colors, preference, setPreference } = useTheme();
+  const { step: fontSizeStep, setStep: setFontSizeStep } = useFontScale();
   const styles = useStyles();
   const [accountAction, setAccountAction] = useState<OnboardingEntry | null>(null);
   const [accountActionError, setAccountActionError] = useState<string | null>(null);
@@ -308,6 +320,38 @@ export default function AccountScreen() {
                   </Pressable>
                 );
               })}
+            </View>
+            <View style={styles.fontScaleSection}>
+              <View style={styles.fontScaleHeader}>
+                <View style={styles.fontScaleInfo}>
+                  <Text style={styles.fontScaleTitle}>Text size</Text>
+                  <Text style={styles.fontScaleDescription}>Adjust text across the app</Text>
+                </View>
+                <Text style={styles.fontScaleCurrent}>
+                  {FONT_SIZE_OPTIONS[fontSizeStep]!.label}
+                </Text>
+              </View>
+              <View style={styles.fontScaleOptions}>
+                {FONT_SIZE_OPTIONS.map((option, index) => {
+                  const active = fontSizeStep === index;
+                  return (
+                    <Pressable
+                      key={option.label}
+                      onPress={() => setFontSizeStep(index)}
+                      style={[styles.fontScaleOption, active && styles.fontScaleOptionActive]}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: active }}
+                      accessibilityLabel={`${option.label} app text`}
+                    >
+                      <Text
+                        style={[styles.fontScaleOptionText, active && styles.fontScaleOptionTextActive]}
+                      >
+                        {option.shortLabel}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
             </View>
           </View>
 
@@ -620,6 +664,59 @@ const useStyles = createThemedStyles((colors) =>
       fontWeight: '600',
     },
     segmentTextActive: {
+      color: colors.onAccent,
+    },
+    fontScaleSection: {
+      marginTop: spacing.xs,
+      gap: spacing.sm,
+    },
+    fontScaleHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: spacing.sm,
+    },
+    fontScaleInfo: {
+      flex: 1,
+      gap: 2,
+    },
+    fontScaleTitle: {
+      color: colors.text,
+      fontSize: 13,
+      fontWeight: '600',
+    },
+    fontScaleDescription: {
+      color: colors.textMuted,
+      fontSize: 11,
+    },
+    fontScaleCurrent: {
+      color: colors.accent,
+      fontSize: 11,
+      fontWeight: '700',
+    },
+    fontScaleOptions: {
+      flexDirection: 'row',
+      backgroundColor: colors.surfaceAlt,
+      borderRadius: radius.md,
+      padding: 3,
+      gap: 3,
+    },
+    fontScaleOption: {
+      flex: 1,
+      minHeight: 38,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderRadius: radius.sm,
+    },
+    fontScaleOptionActive: {
+      backgroundColor: colors.accent,
+    },
+    fontScaleOptionText: {
+      color: colors.textMuted,
+      fontSize: 13,
+      fontWeight: '700',
+    },
+    fontScaleOptionTextActive: {
       color: colors.onAccent,
     },
     keyboardAvoidingView: {
