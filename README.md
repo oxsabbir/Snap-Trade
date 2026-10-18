@@ -39,20 +39,25 @@ Both `typecheck` and `lint` pass clean as of the last commit.
 
 The app version lives in `app.json`: `expo.version` is the SemVer, with `android.versionCode` and
 `ios.buildNumber` as monotonic build numbers. Bump it, commit, then run the GitHub Actions
-workflow — CI reads the version, builds the signed APK, and publishes a GitHub Release whose tag
-matches the APK's `versionName`.
+workflow — CI builds and signs two APKs, one with notification signal detection and one without,
+then publishes the plain APK on the GitHub Release whose tag matches their `versionName`. The
+signal-enabled APK is uploaded as a workflow artifact, which is only downloadable by people with
+read access once the repository is private.
 
 ```bash
-npm run bump minor        # 1.0.0 -> 1.1.0, versionCode 1 -> 2, buildNumber "1" -> "2"
+npm run bump patch        # 1.2.0 -> 1.2.1, versionCode/buildNumber each increment
 npm run bump 2.0.0        # or set an explicit SemVer
-git commit -am "chore(release): v1.1.0"
+git commit -am "chore(release): v1.2.1"
 git push origin main
 ```
 
-Then: GitHub → **Actions** → **Build Release APK** → **Run workflow** (branch `main`). The run
-creates release `v1.1.0` for that exact commit with the signed `app-release.apk` attached and
-auto-generated notes from the commit history. The workflow aborts if the tag already exists, so
-bump before rebuilding.
+Then: GitHub → **Actions** → **Build Release APKs** → **Run workflow** (branch `main`). The run
+creates a release for that exact commit with `app-release-plain.apk` attached and uploads an
+`app-release-sd-incl.apk` as a workflow artifact. Once the repository is private, only people with
+repository read access can download that artifact.
+
+Both APKs use the same package id, so installing one over the other replaces it. The workflow
+aborts if the tag already exists, so bump before rebuilding.
 
 ## Layout
 
