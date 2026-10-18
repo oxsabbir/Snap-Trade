@@ -22,9 +22,11 @@ import {
   LINE_TIMEFRAME,
   type TimeframeOrLine,
 } from "@/lib/kucoin/candles";
+import { useTicker } from "@/state/ticker";
 import { radius, spacing } from "@/theme";
 import { useTheme } from "@/theme/ThemeProvider";
 import { createThemedStyles } from "@/theme/themedStyles";
+import { formatPrice } from "@/utils/format";
 
 type Props = {
   symbol: string;
@@ -43,6 +45,8 @@ type Props = {
   // children?: ReactNode;
   /** Shown as a back affordance in the title row when this screen is a pushed route. */
   onBack?: () => void;
+  /** TP1 from a TP-format signal; centres a TP1/CMP readout in the title while it is present. */
+  signalTp1?: string | null;
 };
 
 /** Timeframe a freshly opened pair starts on. */
@@ -70,7 +74,49 @@ type ChromeProps = {
    * route (a signal deep link); the tab has nothing to go back to.
    */
   onBack?: () => void;
+  /**
+   * TP1 carried by the signal. When present, a TP1/CMP readout is centred in the title row —
+   * the signal's target next to the live market price. Absent on the tab and for gem posts.
+   */
+  signalTp1?: string | null;
 };
+
+/**
+ * The signal's TP1 next to the live market price, centred in the title row ("TP1: 0.0034" over
+ * "CMP: 0.0007320" — the signal's target read against where the market actually is).
+ *
+ * A leaf that subscribes to the price itself, so the tick re-renders this line and nothing above
+ * it. TP1 is a plain prop and sits still; CMP falls back to the last candle's close until the
+ * socket's first tick lands.
+ */
+const SignalTargets = memo(function SignalTargets({
+  symbol,
+  tp1,
+  fallbackPrice,
+  decimals,
+}: {
+  symbol: string;
+  tp1: string;
+  fallbackPrice?: number;
+  decimals?: number;
+}) {
+  const styles = useStyles();
+  const { update } = useTicker(symbol);
+  const price = update?.price ?? fallbackPrice;
+
+  return (
+    <View style={styles.signalTargets}>
+      <Text style={styles.signalStat}>
+        <Text style={styles.signalStatLabel}>TP1: </Text>
+        {tp1}
+      </Text>
+      <Text style={styles.signalStat}>
+        <Text style={styles.signalStatLabel}>CMP: </Text>
+        {price === undefined ? "—" : formatPrice(price, decimals)}
+      </Text>
+    </View>
+  );
+});
 
 /**
  * Everything above the chart: the pair's name, its price, the timeframe tabs and the caption.
@@ -90,6 +136,7 @@ const ChartChrome = memo(function ChartChrome({
   onSelectTimeframe,
   onOpenInfo,
   onBack,
+  signalTp1,
 }: ChromeProps) {
   const { colors } = useTheme();
   const styles = useStyles();
@@ -128,6 +175,17 @@ const ChartChrome = memo(function ChartChrome({
         </View>
       </View>
 
+      {signalTp1 ? (
+        <View style={styles.signalRow}>
+          <SignalTargets
+            symbol={symbol}
+            tp1={signalTp1}
+            fallbackPrice={seedPrice ?? undefined}
+            decimals={decimals}
+          />
+        </View>
+      ) : null}
+
       <View style={styles.priceBlock}>
         <LivePrice
           symbol={symbol}
@@ -149,7 +207,7 @@ const ChartChrome = memo(function ChartChrome({
   );
 });
 
-export function CoinDetail({ symbol, name, decimals, onBack }: Props) {
+export function CoinDetail({ symbol, name, decimals, signalTp1, onBack }: Props) {
   const { colors } = useTheme();
   const styles = useStyles();
   const [timeframeKey, setTimeframeKey] = useState(DEFAULT_TIMEFRAME_KEY);
@@ -238,6 +296,7 @@ export function CoinDetail({ symbol, name, decimals, onBack }: Props) {
         onSelectTimeframe={onSelectTimeframe}
         onOpenInfo={onOpenInfo}
         onBack={onBack}
+        signalTp1={signalTp1}
       />
 
       <View style={styles.chartWrap}>
@@ -324,6 +383,28 @@ const useStyles = createThemedStyles((colors) =>
     headerActions: {
       flexDirection: "row",
       alignItems: "center",
+    },
+    // The signal readout's own row, directly under the title: TP1 and CMP side by side, centred
+    // across the content width.
+    signalRow: {
+      alignItems: "center",
+      paddingHorizontal: spacing.lg,
+      paddingBottom: spacing.sm,
+    },
+    signalTargets: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.lg,
+    },
+    signalStat: {
+      color: colors.text,
+      fontSize: 12,
+      fontWeight: "700",
+      fontVariant: ["tabular-nums"],
+    },
+    signalStatLabel: {
+      color: colors.textFaint,
+      fontWeight: "600",
     },
     symbol: {
       color: colors.text,

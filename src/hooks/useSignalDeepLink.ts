@@ -34,8 +34,12 @@ export function useSignalDeepLink(): void {
       try {
         router.navigate({
           pathname: '/trade/[symbol]',
-          // `entry` is undefined for TP-format signals; only gem posts carry a price.
-          params: { symbol: signal.symbol, ...(signal.entry ? { entry: signal.entry } : {}) },
+          // `entry`/`tp1` are mutually exclusive: gem posts carry a price, TP posts carry TP1.
+          params: {
+            symbol: signal.symbol,
+            ...(signal.entry ? { entry: signal.entry } : {}),
+            ...(signal.tp1 ? { tp1: signal.tp1 } : {}),
+          },
         });
       } catch {
         // The navigator may not be mounted for a beat on a very early intent; the launch URL

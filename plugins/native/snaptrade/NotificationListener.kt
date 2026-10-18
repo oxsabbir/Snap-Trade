@@ -24,7 +24,8 @@ import java.util.regex.Pattern
  * service reads; see [NotificationListenerModule.syncSignalSettings].
  *
  * On a signal the service starts the MainActivity through a `snaptrade://trade/<symbol>` deep
- * link (with `?entry=<price>` for gem posts). If the process is alive the activity is brought
+ * link (with `?tp1=<price>` for TP posts and `?entry=<price>` for gem posts). If the process is
+ * alive the activity is brought
  * forward and the link is re-delivered; if it was killed, that link becomes the app's initial
  * route.
  */
@@ -143,9 +144,11 @@ class NotificationListener : NotificationListenerService() {
         lastLaunchByTicker[ticker] = now
 
         val format = if (tps.size >= 3) "tp" else "gem"
+        val tp1 = if (tps.size >= 3) extractTp1(primaryText) else null
         val pricePart = entryPrice?.let { ", price=$it" } ?: ""
-        log("Decision", "signal $ticker (format=$format, tps=${tps.size}$pricePart)")
-        launchTradeScreen(ticker, entryPrice)
+        val tpPart = tp1?.let { ", tp1=$it" } ?: ""
+        log("Decision", "signal $ticker (format=$format, tps=${tps.size}$pricePart$tpPart)")
+        launchTradeScreen(ticker, entryPrice, tp1)
     }
 
     override fun onNotificationRemoved(sbn: StatusBarNotification?) {
@@ -218,6 +221,35 @@ class NotificationListener : NotificationListenerService() {
         return tps
     }
 
+    /**
+     * TP1 as the exact posted decimal string, so the deep link carries the same digits the
+     * source wrote (a small value must not come out as scientific notation). Null when the post
+     * did not label a TP1.
+     */
+    private fun extractTp1(text: String): String? {
+        if (text.isBlank()) return null
+
+        val primary = tpPattern.matcher(text)
+        while (primary.find()) {
+            if (primary.group(1)?.toIntOrNull() == 1) return normalizeDecimal(primary.group(2))
+        }
+
+        val alternate = tpAltPattern.matcher(text)
+        while (alternate.find()) {
+            if (alternate.group(1)?.toIntOrNull() == 1) return normalizeDecimal(alternate.group(2))
+        }
+
+        return null
+    }
+
+    /** Comma to dot, a bare `.0160` gains its leading zero, and anything non-decimal is dropped. */
+    private fun normalizeDecimal(raw: String?): String? {
+        if (raw == null) return null
+        var value = raw.trim().replace(',', '.')
+        if (value.startsWith('.')) value = "0$value"
+        return if (Regex("^\\d+(\\.\\d+)?$").matches(value)) value else null
+    }
+
     /** Accepts `0.016`, `0,016` and `.016` (a missing leading zero). */
     private fun normalizeNumber(raw: String?): Double? {
         if (raw.isNullOrBlank()) return null
@@ -246,13 +278,13 @@ class NotificationListener : NotificationListenerService() {
         }
     }
 
-    private fun launchTradeScreen(ticker: String, entryPrice: String? = null) {
+    private fun launchTradeScreen(ticker: String, entryPrice: String? = null, tp1: String? = null) {
         val symbol = "${ticker.uppercase()}-USDT"
-        val url = if (entryPrice != null) {
-            "snaptrade://trade/$symbol?entry=$entryPrice"
-        } else {
-            "snaptrade://trade/$symbol"
-        }
+        val params = mutableListOf<String>()
+        entryPrice?.let { params.add("entry=$it") }
+        tp1?.let { params.add("tp1=$it") }
+        val query = if (params.isEmpty()) "" else "?" + params.joinToString("&")
+        val url = "snaptrade://trade/$symbol$query"
         val intent = Intent(Intent.ACTION_VIEW).apply {
             data = Uri.parse(url)
             setPackage(packageName)
