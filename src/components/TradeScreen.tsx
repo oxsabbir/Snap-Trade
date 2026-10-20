@@ -12,6 +12,7 @@ import { createThemedStyles } from "@/theme/themedStyles";
 
 type Props = {
   symbol: string;
+  onInitialBookSnapshot?: (symbol: string) => void;
 };
 
 /**
@@ -34,7 +35,7 @@ type Props = {
  * column scrolls: the screen owns the single scroll view, so a scrollable child here would be a
  * list nested inside a list, competing for the same gesture.
  */
-export const TradeScreen = memo(function TradeScreen({ symbol }: Props) {
+export const TradeScreen = memo(function TradeScreen({ symbol, onInitialBookSnapshot }: Props) {
   const styles = useStyles();
   const [selection, setSelection] = useState<ExternalPriceSelection | null>(
     null,
@@ -53,6 +54,7 @@ export const TradeScreen = memo(function TradeScreen({ symbol }: Props) {
             key={symbol}
             symbol={symbol}
             onPriceSelect={handlePriceSelect}
+            onInitialSnapshot={onInitialBookSnapshot}
           />
         </View>
         <View style={styles.panel}>

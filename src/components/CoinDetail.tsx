@@ -28,6 +28,8 @@ import { createThemedStyles } from "@/theme/themedStyles";
 
 type Props = {
   symbol: string;
+  /** Wait to request candle history until the order book has shown its first snapshot. */
+  chartDataEnabled: boolean;
   name?: string;
   decimals?: number;
   /**
@@ -186,7 +188,7 @@ const ChartChrome = memo(function ChartChrome({
   );
 });
 
-export function CoinDetail({ symbol, name, decimals, signalTp1, signalEntry, onBack }: Props) {
+export function CoinDetail({ symbol, name, decimals, signalTp1, signalEntry, onBack, chartDataEnabled }: Props) {
   const { colors } = useTheme();
   const styles = useStyles();
   const [timeframeKey, setTimeframeKey] = useState(DEFAULT_TIMEFRAME_KEY);
@@ -221,8 +223,8 @@ export function CoinDetail({ symbol, name, decimals, signalTp1, signalEntry, onB
   const isLine = timeframeKey === LINE_TIMEFRAME.key;
   const mode = isLine ? "line" : "candle";
 
-  const live = useLiveCandles(symbol, timeframe, !isLine);
-  const lifetime = useLifetimeSeries(symbol, isLine);
+  const live = useLiveCandles(symbol, timeframe, !isLine && chartDataEnabled);
+  const lifetime = useLifetimeSeries(symbol, isLine && chartDataEnabled);
 
   const candles = isLine ? lifetime.candles : live.candles;
   const isLoading = isLine ? lifetime.isLoading : live.isLoading;

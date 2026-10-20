@@ -1,6 +1,8 @@
 import {
   memo,
+  useEffect,
   useMemo,
+  useRef,
   useState } from "react";
 import { Pressable, View } from '@/components/AppLayout';
 import { Modal, StyleSheet } from 'react-native';
@@ -27,6 +29,7 @@ export type OrderBookViewMode = "split" | "bids" | "asks";
 type Props = {
   symbol: string;
   onPriceSelect: (price: string) => void;
+  onInitialSnapshot?: (symbol: string) => void;
 };
 
 const ROW_HEIGHT = 26;
@@ -99,10 +102,16 @@ const DepthRowView = memo(function DepthRowView({
  * every price tick and re-rendered the whole column to change two text nodes. It is now a leaf
  * that subscribes to the price itself.
  */
-function OrderBookBase({ symbol, onPriceSelect }: Props) {
+function OrderBookBase({ symbol, onPriceSelect, onInitialSnapshot }: Props) {
   const { colors } = useTheme();
   const styles = useStyles();
   const { snapshot } = useLevel2Book(symbol);
+  const initialSnapshotNotified = useRef(false);
+  useEffect(() => {
+    if (!snapshot || initialSnapshotNotified.current) return;
+    initialSnapshotNotified.current = true;
+    onInitialSnapshot?.(symbol);
+  }, [snapshot, symbol, onInitialSnapshot]);
   const { rules } = useSymbolRules(symbol);
   const [baseCurrency = "", quoteCurrency = ""] = symbol.split("-");
 

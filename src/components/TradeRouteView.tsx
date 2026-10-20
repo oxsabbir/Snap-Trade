@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { ScrollView } from '@/components/AppLayout';
 import { type NativeScrollEvent, type NativeSyntheticEvent, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -35,6 +35,25 @@ const HISTORY_LOAD_MORE_THRESHOLD = 320;
  */
 export function TradeRouteView({ symbol, name, decimals, signalEntry, signalTp1, onBack }: Props) {
   const styles = useStyles();
+  const [activeSymbol, setActiveSymbol] = useState(symbol);
+  const [bookReadySymbol, setBookReadySymbol] = useState<string | null>(null);
+  const [chartFallbackSymbol, setChartFallbackSymbol] = useState<string | null>(null);
+  if (symbol !== activeSymbol) {
+    setActiveSymbol(symbol);
+    setBookReadySymbol(null);
+    setChartFallbackSymbol(null);
+  }
+  const handleInitialBookSnapshot = useCallback((bookSymbol: string) => {
+    setBookReadySymbol(bookSymbol);
+  }, []);
+  const chartDataEnabled = bookReadySymbol === symbol || chartFallbackSymbol === symbol;
+
+  // Keep chart history from waiting forever if the book service cannot return a first snapshot.
+  useEffect(() => {
+    if (bookReadySymbol === symbol) return;
+    const timeout = setTimeout(() => setChartFallbackSymbol(symbol), 3_000);
+    return () => clearTimeout(timeout);
+  }, [bookReadySymbol, symbol]);
   // The order form reads this from the shared store too, so this is one `/accounts` request
   // shared by both consumers rather than one each.
   const { available } = useAccountBalance();
@@ -73,13 +92,14 @@ export function TradeRouteView({ symbol, name, decimals, signalEntry, signalTp1,
       >
         <CoinDetail
           symbol={symbol}
+          chartDataEnabled={chartDataEnabled}
           name={name}
           decimals={decimals}
           signalEntry={signalEntry}
           signalTp1={signalTp1}
           onBack={onBack}
         />
-        <TradeScreen symbol={symbol} />
+        <TradeScreen symbol={symbol} onInitialBookSnapshot={handleInitialBookSnapshot} />
         <OrderManagement
           symbol={symbol}
           onDeposit={() => {}}
