@@ -44,7 +44,6 @@ export function MidPrice({ symbol, priceDecimals, quoteCurrency, onPriceSelect }
   const price = hasPrice ? update.price : null;
   const fiat = price !== null && USD_STABLES.has(quoteCurrency) ? price : null;
   const tappable = price !== null && onPriceSelect !== undefined;
-
   return (
     <Pressable
       onPress={tappable ? () => onPriceSelect(price.toFixed(priceDecimals)) : undefined}

@@ -105,7 +105,7 @@ const DepthRowView = memo(function DepthRowView({
 function OrderBookBase({ symbol, onPriceSelect, onInitialSnapshot }: Props) {
   const { colors } = useTheme();
   const styles = useStyles();
-  const { snapshot } = useLevel2Book(symbol);
+  const { snapshot, status } = useLevel2Book(symbol);
   const initialSnapshotNotified = useRef(false);
   useEffect(() => {
     if (!snapshot || initialSnapshotNotified.current) return;
@@ -140,6 +140,12 @@ function OrderBookBase({ symbol, onPriceSelect, onInitialSnapshot }: Props) {
   const options = useMemo(() => aggregationOptions(tickSize), [tickSize]);
   const priceDecimals = decimalsFromIncrement(tickSize);
   const sizeDecimals = decimalsFromIncrement(baseIncrement);
+  const connectionColor = status === "live"
+    ? colors.upText
+    : status === "offline" ? colors.downText : colors.textFaint;
+  const connectionLabel = status === "live"
+    ? "Connected"
+    : status === "offline" ? "Lost" : "Connecting";
 
   const cycleView = () => {
     setViewMode(
@@ -152,6 +158,11 @@ function OrderBookBase({ symbol, onPriceSelect, onInitialSnapshot }: Props) {
     <View style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.headerText}>Price ({quoteCurrency})</Text>
+        <View
+          style={[styles.connectionDot, { backgroundColor: connectionColor }]}
+          accessibilityRole="image"
+          accessibilityLabel={`Order book ${connectionLabel.toLowerCase()}`}
+        />
         <Text style={[styles.headerText, styles.headerRight]}>
           Total ({baseCurrency})
         </Text>
@@ -296,6 +307,12 @@ const useStyles = createThemedStyles((colors) =>
       alignItems: "center",
       justifyContent: "space-between",
       paddingBottom: spacing.xs,
+    },
+    connectionDot: {
+      width: 7,
+      height: 7,
+      borderRadius: 4,
+      marginHorizontal: spacing.xs,
     },
     headerText: {
       color: colors.textFaint,
