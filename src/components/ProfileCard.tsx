@@ -15,6 +15,7 @@ import { radius, spacing } from '@/theme';
 import { useTheme } from '@/theme/ThemeProvider';
 import { createThemedStyles } from '@/theme/themedStyles';
 import { formatPrice, formatTime } from '@/utils/format';
+import { useBalanceVisibility } from '@/state/balanceVisibility';
 
 type Props = {
   displayName: string;
@@ -29,9 +30,9 @@ const MASK = '••••••';
 
 function ProfileCardComponent({ displayName, onRename, accountInfo, portfolio, lastUpdated }: Props) {
   const { colors, scheme } = useTheme();
+  const { balancesVisible, setBalancesVisible } = useBalanceVisibility();
   const styles = useStyles();
   const [isEditing, setIsEditing] = useState(false);
-  const [isHidden, setIsHidden] = useState(false);
   const [draft, setDraft] = useState(displayName);
   const inputRef = useRef<NativeTextInput>(null);
 
@@ -54,12 +55,12 @@ function ProfileCardComponent({ displayName, onRename, accountInfo, portfolio, l
     setIsEditing(true);
   }, [displayName]);
 
-  const toggleHidden = useCallback(() => setIsHidden((value) => !value), []);
+  const toggleHidden = useCallback(() => setBalancesVisible(!balancesVisible), [balancesVisible, setBalancesVisible]);
 
   // One mask for every figure so the total and both wallet tiles always agree.
   const money = useCallback(
-    (value: number) => (isHidden ? MASK : `$${formatPrice(value, 2)}`),
-    [isHidden]
+    (value: number) => (balancesVisible ? `$${formatPrice(value, 2)}` : MASK),
+    [balancesVisible]
   );
 
   return (
@@ -119,10 +120,10 @@ function ProfileCardComponent({ displayName, onRename, accountInfo, portfolio, l
           hitSlop={10}
           style={styles.eyeButton}
           accessibilityRole="button"
-          accessibilityLabel={isHidden ? 'Show balances' : 'Hide balances'}
-          accessibilityState={{ selected: isHidden }}
+          accessibilityLabel={balancesVisible ? 'Hide balances' : 'Show balances'}
+          accessibilityState={{ selected: !balancesVisible }}
         >
-          {isHidden ? <EyeOffIcon size={18} /> : <EyeIcon size={18} />}
+          {balancesVisible ? <EyeIcon size={18} /> : <EyeOffIcon size={18} />}
         </Pressable>
       </View>
 
@@ -132,7 +133,7 @@ function ProfileCardComponent({ displayName, onRename, accountInfo, portfolio, l
         numberOfLines={1}
         adjustsFontSizeToFit
         minimumFontScale={0.6}
-        accessibilityLabel={isHidden ? 'Balance hidden' : undefined}
+        accessibilityLabel={!balancesVisible ? 'Balance hidden' : undefined}
       >
         {money(portfolio.total)}
       </Text>

@@ -10,6 +10,7 @@ import { spacing } from '@/theme';
 import { useTheme } from '@/theme/ThemeProvider';
 import { createThemedStyles } from '@/theme/themedStyles';
 import { formatAmount, formatPrice } from '@/utils/format';
+import { useBalanceVisibility } from '@/state/balanceVisibility';
 
 /** `all` shows the rolled-up row; a wallet kind shows only that wallet's slice. */
 export type AssetScope = 'all' | WalletKind;
@@ -18,6 +19,7 @@ const WALLET_HINT: Record<WalletKind, string> = {
   funding: 'Your main wallet',
   trading: 'Available to trade',
 };
+const MASK = '••••••';
 
 type Props = {
   holding: Holding;
@@ -26,6 +28,7 @@ type Props = {
 
 function AssetRowComponent({ holding, scope }: Props) {
   const { colors } = useTheme();
+  const { balancesVisible } = useBalanceVisibility();
   const styles = useStyles();
   const slice = scope === 'all' ? null : holding[scope];
   const balance = slice ? slice.balance : holding.balance;
@@ -42,20 +45,22 @@ function AssetRowComponent({ holding, scope }: Props) {
   if (scope === 'all' && funding && trading) {
     const combined = funding.value + trading.value;
     fundingShare = combined > 0 ? funding.value / combined : 1;
-    splitText = `${formatAmount(funding.balance)} funding · ${formatAmount(trading.balance)} trading`;
+    splitText = balancesVisible
+      ? `${formatAmount(funding.balance)} funding · ${formatAmount(trading.balance)} trading`
+      : `${MASK} funding · ${MASK} trading`;
   }
 
   let subtitle: string;
   if (splitText) {
-    subtitle = holds > 0 ? `${splitText} · ${formatAmount(holds)} on hold` : splitText;
+    subtitle = holds > 0 ? `${splitText} · ${balancesVisible ? formatAmount(holds) : MASK} on hold` : splitText;
   } else if (scope !== 'all') {
-    subtitle = holds > 0 ? `${WALLET_HINT[scope]} · ${formatAmount(holds)} on hold` : WALLET_HINT[scope];
+    subtitle = holds > 0 ? `${WALLET_HINT[scope]} · ${balancesVisible ? formatAmount(holds) : MASK} on hold` : WALLET_HINT[scope];
   } else if (holding.price <= 0) {
     subtitle = 'No priceable pair';
   } else if (holds > 0) {
-    subtitle = `${formatAmount(holds)} on hold · ≈ $${formatPrice(holding.price)}`;
+    subtitle = `${balancesVisible ? formatAmount(holds) : MASK} on hold · ${balancesVisible ? `≈ $${formatPrice(holding.price)}` : MASK}`;
   } else {
-    subtitle = `≈ $${formatPrice(holding.price)}`;
+    subtitle = balancesVisible ? `≈ $${formatPrice(holding.price)}` : MASK;
   }
 
   return (
@@ -69,7 +74,7 @@ function AssetRowComponent({ holding, scope }: Props) {
         <Text style={styles.subtitle} numberOfLines={1}>
           {subtitle}
         </Text>
-        {splitText ? (
+        {splitText && balancesVisible ? (
           <View
             style={styles.splitTrack}
             accessibilityRole="image"
@@ -83,10 +88,10 @@ function AssetRowComponent({ holding, scope }: Props) {
 
       <View style={styles.valueBlock}>
         <Text style={styles.amount} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>
-          {formatAmount(balance)}
+          {balancesVisible ? formatAmount(balance) : MASK}
         </Text>
         <Text style={styles.value} numberOfLines={1}>
-          {holding.price > 0 ? `$${formatPrice(value, 2)}` : '—'}
+          {holding.price > 0 ? (balancesVisible ? `$${formatPrice(value, 2)}` : MASK) : '—'}
         </Text>
       </View>
     </View>
