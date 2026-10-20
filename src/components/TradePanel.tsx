@@ -45,10 +45,7 @@ type Props = {
   symbol: string;
   /** Override the app-wide `TEST_MODE` for this panel. */
   testMode?: boolean;
-  /**
-   * A price picked elsewhere, e.g. a tap on a row of the order book. Applied whenever `id`
-   * changes, so the same price tapped twice still refills the field.
-   */
+  /** A price picked elsewhere, e.g. a tap on a row of the order book. */
   priceSelection?: ExternalPriceSelection | null;
 };
 
@@ -153,6 +150,7 @@ function TradePanelBase({
   const [size, setSize] = useState("");
   const [total, setTotal] = useState("");
   const [percent, setPercent] = useState<FillPercent | null>(null);
+  const [pendingAllSelectionId, setPendingAllSelectionId] = useState<number | null>(null);
   /**
    * The stop last handed to the fill math, keyed by pair and side so a move to another market or to
    * the other side of the book is never mistaken for one already applied.
@@ -172,6 +170,7 @@ function TradePanelBase({
   const clearPercent = useCallback(() => {
     appliedStopRef.current = null;
     setPercent(null);
+    setPendingAllSelectionId(null);
   }, []);
 
   // Reset on a pair change during render so the form never carries the previous pair's amounts.
@@ -183,6 +182,7 @@ function TradePanelBase({
     setSize("");
     setTotal("");
     setPercent(null);
+    setPendingAllSelectionId(null);
     setInlineError(null);
     setToast(null);
     setIsFetchingBestPrice(false);
@@ -203,40 +203,41 @@ function TradePanelBase({
   // Calculated in useUserTradeFees hook from market stats
   const effectiveFeeRate = takerFeeRate ?? "0.001";
 
-  // A price tapped in the order book fills Price with the row's value, and re-runs the total when
-  // an amount is already entered so the two stay in step as if Price had been typed. Applied
-  // during render rather than in an effect: this is a prop changing, not an external
-  // subscription, and doing it in an effect would cost a second commit per tap.
+  // A price tapped in the order book fills Price and selects the full available spot size.
+  // Applied during render rather than in an effect: this is a prop change, not a subscription.
   const [appliedSelectionId, setAppliedSelectionId] = useState<number | null>(
     null,
   );
   if (priceSelection && priceSelection.id !== appliedSelectionId) {
     setAppliedSelectionId(priceSelection.id);
     setPrice(priceSelection.value);
-    // Persist the selected percentage chip — recalculate size/total at the new price
-    // instead of clearing the percentage chip.
+    // Selecting a book price opts into the full available spot size at that price.
+    setPercent(100);
+    setPendingAllSelectionId(priceSelection.id);
     setInlineError(null);
-    if (percent !== null && rules) {
-      const filled = fillByPercent(
-        side,
-        percent,
-        rules,
-        priceSelection.value,
-        {
-          base: baseAvailable,
-          quote: quoteAvailable,
-        },
-        effectiveFeeRate,
-      );
-      if (filled) {
-        setSize(filled.size);
-        setTotal(filled.total);
-      } else if (size) {
-        setTotal(totalFromSize(priceSelection.value, size) ?? "");
-      }
-    } else if (size) {
-      setTotal(totalFromSize(priceSelection.value, size) ?? "");
+  }
+
+  // A book tap can happen before the pair rules arrive. Keep the 100% selection pending and
+  // calculate it as soon as the rules and current available balance are ready.
+  if (
+    pendingAllSelectionId !== null &&
+    priceSelection?.id === pendingAllSelectionId &&
+    rules
+  ) {
+    const filled = fillByPercent(
+      side,
+      100,
+      rules,
+      priceSelection.value,
+      { base: baseAvailable, quote: quoteAvailable },
+      effectiveFeeRate,
+    );
+    if (filled) {
+      setPercent(100);
+      setSize(filled.size);
+      setTotal(filled.total);
     }
+    setPendingAllSelectionId(null);
   }
 
   const max = rules
