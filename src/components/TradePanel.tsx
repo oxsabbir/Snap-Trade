@@ -5,7 +5,6 @@ import {
   useMemo,
   useRef,
   useState,
-  type ReactNode,
   } from "react";
 import { Pressable, View } from '@/components/AppLayout';
 import { ActivityIndicator, StyleSheet } from 'react-native';
@@ -16,7 +15,6 @@ import { useAccountBalance } from "@/hooks/useAccountBalance";
 import { useSymbolRules } from "@/hooks/useSymbolRules";
 import { useUserTradeFees } from "@/hooks/useUserTradeFees";
 import { describeError } from "@/lib/kucoin/errors";
-import { useLevel2Book } from "@/hooks/useLevel2Book";
 import {
   createClientOid,
   placeLimitOrder,
@@ -28,7 +26,6 @@ import {
   fillByPercent,
   isPositive,
   maxSize,
-  prefillPrice,
   sizeFromTotal,
   stepAmount,
   totalFromSize,
@@ -136,8 +133,6 @@ function TradePanelBase({
     isLoading: rulesLoading,
     error: rulesError,
   } = useSymbolRules(symbol);
-  // Real-time Level 2 snapshot via WebSocket — used for Best Price so we don't hit REST.
-  const { snapshot: level2Snapshot } = useLevel2Book(symbol);
   // Read from the shared balance store, so a cancel driven from the order list below updates the
   // number here instead of leaving a second, independently fetched copy behind. The same store is
   // written by `/account/balance`, so a change made on the desktop moves this too.
@@ -162,7 +157,6 @@ function TradePanelBase({
    */
   const appliedStopRef = useRef<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isFetchingBestPrice, setIsFetchingBestPrice] = useState(false);
   const [inlineError, setInlineError] = useState<string | null>(null);
   const [toast, setToast] = useState<Toast | null>(null);
 
@@ -185,7 +179,6 @@ function TradePanelBase({
     setPendingAllSelectionId(null);
     setInlineError(null);
     setToast(null);
-    setIsFetchingBestPrice(false);
   }
 
   useEffect(() => {
@@ -409,67 +402,6 @@ function TradePanelBase({
     effectiveFeeRate,
   ]);
 
-  /**
-   * Fills Price with the best price on the book the order would trade against, and only when the
-   * user asks for it.
-   *
-   * On demand rather than continuously, because a field that rewrites itself while someone is
-   * typing is a field that cannot be trusted: it was the reason this value used to arrive as a
-   * ticking prop and re-render the entire form several times a second.
-   *
-   * A buy lifts the best ask, the lowest price someone is willing to sell at. A sell lifts the best
-   * bid, the highest price someone will pay. Read from the live Level 2 WebSocket snapshot so it
-   * is instant and doesn't hit REST.
-   */
-  const applyBestPrice = () => {
-    if (!rules || isFetchingBestPrice || !level2Snapshot) return;
-    setIsFetchingBestPrice(true);
-    setInlineError(null);
-    try {
-      // Use the live Level 2 WebSocket snapshot instead of REST
-      const best =
-        side === "buy" ? level2Snapshot.asks[0] : level2Snapshot.bids[0];
-      if (!best) {
-        setInlineError(
-          `No ${side === "buy" ? "sell" : "buy"} orders on the book for ${symbol}.`,
-        );
-        return;
-      }
-      const next = prefillPrice(rules, Number(best.price));
-      if (next === null) {
-        setInlineError("Could not read the best price.");
-        return;
-      }
-      setPrice(next);
-      // Persist the selected percentage chip — recalculate size/total at the new price
-      if (percent !== null) {
-        const filled = fillByPercent(
-          side,
-          percent,
-          rules,
-          next,
-          {
-            base: baseAvailable,
-            quote: quoteAvailable,
-          },
-          effectiveFeeRate,
-        );
-        if (filled) {
-          setSize(filled.size);
-          setTotal(filled.total);
-        } else {
-          syncTotal(next, size);
-        }
-      } else {
-        syncTotal(next, size);
-      }
-    } catch (caught) {
-      setInlineError(describeError(caught, "Could not load the best price."));
-    } finally {
-      setIsFetchingBestPrice(false);
-    }
-  };
-
   const submit = async () => {
     if (!rules || isSubmitting) return;
     setInlineError(null);
@@ -585,29 +517,6 @@ function TradePanelBase({
         onChangeText={onPriceChange}
         onStepUp={() => onStep("price", 1)}
         onStepDown={() => onStep("price", -1)}
-        labelAction={
-          <Pressable
-            onPress={applyBestPrice}
-            // Blocked while an order is in flight so a late reply cannot overwrite the amount the
-            // user is already submitting.
-            disabled={!rules || isSubmitting || isFetchingBestPrice}
-            hitSlop={8}
-            style={[
-              styles.bestPrice,
-              (!rules || isSubmitting || isFetchingBestPrice) &&
-                styles.bestPriceDisabled,
-            ]}
-            accessibilityRole="button"
-            accessibilityLabel={`Use the best ${side === "buy" ? "ask" : "bid"} price`}
-            accessibilityState={{ busy: isFetchingBestPrice }}
-          >
-            {isFetchingBestPrice ? (
-              <ActivityIndicator size="small" color={colors.accent} />
-            ) : (
-              <Text style={styles.bestPriceText}>Best Price</Text>
-            )}
-          </Pressable>
-        }
       />
 
       <AmountField
@@ -707,8 +616,6 @@ type AmountFieldProps = {
   onChangeText: (text: string) => void;
   onStepUp: () => void;
   onStepDown: () => void;
-  /** Rendered on the right of the label row, e.g. the Best Price action. */
-  labelAction?: ReactNode;
 };
 
 function AmountField({
@@ -720,7 +627,6 @@ function AmountField({
   onChangeText,
   onStepUp,
   onStepDown,
-  labelAction,
 }: AmountFieldProps) {
   const { colors, scheme } = useTheme();
   const styles = useStyles();
@@ -728,7 +634,6 @@ function AmountField({
     <View style={styles.field}>
       <View style={styles.fieldLabelRow}>
         <Text style={styles.fieldLabel}>{label}</Text>
-        {labelAction}
       </View>
       <View style={styles.inputWrap}>
         <TextInput
@@ -839,18 +744,6 @@ const useStyles = createThemedStyles((colors) => StyleSheet.create({
     fontSize: 10,
     fontWeight: "600",
     letterSpacing: 0.3,
-  },
-  bestPrice: {
-    paddingHorizontal: 4,
-    paddingVertical: 3,
-  },
-  bestPriceDisabled: {
-    opacity: 0.5,
-  },
-  bestPriceText: {
-    color: colors.accent,
-    fontSize: 10,
-    fontWeight: "700",
   },
   inputWrap: {
     flexDirection: "row",
