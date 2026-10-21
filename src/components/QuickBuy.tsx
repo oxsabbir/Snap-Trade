@@ -1,0 +1,140 @@
+import { memo } from 'react';
+import { Pressable, View } from '@/components/AppLayout';
+import { StyleSheet } from 'react-native';
+import { Text } from '@/components/AppText';
+
+import { useAccountBalance } from '@/hooks/useAccountBalance';
+import { maxSize } from '@/lib/trade';
+import type { DepthRow } from '@/lib/kucoin/orderbook';
+import type { SymbolInfo } from '@/lib/kucoin/types';
+import { compareDecimal, multiplyDecimal } from '@/utils/decimal';
+import { decimalsFromIncrement, formatPrice } from '@/utils/format';
+import { radius, spacing } from '@/theme';
+import { createThemedStyles } from '@/theme/themedStyles';
+
+type Props = {
+  asks: DepthRow[];
+  quoteCurrency: string;
+  rules: SymbolInfo | null;
+  feeRate: string;
+  onSelect: (price: string, size: string) => void;
+};
+
+const PRESET_COUNT = 5;
+
+function QuickBuyBase({
+  asks,
+  quoteCurrency,
+  rules,
+  feeRate,
+  onSelect,
+}: Props) {
+  const styles = useStyles();
+  const { available } = useAccountBalance();
+  const quoteAvailable = available[quoteCurrency] ?? '0';
+
+  return (
+    <View style={styles.container}>
+      {Array.from({ length: PRESET_COUNT }, (_, index) => {
+        // Reverse the five visible ask levels to match the order book: highest at the top.
+        const askLevel = PRESET_COUNT - index;
+        const row = asks[askLevel - 1];
+        const affordable = row && rules
+          ? maxSize('buy', rules, row.price, { base: '0', quote: quoteAvailable }, feeRate)
+          : null;
+        const size = row && affordable !== null
+          ? (compareDecimal(row.total, affordable) ?? 0) < 0 ? row.total : affordable
+          : null;
+        const ratio = size !== null && affordable !== null && (compareDecimal(affordable, '0') ?? 0) > 0
+          ? Math.max(0, Math.min(100, (Number(size) / Number(affordable)) * 100))
+          : 0;
+        const priceTotal = row && size !== null ? multiplyDecimal(row.price, size) : null;
+        const minimumTotal = rules
+          ? (compareDecimal(rules.minFunds, rules.quoteMinSize) ?? 0) > 0
+            ? rules.minFunds
+            : rules.quoteMinSize
+          : null;
+        const enabled = Boolean(
+          row && rules && size !== null && affordable !== null &&
+          (compareDecimal(size, rules.baseMinSize) ?? -1) >= 0 &&
+          priceTotal !== null && minimumTotal !== null &&
+          (compareDecimal(priceTotal, minimumTotal) ?? -1) >= 0,
+        );
+
+        return (
+          <Pressable
+            key={index}
+            onPress={() => row && size && onSelect(row.price, size)}
+            disabled={!enabled}
+            style={[styles.button, !enabled && styles.buttonDisabled]}
+            accessibilityRole="button"
+            accessibilityState={{ disabled: !enabled }}
+            accessibilityLabel={row
+              ? `Quick buy at ${row.price}, estimated ${ratio.toFixed(0)} percent of maximum buy size`
+              : `Quick buy price ${askLevel} loading`}
+          >
+            <View style={[styles.fill, { width: `${ratio}%` }]} />
+            <View style={styles.buttonContent}>
+              <Text style={styles.price} numberOfLines={1}>
+                {row ? formatPrice(Number(row.price), decimalsFromIncrement(rules?.priceIncrement ?? '0.000001')) : '—'}
+              </Text>
+              <Text style={styles.percentage}>{row ? `${ratio.toFixed(0)}%` : '—'}</Text>
+            </View>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
+export const QuickBuy = memo(QuickBuyBase);
+
+const useStyles = createThemedStyles((colors) =>
+  StyleSheet.create({
+    container: {
+      flex: 1,
+      justifyContent: 'space-between',
+      gap: spacing.xs,
+    },
+    button: {
+      flex: 1,
+      minHeight: 25,
+      justifyContent: 'center',
+      overflow: 'hidden',
+      borderRadius: radius.sm,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.border,
+      backgroundColor: colors.surfaceAlt,
+    },
+    buttonDisabled: {
+      opacity: 0.55,
+    },
+    fill: {
+      position: 'absolute',
+      left: 0,
+      top: 0,
+      bottom: 0,
+      backgroundColor: colors.upFill,
+    },
+    buttonContent: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: spacing.xs,
+      paddingHorizontal: spacing.sm,
+    },
+    price: {
+      flex: 1,
+      color: colors.upText,
+      fontSize: 11,
+      fontWeight: '700',
+      fontVariant: ['tabular-nums'],
+    },
+    percentage: {
+      color: colors.upText,
+      fontSize: 9,
+      fontWeight: '800',
+      fontVariant: ['tabular-nums'],
+    },
+  }),
+);

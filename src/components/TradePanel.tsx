@@ -6,7 +6,6 @@ import { Text, TextInput } from "@/components/AppText";
 import { PlusIcon } from "@/components/Icons";
 import { useAccountBalance } from "@/hooks/useAccountBalance";
 import { useSymbolRules } from "@/hooks/useSymbolRules";
-import { useUserTradeFees } from "@/hooks/useUserTradeFees";
 import { describeError } from "@/lib/kucoin/errors";
 import {
   createClientOid,
@@ -33,13 +32,19 @@ import { useFontScale } from "@/theme/FontScaleProvider";
 
 type Props = {
   symbol: string;
+  takerFeeRate: string | null;
   /** Override the app-wide `TEST_MODE` for this panel. */
   testMode?: boolean;
   /** A price picked elsewhere, e.g. a tap on a row of the order book. */
   priceSelection?: ExternalPriceSelection | null;
 };
 
-export type ExternalPriceSelection = { id: number; value: string };
+export type ExternalPriceSelection = {
+  id: number;
+  value: string;
+  size?: string;
+  side?: OrderSide;
+};
 
 type Toast = { tone: "success" | "error"; message: string };
 
@@ -119,6 +124,7 @@ function PercentChips({
 
 function TradePanelBase({
   symbol,
+  takerFeeRate,
   testMode = TEST_MODE,
   priceSelection,
 }: Props) {
@@ -136,8 +142,6 @@ function TradePanelBase({
   // number here instead of leaving a second, independently fetched copy behind. The same store is
   // written by `/account/balance`, so a change made on the desktop moves this too.
   const { available } = useAccountBalance();
-  // User-specific trade fees (VIP level + KCS discount + pair class)
-  const { takerFeeRate } = useUserTradeFees(symbol);
 
   const [side, setSide] = useState<OrderSide>("buy");
   const [price, setPrice] = useState("");
@@ -194,7 +198,6 @@ function TradePanelBase({
   const availableCurrency = side === "buy" ? quoteCurrency : baseCurrency;
 
   // User-specific fee rate (base class rate × VIP coefficient × KCS 20% discount)
-  // Calculated in useUserTradeFees hook from market stats
   const effectiveFeeRate = takerFeeRate ?? "0.001";
 
   // A book tap always updates Price. On Buy it also selects the full available balance; on Sell it
@@ -206,7 +209,14 @@ function TradePanelBase({
   if (priceSelection && priceSelection.id !== appliedSelectionId) {
     setAppliedSelectionId(priceSelection.id);
     setPrice(priceSelection.value);
-    if (side === "buy") {
+    const selectionSide = priceSelection.side ?? side;
+    if (priceSelection.side) setSide(priceSelection.side);
+    if (selectionSide === "buy" && priceSelection.size) {
+      setPercent(null);
+      setPendingAllSelectionId(null);
+      setSize(priceSelection.size);
+      setTotal(totalFromSize(priceSelection.value, priceSelection.size) ?? "");
+    } else if (selectionSide === "buy") {
       // Selecting a book price on Buy opts into the full available balance at that price.
       setPercent(100);
       setPendingAllSelectionId(priceSelection.id);

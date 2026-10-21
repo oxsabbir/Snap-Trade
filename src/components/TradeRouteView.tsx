@@ -19,6 +19,8 @@ type Props = {
   signalEntry?: string | null;
   /** TP1 from a first-influencer (TP) signal; shown in the title while the user is here. */
   signalTp1?: string | null;
+  /** Quick Buy starts enabled when this screen was opened from a signal. */
+  quickBuyByDefault?: boolean;
   /** Shown only when the screen is a pushed route rather than a tab. */
   onBack?: () => void;
 };
@@ -33,7 +35,7 @@ const HISTORY_LOAD_MORE_THRESHOLD = 320;
  * The trade screen's content: the chart, the order form, and the order management section, with the
  * symbol supplied by the tab route that owns the screen's only scroll view.
  */
-export function TradeRouteView({ symbol, name, decimals, signalEntry, signalTp1, onBack }: Props) {
+export function TradeRouteView({ symbol, name, decimals, signalEntry, signalTp1, quickBuyByDefault, onBack }: Props) {
   const styles = useStyles();
   const [activeSymbol, setActiveSymbol] = useState(symbol);
   const [bookReadySymbol, setBookReadySymbol] = useState<string | null>(null);
@@ -99,7 +101,11 @@ export function TradeRouteView({ symbol, name, decimals, signalEntry, signalTp1,
           signalTp1={signalTp1}
           onBack={onBack}
         />
-        <TradeScreen symbol={symbol} onInitialBookSnapshot={handleInitialBookSnapshot} />
+        <TradeScreen
+          symbol={symbol}
+          onInitialBookSnapshot={handleInitialBookSnapshot}
+          quickBuyByDefault={quickBuyByDefault}
+        />
         <OrderManagement
           symbol={symbol}
           onDeposit={() => {}}

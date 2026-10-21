@@ -82,6 +82,7 @@ function TradeDeepLinkContent() {
         decimals={8}
         signalEntry={entry}
         signalTp1={tp1}
+        quickBuyByDefault
         onBack={() => router.navigate('/(tabs)/trade')}
       />
       {!status.notificationAccess ? (

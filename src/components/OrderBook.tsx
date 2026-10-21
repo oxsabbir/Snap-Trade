@@ -13,6 +13,7 @@ import {
   CaretUpIcon,
   LayersIcon,
   RowsIcon,
+  TradeIcon,
 } from "@/components/Icons";
 import { MidPrice } from "@/components/MidPrice";
 import { useLevel2Book } from "@/hooks/useLevel2Book";
@@ -21,6 +22,8 @@ import { useSymbolRules } from "@/hooks/useSymbolRules";
 import { aggregationOptions, VISIBLE_LEVELS, type DepthRow } from "@/lib/kucoin/orderbook";
 import { radius, spacing } from "@/theme";
 import { useTheme } from "@/theme/ThemeProvider";
+import { useQuickBuy } from "@/state/quickBuy";
+import { QuickBuy } from "@/components/QuickBuy";
 import { createThemedStyles } from "@/theme/themedStyles";
 import { decimalsFromIncrement, formatCompactSize, formatPrice } from "@/utils/format";
 
@@ -28,8 +31,10 @@ export type OrderBookViewMode = "split" | "bids" | "asks";
 
 type Props = {
   symbol: string;
-  onPriceSelect: (price: string) => void;
+  takerFeeRate: string | null;
+  onPriceSelect: (price: string, size?: string, side?: "buy") => void;
   onInitialSnapshot?: (symbol: string) => void;
+  quickBuyByDefault?: boolean;
 };
 
 const ROW_HEIGHT = 26;
@@ -102,7 +107,7 @@ const DepthRowView = memo(function DepthRowView({
  * every price tick and re-rendered the whole column to change two text nodes. It is now a leaf
  * that subscribes to the price itself.
  */
-function OrderBookBase({ symbol, onPriceSelect, onInitialSnapshot }: Props) {
+function OrderBookBase({ symbol, takerFeeRate, onPriceSelect, onInitialSnapshot, quickBuyByDefault = false }: Props) {
   const { colors } = useTheme();
   const styles = useStyles();
   const { snapshot, status } = useLevel2Book(symbol);
@@ -113,6 +118,9 @@ function OrderBookBase({ symbol, onPriceSelect, onInitialSnapshot }: Props) {
     onInitialSnapshot?.(symbol);
   }, [snapshot, symbol, onInitialSnapshot]);
   const { rules } = useSymbolRules(symbol);
+  const { enabled: quickBuyEnabled } = useQuickBuy();
+  const [quickBuyOverride, setQuickBuyOverride] = useState<boolean | null>(null);
+  const showQuickBuy = quickBuyOverride ?? (quickBuyEnabled || quickBuyByDefault);
   const [baseCurrency = "", quoteCurrency = ""] = symbol.split("-");
 
   const [aggregation, setAggregation] = useState("0.000001");
@@ -142,6 +150,8 @@ function OrderBookBase({ symbol, onPriceSelect, onInitialSnapshot }: Props) {
   // ten rows in total.
   const depthRowsHeight =
     (viewMode === "split" ? VISIBLE_LEVELS : SINGLE_SIDE_LEVELS) * ROW_HEIGHT;
+  const quickBuyHeight = depthRowsHeight +
+    (viewMode === "split" ? spacing.md : 0);
   const options = useMemo(() => aggregationOptions(tickSize), [tickSize]);
   const priceDecimals = decimalsFromIncrement(tickSize);
   const sizeDecimals = decimalsFromIncrement(baseIncrement);
@@ -173,23 +183,35 @@ function OrderBookBase({ symbol, onPriceSelect, onInitialSnapshot }: Props) {
           accessibilityLabel={`Order book ${connectionLabel.toLowerCase()}`}
         />
         <Text style={[styles.headerText, styles.headerRight]}>
-          Total ({baseCurrency})
+          {(quickBuyEnabled || quickBuyByDefault) && showQuickBuy && viewMode !== "bids" ? "Size / fill" : `Total (${baseCurrency})`}
         </Text>
       </View>
 
       {viewMode !== "bids" ? (
-        <View style={[styles.asks, { height: depthRowsHeight }]}>
-          {[...depth.asks].reverse().map((row, index) => (
-            <DepthRowView
-              key={`ask:${depth.asks.length - 1 - index}`}
-              row={row}
-              side="ask"
-              priceDecimals={priceDecimals}
-              sizeDecimals={sizeDecimals}
-              onPress={onPriceSelect}
+        (quickBuyEnabled || quickBuyByDefault) && showQuickBuy ? (
+          <View style={[styles.asks, { height: quickBuyHeight }]}>
+            <QuickBuy
+              asks={depth.asks}
+              quoteCurrency={quoteCurrency}
+              rules={rules ?? null}
+              feeRate={takerFeeRate ?? "0.001"}
+              onSelect={(price, size) => onPriceSelect(price, size, "buy")}
             />
-          ))}
-        </View>
+          </View>
+        ) : (
+          <View style={[styles.asks, { height: depthRowsHeight }]}>
+            {[...depth.asks].reverse().map((row, index) => (
+              <DepthRowView
+                key={`ask:${depth.asks.length - 1 - index}`}
+                row={row}
+                side="ask"
+                priceDecimals={priceDecimals}
+                sizeDecimals={sizeDecimals}
+                onPress={onPriceSelect}
+              />
+            ))}
+          </View>
+        )
       ) : null}
 
       <MidPrice
@@ -247,9 +269,23 @@ function OrderBookBase({ symbol, onPriceSelect, onInitialSnapshot }: Props) {
           accessibilityLabel={`Aggregation step ${aggregation}`}
         >
           <LayersIcon size={12} color={colors.textMuted} />
-          <Text style={styles.stepText}>{aggregation}</Text>
           <CaretDownIcon size={10} color={colors.textFaint} />
         </Pressable>
+
+        {quickBuyEnabled || quickBuyByDefault ? (
+          <Pressable
+            onPress={() => setQuickBuyOverride(!showQuickBuy)}
+            style={[styles.quickBuyButton, showQuickBuy && styles.quickBuyButtonActive]}
+            accessibilityRole="button"
+            accessibilityLabel={`Quick Buy ${showQuickBuy ? "on" : "off"}`}
+            accessibilityState={{ selected: showQuickBuy }}
+          >
+            <TradeIcon
+              size={14}
+              color={showQuickBuy ? colors.upText : colors.textMuted}
+            />
+          </Pressable>
+        ) : null}
 
         <Pressable
           onPress={cycleView}
@@ -416,31 +452,38 @@ const useStyles = createThemedStyles((colors) =>
     controls: {
       flexDirection: "row",
       alignItems: "center",
-      justifyContent: "space-between",
+      justifyContent: "flex-start",
+      gap: spacing.sm,
       paddingTop: spacing.sm,
     },
     stepButton: {
+      flex: 1,
       flexDirection: "row",
       alignItems: "center",
+      justifyContent: "center",
       gap: 4,
       backgroundColor: colors.surfaceAlt,
       borderRadius: radius.sm,
-      paddingHorizontal: spacing.sm,
       height: 24,
     },
-    stepText: {
-      color: colors.textMuted,
-      fontSize: 10,
-      fontWeight: "600",
-      fontVariant: ["tabular-nums"],
-    },
     viewButton: {
-      width: 28,
+      flex: 1,
       height: 24,
       alignItems: "center",
       justifyContent: "center",
       backgroundColor: colors.surfaceAlt,
       borderRadius: radius.sm,
+    },
+    quickBuyButton: {
+      flex: 1,
+      height: 24,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: colors.surfaceAlt,
+      borderRadius: radius.sm,
+    },
+    quickBuyButtonActive: {
+      backgroundColor: colors.upFill,
     },
     backdrop: {
       flex: 1,

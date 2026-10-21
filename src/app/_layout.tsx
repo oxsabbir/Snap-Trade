@@ -15,6 +15,7 @@ import { SIGNAL_DETECTION_ENABLED } from '@/lib/featureFlags';
 import { ActiveCoinProvider } from '@/state/activeCoin';
 import { ApiCredentialsProvider, useApiCredentials } from '@/state/apiCredentials';
 import { BalanceVisibilityProvider } from '@/state/balanceVisibility';
+import { QuickBuyProvider } from '@/state/quickBuy';
 import { FontScaleProvider } from '@/theme/FontScaleProvider';
 import { ThemeProvider, useTheme } from '@/theme/ThemeProvider';
 import { createThemedStyles } from '@/theme/themedStyles';
@@ -26,11 +27,13 @@ export default function RootLayout() {
         <ThemeProvider>
           <FontScaleProvider>
             <BalanceVisibilityProvider>
-              <ActiveCoinProvider>
-                <ApiCredentialsProvider>
-                  <RootNavigator />
-                </ApiCredentialsProvider>
-              </ActiveCoinProvider>
+              <QuickBuyProvider>
+                <ActiveCoinProvider>
+                  <ApiCredentialsProvider>
+                    <RootNavigator />
+                  </ApiCredentialsProvider>
+                </ActiveCoinProvider>
+              </QuickBuyProvider>
             </BalanceVisibilityProvider>
           </FontScaleProvider>
         </ThemeProvider>
