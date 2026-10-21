@@ -1,14 +1,7 @@
-import {
-  memo,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  } from "react";
-import { Pressable, View } from '@/components/AppLayout';
-import { ActivityIndicator, StyleSheet } from 'react-native';
-import { Text, TextInput } from '@/components/AppText';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Pressable, View } from "@/components/AppLayout";
+import { ActivityIndicator, StyleSheet } from "react-native";
+import { Text, TextInput } from "@/components/AppText";
 
 import { PlusIcon } from "@/components/Icons";
 import { useAccountBalance } from "@/hooks/useAccountBalance";
@@ -83,38 +76,43 @@ function PercentChips({
   const compact = scale >= 1.075;
 
   return (
-    <View style={[styles.chipContainer, compact && styles.chipContainerCompact]}>
-      {PERCENT_CHIPS.map((chip) => {
-        const isActive = activeChip === chip;
-        return (
-          <Pressable
-            key={chip}
-            onPress={() => enabled && onChange(chip)}
-            disabled={!enabled}
-            hitSlop={8}
-            style={[
-              styles.chip,
-              compact && styles.chipCompact,
-              isActive ? styles.chipActive : styles.chipInactive,
-              isActive && { backgroundColor: accentColor },
-            ]}
-            accessibilityRole="button"
-            accessibilityState={{ selected: isActive, disabled: !enabled }}
-          >
-            <Text
-              numberOfLines={1}
+    <View style={styles.percentSection}>
+      <Text style={styles.fieldLabel}>Spot Size</Text>
+      <View
+        style={[styles.chipContainer, compact && styles.chipContainerCompact]}
+      >
+        {PERCENT_CHIPS.map((chip) => {
+          const isActive = activeChip === chip;
+          return (
+            <Pressable
+              key={chip}
+              onPress={() => enabled && onChange(chip)}
+              disabled={!enabled}
+              hitSlop={8}
               style={[
-                styles.chipText,
-                compact && styles.chipTextCompact,
-                isActive ? styles.chipTextActive : styles.chipTextInactive,
-                !enabled && styles.chipTextDisabled,
+                styles.chip,
+                compact && styles.chipCompact,
+                isActive ? styles.chipActive : styles.chipInactive,
+                isActive && { backgroundColor: accentColor },
               ]}
+              accessibilityRole="button"
+              accessibilityState={{ selected: isActive, disabled: !enabled }}
             >
-              {chip === 100 ? "All" : `${chip}%`}
-            </Text>
-          </Pressable>
-        );
-      })}
+              <Text
+                numberOfLines={1}
+                style={[
+                  styles.chipText,
+                  compact && styles.chipTextCompact,
+                  isActive ? styles.chipTextActive : styles.chipTextInactive,
+                  !enabled && styles.chipTextDisabled,
+                ]}
+              >
+                {chip === 100 ? "All" : `${chip}%`}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
     </View>
   );
 }
@@ -125,6 +123,7 @@ function TradePanelBase({
   priceSelection,
 }: Props) {
   const { colors } = useTheme();
+  const { scale } = useFontScale();
   const styles = useStyles();
   const [baseCurrency = "", quoteCurrency = ""] = symbol.split("-");
 
@@ -145,7 +144,9 @@ function TradePanelBase({
   const [size, setSize] = useState("");
   const [total, setTotal] = useState("");
   const [percent, setPercent] = useState<FillPercent | null>(null);
-  const [pendingAllSelectionId, setPendingAllSelectionId] = useState<number | null>(null);
+  const [pendingAllSelectionId, setPendingAllSelectionId] = useState<
+    number | null
+  >(null);
   /**
    * The stop last handed to the fill math, keyed by pair and side so a move to another market or to
    * the other side of the book is never mistaken for one already applied.
@@ -196,7 +197,8 @@ function TradePanelBase({
   // Calculated in useUserTradeFees hook from market stats
   const effectiveFeeRate = takerFeeRate ?? "0.001";
 
-  // A price tapped in the order book fills Price and selects the full available spot size.
+  // A book tap always updates Price. On Buy it also selects the full available balance; on Sell it
+  // leaves the entered amount alone and only recalculates Total.
   // Applied during render rather than in an effect: this is a prop change, not a subscription.
   const [appliedSelectionId, setAppliedSelectionId] = useState<number | null>(
     null,
@@ -204,9 +206,15 @@ function TradePanelBase({
   if (priceSelection && priceSelection.id !== appliedSelectionId) {
     setAppliedSelectionId(priceSelection.id);
     setPrice(priceSelection.value);
-    // Selecting a book price opts into the full available spot size at that price.
-    setPercent(100);
-    setPendingAllSelectionId(priceSelection.id);
+    if (side === "buy") {
+      // Selecting a book price on Buy opts into the full available balance at that price.
+      setPercent(100);
+      setPendingAllSelectionId(priceSelection.id);
+    } else {
+      setPercent(null);
+      setPendingAllSelectionId(null);
+      setTotal(size ? totalFromSize(priceSelection.value, size) ?? "" : "");
+    }
     setInlineError(null);
   }
 
@@ -232,6 +240,12 @@ function TradePanelBase({
     }
     setPendingAllSelectionId(null);
   }
+
+  useEffect(() => {
+    if (side === "sell" && priceSelection?.id === appliedSelectionId) {
+      appliedStopRef.current = null;
+    }
+  }, [side, priceSelection?.id, appliedSelectionId]);
 
   const max = rules
     ? maxSize(
@@ -549,58 +563,63 @@ function TradePanelBase({
         onStepDown={() => onStep("total", -1)}
       />
 
-      <View style={styles.row}>
-        <Text style={styles.rowLabel}>Available</Text>
-        <View style={styles.rowValueWrap}>
-          <Text style={styles.rowValue}>
-            {formatAmount(Number(availableForSide))} {availableCurrency}
-          </Text>
-          <Pressable
-            onPress={() => undefined}
-            hitSlop={8}
-            style={styles.deposit}
-            accessibilityRole="button"
-            accessibilityLabel={`Deposit ${availableCurrency}`}
-          >
-            <PlusIcon size={12} color={colors.accent} />
-          </Pressable>
+      <View style={styles.footer}>
+        <View style={styles.summaryRows}>
+          <View style={styles.row}>
+            <Text style={styles.rowLabel}>Available</Text>
+            <View style={styles.rowValueWrap}>
+              <Text style={styles.rowValue}>
+                {formatAmount(Number(availableForSide))} {availableCurrency}
+              </Text>
+              <Pressable
+                onPress={() => undefined}
+                hitSlop={8}
+                style={styles.deposit}
+                accessibilityRole="button"
+                accessibilityLabel={`Deposit ${availableCurrency}`}
+              >
+                <PlusIcon size={12} color={colors.accent} />
+              </Pressable>
+            </View>
+          </View>
+
+          <View style={styles.row}>
+            <Text style={styles.rowLabel}>{maxLabel}</Text>
+            <Text style={styles.rowValue}>
+              {max === null ? "—" : `${formatAmount(Number(max))} ${baseCurrency}`}
+            </Text>
+          </View>
         </View>
+
+        {rulesError ? <Text style={styles.error}>{rulesError}</Text> : null}
+        {inlineError ? <Text style={styles.error}>{inlineError}</Text> : null}
+
+        <Pressable
+          onPress={submit}
+          disabled={!rules || isSubmitting}
+          hitSlop={12}
+          style={[
+            styles.action,
+            scale === 1 && styles.actionDefaultSize,
+            side === "buy" ? styles.actionBuy : styles.actionSell,
+            (!rules || isSubmitting) && styles.actionDisabled,
+          ]}
+          accessibilityRole="button"
+          accessibilityLabel={`${side === "buy" ? "Buy" : "Sell"} ${baseCurrency}`}
+        >
+          {isSubmitting ? (
+            <ActivityIndicator color={colors.onAccent} />
+          ) : (
+            <Text style={styles.actionText}>
+              {side === "buy" ? "Buy" : "Sell"} {baseCurrency}
+            </Text>
+          )}
+        </Pressable>
+
+        {rulesLoading ? (
+          <ActivityIndicator color={colors.accent} style={styles.rulesLoader} />
+        ) : null}
       </View>
-
-      <View style={styles.row}>
-        <Text style={styles.rowLabel}>{maxLabel}</Text>
-        <Text style={styles.rowValue}>
-          {max === null ? "—" : `${formatAmount(Number(max))} ${baseCurrency}`}
-        </Text>
-      </View>
-
-      {rulesError ? <Text style={styles.error}>{rulesError}</Text> : null}
-      {inlineError ? <Text style={styles.error}>{inlineError}</Text> : null}
-
-      <Pressable
-        onPress={submit}
-        disabled={!rules || isSubmitting}
-        hitSlop={12}
-        style={[
-          styles.action,
-          side === "buy" ? styles.actionBuy : styles.actionSell,
-          (!rules || isSubmitting) && styles.actionDisabled,
-        ]}
-        accessibilityRole="button"
-        accessibilityLabel={`${side === "buy" ? "Buy" : "Sell"} ${baseCurrency}`}
-      >
-        {isSubmitting ? (
-          <ActivityIndicator color={colors.onAccent} />
-        ) : (
-          <Text style={styles.actionText}>
-            {side === "buy" ? "Buy" : "Sell"} {baseCurrency}
-          </Text>
-        )}
-      </Pressable>
-
-      {rulesLoading ? (
-        <ActivityIndicator color={colors.accent} style={styles.rulesLoader} />
-      ) : null}
     </View>
   );
 }
@@ -642,7 +661,7 @@ function AmountField({
           placeholder={placeholder}
           placeholderTextColor={colors.textFaint}
           style={styles.input}
-          keyboardAppearance={scheme === 'dark' ? 'dark' : 'light'}
+          keyboardAppearance={scheme === "dark" ? "dark" : "light"}
           keyboardType="decimal-pad"
           editable={editable}
           autoCapitalize="none"
@@ -677,225 +696,237 @@ function AmountField({
   );
 }
 
-const useStyles = createThemedStyles((colors) => StyleSheet.create({
-  // The parent owns the padding, and this column is stretched to the height of the taller one
-  // beside it, so the content spreads to fill rather than sitting in a scroll view of its own.
-  content: {
-    flex: 1,
-    gap: 10,
-  },
-  toast: {
-    borderRadius: radius.sm,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 6,
-  },
-  toastOk: {
-    backgroundColor: colors.upFill,
-  },
-  toastError: {
-    backgroundColor: colors.downFill,
-  },
-  toastText: {
-    color: colors.text,
-    fontSize: 11,
-    fontWeight: "600",
-  },
-  toggle: {
-    flexDirection: "row",
-    backgroundColor: colors.surfaceAlt,
-    borderRadius: radius.md,
-    padding: 2,
-    gap: 3,
-  },
-  tab: {
-    flex: 1,
-    minHeight: 29,
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 5,
-  },
-  tabBuy: {
-    backgroundColor: colors.up,
-  },
-  tabSell: {
-    backgroundColor: colors.down,
-  },
-  tabText: {
-    color: colors.textMuted,
-    fontSize: 13,
-    fontWeight: "700",
-  },
-  tabTextBuy: {
-    color: colors.onAccent,
-  },
-  tabTextSell: {
-    color: colors.onAccent,
-  },
-  field: {
-    gap: 3,
-  },
-  fieldLabelRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  fieldLabel: {
-    color: colors.textFaint,
-    fontSize: 10,
-    fontWeight: "600",
-    letterSpacing: 0.3,
-  },
-  inputWrap: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: colors.surfaceAlt,
-    borderRadius: radius.sm,
-    paddingHorizontal: 6,
-    height: 36,
-    gap: 6,
-  },
-  input: {
-    flex: 1,
-    color: colors.text,
-    fontSize: 14,
-    fontWeight: "600",
-    fontVariant: ["tabular-nums"],
-    padding: 0,
-  },
-  unit: {
-    color: colors.textMuted,
-    fontSize: 11,
-    fontWeight: "600",
-  },
-  stepperButton: {
-    width: 24,
-    height: 28,
-    borderRadius: 5,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: colors.bg,
-  },
-  stepperGroup: {
-    flexDirection: "row",
-    gap: 3,
-  },
-  stepperText: {
-    fontSize: 18,
-    fontWeight: "600",
-    color: colors.text,
-  },
-  chipContainer: {
-    flexDirection: "row",
-    backgroundColor: colors.surfaceAlt,
-    borderRadius: 8,
-    padding: 4,
-    gap: 3,
-    width: "100%",
-    height: 40,
-    alignItems: "stretch",
-    marginTop: spacing.xs,
-  },
-  chipContainerCompact: {
-    padding: 3,
-    gap: 3,
-  },
-  chip: {
-    flex: 1,
-    minWidth: 0,
-    minHeight: 0,
-    paddingHorizontal: 4,
-    paddingVertical: 2,
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 5,
-  },
-  chipCompact: {
-    paddingHorizontal: 1,
-  },
-  chipInactive: {
-    backgroundColor: "transparent",
-  },
-  chipActive: {
-    // backgroundColor set dynamically based on side (colors.up / colors.down)
-  },
-  chipDisabled: {
-    opacity: 0.4,
-  },
-  chipText: {
-    fontSize: 12,
-    fontWeight: "600",
-    fontVariant: ["tabular-nums"],
-  },
-  chipTextCompact: {
-    letterSpacing: -0.2,
-  },
-  chipTextInactive: {
-    color: colors.textMuted,
-  },
-  chipTextActive: {
-    color: colors.onAccent,
-  },
-  chipTextDisabled: {
-    color: colors.textFaint,
-  },
-  row: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  rowLabel: {
-    color: colors.textMuted,
-    fontSize: 11,
-  },
-  rowValueWrap: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-  },
-  rowValue: {
-    color: colors.text,
-    fontSize: 11,
-    fontWeight: "600",
-    fontVariant: ["tabular-nums"],
-  },
-  deposit: {
-    width: 16,
-    height: 16,
-    borderRadius: 8,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: colors.upFill,
-  },
-  error: {
-    color: colors.downText,
-    fontSize: 11,
-    lineHeight: 15,
-  },
-  action: {
-    height: 38,
-    width: "100%",
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 8,
-    // Absorbs whatever height the book column leaves this one short by, so the button sits on the
-    // bottom edge of the section and both columns finish at the same line.
-    marginTop: "auto",
-  },
-  actionBuy: {
-    backgroundColor: colors.up,
-  },
-  actionSell: {
-    backgroundColor: colors.down,
-  },
-  actionDisabled: {
-    opacity: 0.4,
-  },
-  actionText: {
-    color: colors.onAccent,
-    fontSize: 14,
-    fontWeight: "700",
-  },
-  rulesLoader: {
-    marginTop: 2,
-  },
-}));
+const useStyles = createThemedStyles((colors) =>
+  StyleSheet.create({
+    // The parent owns the padding, and this column is stretched to the height of the taller one
+    // beside it, so the content spreads to fill rather than sitting in a scroll view of its own.
+    content: {
+      flex: 1,
+      gap: 10,
+    },
+    toast: {
+      borderRadius: radius.sm,
+      paddingHorizontal: spacing.sm,
+      paddingVertical: 6,
+    },
+    toastOk: {
+      backgroundColor: colors.upFill,
+    },
+    toastError: {
+      backgroundColor: colors.downFill,
+    },
+    toastText: {
+      color: colors.text,
+      fontSize: 11,
+      fontWeight: "600",
+    },
+    toggle: {
+      flexDirection: "row",
+      backgroundColor: colors.surfaceAlt,
+      borderRadius: radius.md,
+      padding: 2,
+      gap: 3,
+    },
+    tab: {
+      flex: 1,
+      minHeight: 29,
+      alignItems: "center",
+      justifyContent: "center",
+      borderRadius: 5,
+    },
+    tabBuy: {
+      backgroundColor: colors.up,
+    },
+    tabSell: {
+      backgroundColor: colors.down,
+    },
+    tabText: {
+      color: colors.textMuted,
+      fontSize: 13,
+      fontWeight: "700",
+    },
+    tabTextBuy: {
+      color: colors.onAccent,
+    },
+    tabTextSell: {
+      color: colors.onAccent,
+    },
+    field: {
+      gap: 3,
+    },
+    fieldLabelRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+    },
+    fieldLabel: {
+      color: colors.textFaint,
+      fontSize: 10,
+      fontWeight: "600",
+      letterSpacing: 0.3,
+    },
+    inputWrap: {
+      flexDirection: "row",
+      alignItems: "center",
+      backgroundColor: colors.surfaceAlt,
+      borderRadius: radius.sm,
+      paddingHorizontal: 6,
+      height: 36,
+      gap: 6,
+    },
+    input: {
+      flex: 1,
+      color: colors.text,
+      fontSize: 14,
+      fontWeight: "600",
+      fontVariant: ["tabular-nums"],
+      padding: 0,
+      paddingLeft: 4,
+    },
+    unit: {
+      color: colors.textMuted,
+      fontSize: 11,
+      fontWeight: "600",
+    },
+    stepperButton: {
+      width: 24,
+      height: 28,
+      borderRadius: 5,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: colors.bg,
+    },
+    stepperGroup: {
+      flexDirection: "row",
+      gap: 3,
+    },
+    stepperText: {
+      fontSize: 18,
+      fontWeight: "600",
+      color: colors.text,
+    },
+    chipContainer: {
+      flexDirection: "row",
+      backgroundColor: colors.surfaceAlt,
+      borderRadius: 8,
+      padding: 4,
+      gap: 3,
+      width: "100%",
+      height: 44,
+      alignItems: "stretch",
+    },
+    percentSection: {
+      gap: 3,
+    },
+    chipContainerCompact: {
+      padding: 3,
+      gap: 3,
+    },
+    chip: {
+      flex: 1,
+      minWidth: 0,
+      minHeight: 0,
+      paddingHorizontal: 4,
+      paddingVertical: 2,
+      alignItems: "center",
+      justifyContent: "center",
+      borderRadius: 5,
+    },
+    chipCompact: {
+      paddingHorizontal: 1,
+    },
+    chipInactive: {
+      backgroundColor: "transparent",
+    },
+    chipActive: {
+      // backgroundColor set dynamically based on side (colors.up / colors.down)
+    },
+    chipDisabled: {
+      opacity: 0.4,
+    },
+    chipText: {
+      fontSize: 12,
+      fontWeight: "600",
+      fontVariant: ["tabular-nums"],
+    },
+    chipTextCompact: {
+      letterSpacing: -0.2,
+    },
+    chipTextInactive: {
+      color: colors.textMuted,
+    },
+    chipTextActive: {
+      color: colors.onAccent,
+    },
+    chipTextDisabled: {
+      color: colors.textFaint,
+    },
+    footer: {
+      marginTop: "auto",
+      gap: 6,
+    },
+    summaryRows: {
+      gap: 4,
+    },
+    row: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+    },
+    rowLabel: {
+      color: colors.textMuted,
+      fontSize: 11,
+    },
+    rowValueWrap: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+    },
+    rowValue: {
+      color: colors.text,
+      fontSize: 11,
+      fontWeight: "600",
+      fontVariant: ["tabular-nums"],
+    },
+    deposit: {
+      width: 16,
+      height: 16,
+      borderRadius: 8,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: colors.upFill,
+    },
+    error: {
+      color: colors.downText,
+      fontSize: 11,
+      lineHeight: 15,
+    },
+    action: {
+      height: 38,
+      width: "100%",
+      alignItems: "center",
+      justifyContent: "center",
+      borderRadius: 8,
+    },
+    actionDefaultSize: {
+      height: 42,
+    },
+    actionBuy: {
+      backgroundColor: colors.up,
+    },
+    actionSell: {
+      backgroundColor: colors.down,
+    },
+    actionDisabled: {
+      opacity: 0.4,
+    },
+    actionText: {
+      color: colors.onAccent,
+      fontSize: 14,
+      fontWeight: "700",
+    },
+    rulesLoader: {
+      marginTop: 2,
+    },
+  }),
+);

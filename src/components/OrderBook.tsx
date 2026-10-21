@@ -141,7 +141,7 @@ function OrderBookBase({ symbol, onPriceSelect, onInitialSnapshot }: Props) {
   const priceDecimals = decimalsFromIncrement(tickSize);
   const sizeDecimals = decimalsFromIncrement(baseIncrement);
   const connectionColor = status === "live"
-    ? colors.upText
+    ? colors.up
     : status === "offline" ? colors.downText : colors.textFaint;
   const connectionLabel = status === "live"
     ? "Connected"
@@ -159,7 +159,11 @@ function OrderBookBase({ symbol, onPriceSelect, onInitialSnapshot }: Props) {
       <View style={styles.header}>
         <Text style={styles.headerText}>Price ({quoteCurrency})</Text>
         <View
-          style={[styles.connectionDot, { backgroundColor: connectionColor }]}
+          style={[
+            styles.connectionDot,
+            { backgroundColor: connectionColor },
+            status === "live" && styles.connectionDotLive,
+          ]}
           accessibilityRole="image"
           accessibilityLabel={`Order book ${connectionLabel.toLowerCase()}`}
         />
@@ -309,10 +313,17 @@ const useStyles = createThemedStyles((colors) =>
       paddingBottom: spacing.xs,
     },
     connectionDot: {
-      width: 7,
-      height: 7,
+      width: 8,
+      height: 8,
       borderRadius: 4,
       marginHorizontal: spacing.xs,
+    },
+    connectionDotLive: {
+      shadowColor: colors.up,
+      shadowOffset: { width: 0, height: 0 },
+      shadowOpacity: 0.9,
+      shadowRadius: 6,
+      elevation: 4,
     },
     headerText: {
       color: colors.textFaint,
