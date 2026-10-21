@@ -682,7 +682,7 @@ const useStyles = createThemedStyles((colors) => StyleSheet.create({
   // beside it, so the content spreads to fill rather than sitting in a scroll view of its own.
   content: {
     flex: 1,
-    gap: spacing.sm,
+    gap: 10,
   },
   toast: {
     borderRadius: radius.sm,
@@ -703,16 +703,16 @@ const useStyles = createThemedStyles((colors) => StyleSheet.create({
   toggle: {
     flexDirection: "row",
     backgroundColor: colors.surfaceAlt,
-    borderRadius: radius.pill,
+    borderRadius: radius.md,
     padding: 2,
-    gap: 2,
+    gap: 3,
   },
   tab: {
     flex: 1,
-    height: 32,
+    minHeight: 29,
     alignItems: "center",
     justifyContent: "center",
-    borderRadius: radius.pill,
+    borderRadius: 5,
   },
   tabBuy: {
     backgroundColor: colors.up,
@@ -732,7 +732,7 @@ const useStyles = createThemedStyles((colors) => StyleSheet.create({
     color: colors.onAccent,
   },
   field: {
-    gap: 4,
+    gap: 3,
   },
   fieldLabelRow: {
     flexDirection: "row",
@@ -750,9 +750,8 @@ const useStyles = createThemedStyles((colors) => StyleSheet.create({
     alignItems: "center",
     backgroundColor: colors.surfaceAlt,
     borderRadius: radius.sm,
-    paddingLeft: spacing.sm,
-    paddingRight: 6,
-    height: 38,
+    paddingHorizontal: 6,
+    height: 36,
     gap: 6,
   },
   input: {
@@ -770,55 +769,48 @@ const useStyles = createThemedStyles((colors) => StyleSheet.create({
   },
   stepperButton: {
     width: 24,
-    height: 36,
-    borderRadius: radius.sm,
+    height: 28,
+    borderRadius: 5,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: colors.surfaceAlt,
+    backgroundColor: colors.bg,
   },
   stepperGroup: {
     flexDirection: "row",
-    gap: 1,
+    gap: 3,
   },
   stepperText: {
     fontSize: 18,
     fontWeight: "600",
     color: colors.text,
   },
-  chipRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginTop: 4,
-    marginBottom: 4,
-    gap: spacing.xs,
-  },
   chipContainer: {
     flexDirection: "row",
     backgroundColor: colors.surfaceAlt,
-    borderRadius: radius.pill,
+    borderRadius: 8,
     padding: 4,
-    gap: 4,
+    gap: 3,
     width: "100%",
+    height: 40,
+    alignItems: "stretch",
+    marginTop: spacing.xs,
   },
   chipContainerCompact: {
     padding: 3,
-    gap: 2,
+    gap: 3,
   },
   chip: {
     flex: 1,
     minWidth: 0,
-    minHeight: 36,
-    paddingHorizontal: 8,
-    paddingVertical: 8,
+    minHeight: 0,
+    paddingHorizontal: 4,
+    paddingVertical: 2,
     alignItems: "center",
     justifyContent: "center",
-    // Match the radius to half the height; the global scaler grows both together so the
-    // selected chip remains a capsule instead of relying on an oversized pill radius.
-    borderRadius: 18,
+    borderRadius: 5,
   },
   chipCompact: {
-    paddingHorizontal: 2,
-    paddingVertical: 2,
+    paddingHorizontal: 1,
   },
   chipInactive: {
     backgroundColor: "transparent",
@@ -880,11 +872,11 @@ const useStyles = createThemedStyles((colors) => StyleSheet.create({
     lineHeight: 15,
   },
   action: {
-    height: 42,
+    height: 38,
     width: "100%",
     alignItems: "center",
     justifyContent: "center",
-    borderRadius: radius.pill,
+    borderRadius: 8,
     // Absorbs whatever height the book column leaves this one short by, so the button sits on the
     // bottom edge of the section and both columns finish at the same line.
     marginTop: "auto",
