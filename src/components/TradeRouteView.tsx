@@ -35,7 +35,7 @@ const HISTORY_LOAD_MORE_THRESHOLD = 320;
  * The trade screen's content: the chart, the order form, and the order management section, with the
  * symbol supplied by the tab route that owns the screen's only scroll view.
  */
-export function TradeRouteView({ symbol, name, decimals, signalEntry, signalTp1, quickBuyByDefault, onBack }: Props) {
+export function TradeRouteView({ symbol, name, decimals, signalEntry, signalTp1, quickBuyByDefault = false, onBack }: Props) {
   const styles = useStyles();
   const [activeSymbol, setActiveSymbol] = useState(symbol);
   const [bookReadySymbol, setBookReadySymbol] = useState<string | null>(null);

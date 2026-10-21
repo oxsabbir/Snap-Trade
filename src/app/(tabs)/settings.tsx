@@ -9,7 +9,6 @@ import { BackIcon, CheckIcon } from '@/components/Icons';
 import { SIGNAL_DETECTION_ENABLED } from '@/lib/featureFlags';
 import { useSignalSource } from '@/hooks/useSignalSource';
 import { useBalanceVisibility } from '@/state/balanceVisibility';
-import { useQuickBuy } from '@/state/quickBuy';
 import { FONT_SIZE_OPTIONS, useFontScale } from '@/theme/FontScaleProvider';
 import { radius, spacing } from '@/theme';
 import { useTheme, type ThemePreference } from '@/theme/ThemeProvider';
@@ -25,7 +24,6 @@ export default function SettingsScreen() {
   const { colors, preference, setPreference } = useTheme();
   const { step: fontSizeStep, setStep: setFontSizeStep } = useFontScale();
   const { balancesVisible, setBalancesVisible } = useBalanceVisibility();
-  const { enabled: quickBuyEnabled, setEnabled: setQuickBuyEnabled } = useQuickBuy();
   const signal = useSignalSource();
   const styles = useStyles();
   const [signalNameInput, setSignalNameInput] = useState(signal.displayName);
@@ -168,25 +166,6 @@ export default function SettingsScreen() {
               trackColor={{ false: colors.surfaceAlt, true: colors.accent }}
               thumbColor={!balancesVisible ? '#FFFFFF' : colors.text}
               accessibilityLabel="Hide account balances"
-            />
-          </View>
-        </View>
-
-        <View style={styles.section}>
-          <Text style={styles.sectionEyebrow}>TRADING</Text>
-          <View style={styles.settingRow}>
-            <View style={styles.settingCopy}>
-              <Text style={styles.settingTitle}>Enable Quick Buy</Text>
-              <Text style={styles.settingDescription}>
-                Replace ask rows with four live buy price and depth shortcuts.
-              </Text>
-            </View>
-            <Switch
-              value={quickBuyEnabled}
-              onValueChange={setQuickBuyEnabled}
-              trackColor={{ false: colors.surfaceAlt, true: colors.up }}
-              thumbColor={quickBuyEnabled ? '#FFFFFF' : colors.text}
-              accessibilityLabel="Enable Quick Buy"
             />
           </View>
         </View>

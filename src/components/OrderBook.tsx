@@ -22,7 +22,6 @@ import { useSymbolRules } from "@/hooks/useSymbolRules";
 import { aggregationOptions, VISIBLE_LEVELS, type DepthRow } from "@/lib/kucoin/orderbook";
 import { radius, spacing } from "@/theme";
 import { useTheme } from "@/theme/ThemeProvider";
-import { useQuickBuy } from "@/state/quickBuy";
 import { QuickBuy } from "@/components/QuickBuy";
 import { createThemedStyles } from "@/theme/themedStyles";
 import { decimalsFromIncrement, formatCompactSize, formatPrice } from "@/utils/format";
@@ -118,9 +117,8 @@ function OrderBookBase({ symbol, takerFeeRate, onPriceSelect, onInitialSnapshot,
     onInitialSnapshot?.(symbol);
   }, [snapshot, symbol, onInitialSnapshot]);
   const { rules } = useSymbolRules(symbol);
-  const { enabled: quickBuyEnabled } = useQuickBuy();
   const [quickBuyOverride, setQuickBuyOverride] = useState<boolean | null>(null);
-  const showQuickBuy = quickBuyOverride ?? (quickBuyEnabled || quickBuyByDefault);
+  const showQuickBuy = quickBuyOverride ?? quickBuyByDefault;
   const [baseCurrency = "", quoteCurrency = ""] = symbol.split("-");
 
   const [aggregation, setAggregation] = useState("0.000001");
@@ -183,12 +181,12 @@ function OrderBookBase({ symbol, takerFeeRate, onPriceSelect, onInitialSnapshot,
           accessibilityLabel={`Order book ${connectionLabel.toLowerCase()}`}
         />
         <Text style={[styles.headerText, styles.headerRight]}>
-          {(quickBuyEnabled || quickBuyByDefault) && showQuickBuy && viewMode !== "bids" ? "Size / fill" : `Total (${baseCurrency})`}
+          {showQuickBuy && viewMode !== "bids" ? "Size / fill" : `Total (${baseCurrency})`}
         </Text>
       </View>
 
       {viewMode !== "bids" ? (
-        (quickBuyEnabled || quickBuyByDefault) && showQuickBuy ? (
+        showQuickBuy ? (
           <View style={[styles.asks, { height: quickBuyHeight }]}>
             <QuickBuy
               asks={depth.asks}
@@ -272,20 +270,18 @@ function OrderBookBase({ symbol, takerFeeRate, onPriceSelect, onInitialSnapshot,
           <CaretDownIcon size={10} color={colors.textFaint} />
         </Pressable>
 
-        {quickBuyEnabled || quickBuyByDefault ? (
-          <Pressable
-            onPress={() => setQuickBuyOverride(!showQuickBuy)}
-            style={[styles.quickBuyButton, showQuickBuy && styles.quickBuyButtonActive]}
-            accessibilityRole="button"
-            accessibilityLabel={`Quick Buy ${showQuickBuy ? "on" : "off"}`}
-            accessibilityState={{ selected: showQuickBuy }}
-          >
-            <TradeIcon
-              size={14}
-              color={showQuickBuy ? colors.upText : colors.textMuted}
-            />
-          </Pressable>
-        ) : null}
+        <Pressable
+          onPress={() => setQuickBuyOverride(!showQuickBuy)}
+          style={[styles.quickBuyButton, showQuickBuy && styles.quickBuyButtonActive]}
+          accessibilityRole="button"
+          accessibilityLabel={`Quick Buy ${showQuickBuy ? "on" : "off"}`}
+          accessibilityState={{ selected: showQuickBuy }}
+        >
+          <TradeIcon
+            size={14}
+            color={showQuickBuy ? colors.upText : colors.textMuted}
+          />
+        </Pressable>
 
         <Pressable
           onPress={cycleView}
