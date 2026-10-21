@@ -162,7 +162,7 @@ const ChartChrome = memo(function ChartChrome({
             accessibilityRole="button"
             accessibilityLabel={`About ${symbol}`}
           >
-            <InfoIcon size={17} color={colors.textMuted} />
+            <InfoIcon size={19} color={colors.textMuted} />
           </Pressable>
         </View>
       </View>
@@ -356,7 +356,7 @@ const useStyles = createThemedStyles((colors) =>
       gap: spacing.md,
       paddingHorizontal: spacing.lg,
       paddingTop: spacing.sm,
-      paddingBottom: spacing.md,
+      paddingBottom: spacing.sm,
     },
     headerText: {
       flex: 1,
@@ -365,6 +365,7 @@ const useStyles = createThemedStyles((colors) =>
     headerActions: {
       flexDirection: "row",
       alignItems: "center",
+      gap: spacing.xs,
     },
     // Overlays the title row so the readout is centred across the full width regardless of how
     // wide the pair name is; it ignores touches, so the back and info buttons stay tappable.
@@ -401,6 +402,7 @@ const useStyles = createThemedStyles((colors) =>
       flexDirection: "row",
       alignItems: "center",
       gap: spacing.md,
+      minHeight: 40,
       paddingHorizontal: spacing.md,
       paddingBottom: spacing.sm,
     },
@@ -453,9 +455,14 @@ const useStyles = createThemedStyles((colors) =>
       fontSize: 12,
     },
     infoButton: {
-      padding: spacing.xs,
-      marginLeft: spacing.xs,
+      width: 36,
+      height: 36,
+      alignItems: "center",
+      justifyContent: "center",
       borderRadius: radius.pill,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.border,
+      backgroundColor: colors.surfaceAlt,
     },
     iconButton: {
       padding: spacing.xs,

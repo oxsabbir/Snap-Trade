@@ -137,6 +137,11 @@ function OrderBookBase({ symbol, onPriceSelect, onInitialSnapshot }: Props) {
     aggregation,
     viewMode === "split" ? VISIBLE_LEVELS : SINGLE_SIDE_LEVELS,
   );
+  // Reserve the full depth area before the first REST snapshot arrives, so the columns do not
+  // grow when the initial asks and bids are inserted. Split and single-sided modes both occupy
+  // ten rows in total.
+  const depthRowsHeight =
+    (viewMode === "split" ? VISIBLE_LEVELS : SINGLE_SIDE_LEVELS) * ROW_HEIGHT;
   const options = useMemo(() => aggregationOptions(tickSize), [tickSize]);
   const priceDecimals = decimalsFromIncrement(tickSize);
   const sizeDecimals = decimalsFromIncrement(baseIncrement);
@@ -173,7 +178,7 @@ function OrderBookBase({ symbol, onPriceSelect, onInitialSnapshot }: Props) {
       </View>
 
       {viewMode !== "bids" ? (
-        <View style={styles.asks}>
+        <View style={[styles.asks, { height: depthRowsHeight }]}>
           {[...depth.asks].reverse().map((row, index) => (
             <DepthRowView
               key={`ask:${depth.asks.length - 1 - index}`}
@@ -195,7 +200,7 @@ function OrderBookBase({ symbol, onPriceSelect, onInitialSnapshot }: Props) {
       />
 
       {viewMode !== "asks" ? (
-        <View style={styles.bids}>
+        <View style={[styles.bids, { height: depthRowsHeight }]}>
           {depth.bids.map((row, index) => (
             <DepthRowView
               key={`bid:${index}`}
@@ -338,11 +343,9 @@ const useStyles = createThemedStyles((colors) =>
     // price band: asks sit on top of it and bids under it, so the extra space falls at the far
     // edges of the column instead of opening a gap in the middle of the book.
     asks: {
-      flex: 1,
       justifyContent: "flex-end",
     },
     bids: {
-      flex: 1,
       justifyContent: "flex-start",
     },
     row: {
