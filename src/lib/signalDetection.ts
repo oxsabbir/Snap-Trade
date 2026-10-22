@@ -20,6 +20,27 @@ export type SignalCheckResult = {
   entry: string | null;
 };
 
+export const IGNORED_TAGS = new Set([
+  'KUCOIN',
+  'MEXC',
+  'BINANCE',
+  'BYBIT',
+  'GATEIO',
+  'OKX',
+  'BITGET',
+  'COINBASE',
+  'KRAKEN',
+  'HTX',
+  'HUOBI',
+  'SIGNAL',
+  'SIGNALS',
+  'VIP',
+  'ENTRY',
+  'TARGET',
+  'TARGETS',
+  'STOPLOSS',
+]);
+
 function normalizeNumber(str: string): number | null {
   if (!str) return null;
   const normalized = str.replace(',', '.');
@@ -30,12 +51,33 @@ function normalizeNumber(str: string): number | null {
 }
 
 function extractTicker(text: string): string | null {
-  const match = text.match(/\$([A-Za-z0-9]+)/);
-  return match ? match[1].toUpperCase() : null;
+  // Priority 1: Cashtag $TICKER
+  const cashMatch = text.match(/\$([A-Za-z0-9]+)/);
+  if (cashMatch) {
+    return cashMatch[1].toUpperCase();
+  }
+
+  // Priority 2: Hashtag #TICKER (excluding ignored exchange and system tags)
+  const hashRegex = /#([A-Za-z0-9]+)/g;
+  let hashMatch: RegExpExecArray | null;
+  while ((hashMatch = hashRegex.exec(text)) !== null) {
+    const tag = hashMatch[1].toUpperCase();
+    if (!IGNORED_TAGS.has(tag) && tag.length >= 2 && tag.length <= 10) {
+      return tag;
+    }
+  }
+
+  return null;
 }
 
-function extractTPs(text: string): number[] {
+type TPsResult = {
+  tps: number[];
+  firstTpIndex: number | null;
+};
+
+function extractTPs(text: string): TPsResult {
   const tps: number[] = [];
+  let firstTpIndex: number | null = null;
   const tpRegex = /(?:TP|tp|T\.P)\s*[.:]?\s*(\d+)\s*[=:]\s*([\d,.]+)/gi;
   let match;
 
@@ -44,6 +86,9 @@ function extractTPs(text: string): number[] {
     const tpValue = normalizeNumber(match[2]);
     if (tpNum >= 1 && tpNum <= 10 && tpValue !== null) {
       tps.push(tpValue);
+      if (firstTpIndex === null || match.index < firstTpIndex) {
+        firstTpIndex = match.index;
+      }
     }
   }
 
@@ -56,12 +101,14 @@ function extractTPs(text: string): number[] {
       // Avoid duplicates
       if (!tps.some((existing, i) => i + 1 === tpNum && Math.abs(existing - tpValue) < 0.0001)) {
         tps.push(tpValue);
+        if (firstTpIndex === null || match.index < firstTpIndex) {
+          firstTpIndex = match.index;
+        }
       }
     }
   }
 
-  // Sort by TP number (1, 2, 3...)
-  return tps;
+  return { tps, firstTpIndex };
 }
 
 /**
@@ -83,15 +130,18 @@ export function checkForSignal(notification: XNotification): SignalCheckResult {
     return { isSignal: false, format: null, ticker: null, tp1: null, tpCount: 0, entry: null };
   }
 
-  const ticker = extractTicker(primaryText);
-  const tps = extractTPs(primaryText);
+  const { tps, firstTpIndex } = extractTPs(primaryText);
   const tpCount = tps.length;
   const tp1 = tps[0] ?? null;
 
-  // Format 1: cashtag + ≥3 numbered TPs. Format 2 (gem posts): cashtag + marker + market
-  // price — the trailing cashtag list in gem posts is a decoy; only the first cashtag counts.
-  const entry = tpCount >= 3 ? null : extractGemEntry(primaryText);
-  const format: SignalFormat | null = tpCount >= 3 ? 'tp' : entry !== null ? 'gem' : null;
+  // Format 1: cashtag/hashtag + ≥3 numbered TPs. For TP posts, the ticker MUST be found
+  // before the first TP target to prevent decoy tags at the bottom from triggering false trades.
+  const isTpSignal = tpCount >= 3;
+  const searchRegion = isTpSignal && firstTpIndex !== null ? primaryText.slice(0, firstTpIndex) : primaryText;
+  const ticker = extractTicker(searchRegion);
+
+  const entry = isTpSignal ? null : extractGemEntry(primaryText);
+  const format: SignalFormat | null = isTpSignal ? 'tp' : entry !== null ? 'gem' : null;
   const isSignal = ticker !== null && format !== null;
 
   return { isSignal, format, ticker, tp1, tpCount, entry };

@@ -68,6 +68,30 @@ class NotificationListener : NotificationListenerService() {
     // Cashtag ticker, e.g. `$SKY`.
     private val tickerPattern = Pattern.compile("\\$([A-Za-z0-9]+)")
 
+    // Hashtag ticker fallback, e.g. `#P2P`.
+    private val hashtagPattern = Pattern.compile("#([A-Za-z0-9]+)")
+
+    private val ignoredHashtags = setOf(
+        "KUCOIN",
+        "MEXC",
+        "BINANCE",
+        "BYBIT",
+        "GATEIO",
+        "OKX",
+        "BITGET",
+        "COINBASE",
+        "KRAKEN",
+        "HTX",
+        "HUOBI",
+        "SIGNAL",
+        "SIGNALS",
+        "VIP",
+        "ENTRY",
+        "TARGET",
+        "TARGETS",
+        "STOPLOSS"
+    )
+
     // `TP1: 0.016`, `T.P 1 = 0,016`, `TP 1: .0160` — label, optional separator, value.
     private val tpPattern =
         Pattern.compile("(?i)(?:TP|T\\.P)\\s*[.:]?\\s*(\\d+)\\s*[=:]*\\s*([\\d,.]+)")
@@ -128,10 +152,18 @@ class NotificationListener : NotificationListenerService() {
             .distinct()
             .joinToString("\n")
 
-        val ticker = extractTicker(primaryText)
-        val tps = extractTps(primaryText)
+        val tpsResult = extractTps(primaryText)
+        val tps = tpsResult.tps
+        val isTpSignal = tps.size >= 3
+        val searchRegion = if (isTpSignal && tpsResult.firstTpIndex != null) {
+            primaryText.substring(0, tpsResult.firstTpIndex)
+        } else {
+            primaryText
+        }
+
+        val ticker = extractTicker(searchRegion)
         val hasGemMarker = hasGemMarker(primaryText)
-        val entryPrice = if (tps.size < 3) extractGemPrice(primaryText) else null
+        val entryPrice = if (!isTpSignal) extractGemPrice(primaryText) else null
         log(
             "SignalParse",
             "ticker=${ticker ?: "none"}, tps=${tps.size}, gemMarker=$hasGemMarker, " +
@@ -142,11 +174,11 @@ class NotificationListener : NotificationListenerService() {
             return
         }
 
-        // Format 1 (TP posts): a cashtag plus at least three numbered take-profits.
-        // Format 2 (gem posts): a cashtag plus the marker phrase and a market price line.
+        // Format 1 (TP posts): a cashtag/hashtag plus at least three numbered take-profits.
+        // Format 2 (gem posts): a cashtag/hashtag plus the marker phrase and a market price line.
         // The trailing cashtag list in gem posts is a decoy — only the first cashtag is
         // ever taken as the ticker.
-        if (tps.size < 3 && entryPrice == null) {
+        if (!isTpSignal && entryPrice == null) {
             log(
                 "Decision",
                 "not signal (ticker=$ticker, tps=${tps.size}, " +
@@ -163,8 +195,8 @@ class NotificationListener : NotificationListenerService() {
         }
         lastLaunchByTicker[ticker] = now
 
-        val format = if (tps.size >= 3) "tp" else "gem"
-        val tp1 = if (tps.size >= 3) extractTp1(primaryText) else null
+        val format = if (isTpSignal) "tp" else "gem"
+        val tp1 = if (isTpSignal) extractTp1(primaryText) else null
         val pricePart = entryPrice?.let { ", price=$it" } ?: ""
         val tpPart = tp1?.let { ", tp1=$it" } ?: ""
         log("Decision", "signal $ticker (format=$format, tps=${tps.size}$pricePart$tpPart)")
@@ -212,21 +244,49 @@ class NotificationListener : NotificationListenerService() {
 
     private fun extractTicker(text: String): String? {
         if (text.isBlank()) return null
-        val matcher = tickerPattern.matcher(text)
-        return if (matcher.find()) matcher.group(1)?.uppercase() else null
+
+        // Priority 1: Cashtag `$TICKER`
+        val cashMatcher = tickerPattern.matcher(text)
+        if (cashMatcher.find()) {
+            val symbol = cashMatcher.group(1)?.uppercase()
+            if (!symbol.isNullOrBlank()) return symbol
+        }
+
+        // Priority 2: Hashtag `#TICKER` (excluding blacklisted exchange and system tags)
+        val hashMatcher = hashtagPattern.matcher(text)
+        while (hashMatcher.find()) {
+            val tag = hashMatcher.group(1)?.uppercase() ?: continue
+            if (tag !in ignoredHashtags && tag.length in 2..10) {
+                return tag
+            }
+        }
+
+        return null
     }
 
-    private fun extractTps(text: String): List<Double> {
-        if (text.isBlank()) return emptyList()
+    private data class TpsResult(
+        val tps: List<Double>,
+        val firstTpIndex: Int?
+    )
+
+    private fun extractTps(text: String): TpsResult {
+        if (text.isBlank()) return TpsResult(emptyList(), null)
 
         val tps = mutableListOf<Double>()
         val seen = mutableSetOf<Int>()
+        var earliestIndex: Int? = null
 
         val primary = tpPattern.matcher(text)
         while (primary.find()) {
             val number = primary.group(1)?.toIntOrNull() ?: continue
             val value = normalizeNumber(primary.group(2)) ?: continue
-            if (number in 1..10 && seen.add(number)) tps.add(value)
+            if (number in 1..10 && seen.add(number)) {
+                tps.add(value)
+                val start = primary.start()
+                if (earliestIndex == null || start < earliestIndex) {
+                    earliestIndex = start
+                }
+            }
         }
 
         // Same TP numbers the primary pattern already claimed are skipped, so the two passes
@@ -235,10 +295,16 @@ class NotificationListener : NotificationListenerService() {
         while (alternate.find()) {
             val number = alternate.group(1)?.toIntOrNull() ?: continue
             val value = normalizeNumber(alternate.group(2)) ?: continue
-            if (number in 1..10 && seen.add(number)) tps.add(value)
+            if (number in 1..10 && seen.add(number)) {
+                tps.add(value)
+                val start = alternate.start()
+                if (earliestIndex == null || start < earliestIndex) {
+                    earliestIndex = start
+                }
+            }
         }
 
-        return tps
+        return TpsResult(tps, earliestIndex)
     }
 
     /**
