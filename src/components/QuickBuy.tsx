@@ -43,11 +43,10 @@ function QuickBuyBase({
         const affordable = row && rules
           ? maxSize('buy', rules, row.price, { base: '0', quote: quoteAvailable }, feeRate)
           : null;
-        const size = row && affordable !== null
-          ? (compareDecimal(row.total, affordable) ?? 0) < 0 ? row.total : affordable
-          : null;
-        const ratio = size !== null && affordable !== null && (compareDecimal(affordable, '0') ?? 0) > 0
-          ? Math.max(0, Math.min(100, (Number(size) / Number(affordable)) * 100))
+        // Uses full 100% (All) available balance at this ask price ceiling
+        const size = affordable;
+        const ratio = row && affordable !== null && (compareDecimal(affordable, '0') ?? 0) > 0
+          ? Math.max(0, Math.min(100, (Number(row.total) / Number(affordable)) * 100))
           : 0;
         const priceTotal = row && size !== null ? multiplyDecimal(row.price, size) : null;
         const minimumTotal = rules

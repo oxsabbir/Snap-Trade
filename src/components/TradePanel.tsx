@@ -211,15 +211,27 @@ function TradePanelBase({
     setPrice(priceSelection.value);
     const selectionSide = priceSelection.side ?? side;
     if (priceSelection.side) setSide(priceSelection.side);
-    if (selectionSide === "buy" && priceSelection.size) {
-      setPercent(null);
-      setPendingAllSelectionId(null);
-      setSize(priceSelection.size);
-      setTotal(totalFromSize(priceSelection.value, priceSelection.size) ?? "");
-    } else if (selectionSide === "buy") {
-      // Selecting a book price on Buy opts into the full available balance at that price.
+    if (selectionSide === "buy") {
+      // Selecting a book price on Buy opts into the full available balance (All / 100%) at that price.
       setPercent(100);
       setPendingAllSelectionId(priceSelection.id);
+      if (rules) {
+        const filled = fillByPercent(
+          selectionSide,
+          100,
+          rules,
+          priceSelection.value,
+          { base: baseAvailable, quote: quoteAvailable },
+          effectiveFeeRate,
+        );
+        if (filled) {
+          setSize(filled.size);
+          setTotal(filled.total);
+        }
+      } else if (priceSelection.size) {
+        setSize(priceSelection.size);
+        setTotal(totalFromSize(priceSelection.value, priceSelection.size) ?? "");
+      }
     } else {
       setPercent(null);
       setPendingAllSelectionId(null);
