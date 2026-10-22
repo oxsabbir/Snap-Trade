@@ -13,6 +13,7 @@ import { LiveBadge } from "@/components/LiveBadge";
 import { LivePrice } from "@/components/LivePrice";
 import { PositionPnlChip } from "@/components/PositionPnlChip";
 import { PriceChart } from "@/components/PriceChart";
+import { FloatingOrderBar } from "@/components/FloatingOrderBar";
 import { TimeframeTabs } from "@/components/TimeframeTabs";
 import { useLifetimeSeries } from "@/hooks/useLifetimeSeries";
 import { useLiveCandles } from "@/hooks/useLiveCandles";
@@ -331,6 +332,8 @@ export function CoinDetail({ symbol, name, decimals, signalTp1, signalEntry, onB
             ) : null}
           </View>
         ) : null}
+
+        <FloatingOrderBar symbol={symbol} />
       </View>
 
       {/* {children} */}

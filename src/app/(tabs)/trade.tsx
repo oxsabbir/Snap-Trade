@@ -37,6 +37,7 @@ export default function TradeScreenRoute() {
       symbol={coin.symbol}
       name={coin.name}
       decimals={coin.decimals}
+      quickBuyByDefault
     />
   );
 }

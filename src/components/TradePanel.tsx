@@ -474,11 +474,7 @@ function TradePanelBase({
           },
         );
       }
-      const verb = side === "buy" ? "Buy" : "Sell";
-      setToast({
-        tone: "success",
-        message: `${testMode ? "Test " : ""}${verb} order placed · ${placed.orderId.slice(0, 8)}`,
-      });
+      setToast(null);
       setSize("");
       setTotal("");
       clearPercent();

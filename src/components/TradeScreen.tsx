@@ -39,7 +39,11 @@ type Props = {
  * column scrolls: the screen owns the single scroll view, so a scrollable child here would be a
  * list nested inside a list, competing for the same gesture.
  */
-export const TradeScreen = memo(function TradeScreen({ symbol, onInitialBookSnapshot, quickBuyByDefault }: Props) {
+export const TradeScreen = memo(function TradeScreen({
+  symbol,
+  onInitialBookSnapshot,
+  quickBuyByDefault,
+}: Props) {
   const styles = useStyles();
   const { takerFeeRate } = useUserTradeFees(symbol);
   const [selection, setSelection] = useState<ExternalPriceSelection | null>(
@@ -70,7 +74,11 @@ export const TradeScreen = memo(function TradeScreen({ symbol, onInitialBookSnap
           />
         </View>
         <View style={styles.panel}>
-          <TradePanel symbol={symbol} takerFeeRate={takerFeeRate} priceSelection={selection} />
+          <TradePanel
+            symbol={symbol}
+            takerFeeRate={takerFeeRate}
+            priceSelection={selection}
+          />
         </View>
       </View>
     </View>

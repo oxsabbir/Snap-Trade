@@ -32,6 +32,7 @@ function QuickBuyBase({
   const styles = useStyles();
   const { available } = useAccountBalance();
   const quoteAvailable = available[quoteCurrency] ?? '0';
+  const basePrice = asks[0] ? Number(asks[0].price) : null;
 
   return (
     <View style={styles.container}>
@@ -61,6 +62,9 @@ function QuickBuyBase({
           (compareDecimal(priceTotal, minimumTotal) ?? -1) >= 0,
         );
 
+        const rowPrice = row ? Number(row.price) : 0;
+        const slippagePct = basePrice && basePrice > 0 ? ((rowPrice - basePrice) / basePrice) * 100 : 0;
+
         return (
           <Pressable
             key={index}
@@ -75,9 +79,30 @@ function QuickBuyBase({
           >
             <View style={[styles.fill, { width: `${ratio}%` }]} />
             <View style={styles.buttonContent}>
-              <Text style={styles.price} numberOfLines={1}>
-                {row ? formatPrice(Number(row.price), decimalsFromIncrement(rules?.priceIncrement ?? '0.000001')) : '—'}
-              </Text>
+              <View style={styles.priceRow}>
+                <Text style={styles.price} numberOfLines={1}>
+                  {row ? formatPrice(Number(row.price), decimalsFromIncrement(rules?.priceIncrement ?? '0.000001')) : '—'}
+                </Text>
+                {row ? (
+                  <Text
+                    style={[
+                      styles.slippage,
+                      slippagePct >= 5 && styles.slippageWarning,
+                      slippagePct >= 10 && styles.slippageDanger,
+                    ]}
+                    numberOfLines={1}
+                  >
+                    {slippagePct >= 10 ? '⚠️ +' : '+'}
+                    {slippagePct === 0
+                      ? '0.0%'
+                      : slippagePct < 1
+                        ? `${slippagePct.toFixed(2)}%`
+                        : slippagePct < 10
+                          ? `${slippagePct.toFixed(1)}%`
+                          : `${Math.round(slippagePct)}%`}
+                  </Text>
+                ) : null}
+              </View>
               <Text style={styles.percentage}>{row ? `${ratio.toFixed(0)}%` : '—'}</Text>
             </View>
           </Pressable>
@@ -123,17 +148,36 @@ const useStyles = createThemedStyles((colors) =>
       gap: spacing.xs,
       paddingHorizontal: spacing.sm,
     },
-    price: {
+    priceRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.xs,
       flex: 1,
+    },
+    price: {
       color: colors.upText,
-      fontSize: 11,
-      fontWeight: '700',
+      fontSize: 12,
+      fontWeight: '600',
       fontVariant: ['tabular-nums'],
+    },
+    slippage: {
+      color: colors.textMuted,
+      fontSize: 10,
+      fontWeight: '600',
+      fontVariant: ['tabular-nums'],
+    },
+    slippageWarning: {
+      color: colors.warning,
+      fontWeight: '700',
+    },
+    slippageDanger: {
+      color: colors.downText,
+      fontWeight: '800',
     },
     percentage: {
       color: colors.upText,
-      fontSize: 9,
-      fontWeight: '800',
+      fontSize: 10,
+      fontWeight: '700',
       fontVariant: ['tabular-nums'],
     },
   }),
