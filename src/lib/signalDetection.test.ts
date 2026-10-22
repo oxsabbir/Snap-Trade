@@ -119,6 +119,22 @@ Current market price - 0.0007306 $`;
   eq(result.entry, '0.0007306');
 });
 
+test('detects #UNION in gem post with trailing $q decoys at the bottom', () => {
+  const text = `#UNION
+
+    Buying this GEM 💎 on #KuCoin
+
+    Current market price - 0.0001155 $
+
+    $q $sqr $xr $obi $cho $ava $hmnd`;
+
+  const result = checkForSignal(makeNotification(text));
+  eq(result.isSignal, true);
+  eq(result.format, 'gem');
+  eq(result.ticker, 'UNION');
+  eq(result.entry, '0.0001155');
+});
+
 // --- runner -----------------------------------------------------------------------------------
 
 let failures = 0;

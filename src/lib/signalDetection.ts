@@ -111,16 +111,23 @@ function extractTPs(text: string): TPsResult {
   return { tps, firstTpIndex };
 }
 
+function hasGemMarker(text: string): boolean {
+  const normalized = text.toLowerCase().replace(/[^a-z0-9]/g, '');
+  return normalized.includes('buyingthisgemonkucoin');
+}
+
 /**
  * Gem-format anchor, mirroring the native listener: the constant marker phrase plus a
- * `Current market price - X $` line. Returns the price as the plain posted decimal string.
+ * `Current market price - X $` line. Returns the price as the plain posted decimal string
+ * and the character index where the price line starts (used as a cutoff for decoys).
  */
-function extractGemEntry(text: string): string | null {
-  if (!/buying\s+this\s+gem\s+on\s+#?kucoin/i.test(text)) return null;
+function extractGemEntry(text: string): { entry: string | null; priceIndex: number | null } {
+  if (!hasGemMarker(text)) return { entry: null, priceIndex: null };
   const match = text.match(/current\s+market\s+price\s*[-–:]?\s*([\d.,]+)/i);
-  if (!match) return null;
+  if (!match || match.index === undefined) return { entry: null, priceIndex: null };
   const normalized = match[1].replace(',', '.');
-  return /^\d+(\.\d+)?$/.test(normalized) ? normalized : null;
+  const valid = /^\d+(\.\d+)?$/.test(normalized) ? normalized : null;
+  return { entry: valid, priceIndex: match.index };
 }
 
 export function checkForSignal(notification: XNotification): SignalCheckResult {
@@ -134,13 +141,21 @@ export function checkForSignal(notification: XNotification): SignalCheckResult {
   const tpCount = tps.length;
   const tp1 = tps[0] ?? null;
 
-  // Format 1: cashtag/hashtag + ≥3 numbered TPs. For TP posts, the ticker MUST be found
-  // before the first TP target to prevent decoy tags at the bottom from triggering false trades.
+  // Format 1: cashtag/hashtag + ≥3 numbered TPs (ticker searched before the first TP).
+  // Format 2: cashtag/hashtag + gem marker + market price (ticker searched before market price).
+  // Trailing cashtag lists at the bottom of both formats are decoys and excluded by the cutoff.
   const isTpSignal = tpCount >= 3;
-  const searchRegion = isTpSignal && firstTpIndex !== null ? primaryText.slice(0, firstTpIndex) : primaryText;
-  const ticker = extractTicker(searchRegion);
+  const gemResult = isTpSignal ? { entry: null, priceIndex: null } : extractGemEntry(primaryText);
+  const entry = gemResult.entry;
 
-  const entry = isTpSignal ? null : extractGemEntry(primaryText);
+  const searchRegion =
+    isTpSignal && firstTpIndex !== null
+      ? primaryText.slice(0, firstTpIndex)
+      : !isTpSignal && gemResult.priceIndex !== null
+        ? primaryText.slice(0, gemResult.priceIndex)
+        : primaryText;
+
+  const ticker = extractTicker(searchRegion);
   const format: SignalFormat | null = isTpSignal ? 'tp' : entry !== null ? 'gem' : null;
   const isSignal = ticker !== null && format !== null;
 

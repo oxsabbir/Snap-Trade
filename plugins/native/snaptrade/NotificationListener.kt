@@ -155,15 +155,20 @@ class NotificationListener : NotificationListenerService() {
         val tpsResult = extractTps(primaryText)
         val tps = tpsResult.tps
         val isTpSignal = tps.size >= 3
-        val searchRegion = if (isTpSignal && tpsResult.firstTpIndex != null) {
-            primaryText.substring(0, tpsResult.firstTpIndex)
-        } else {
-            primaryText
+        val hasGemMarker = hasGemMarker(primaryText)
+        val gemResult = if (!isTpSignal) extractGemPrice(primaryText) else GemResult(null, null)
+        val entryPrice = gemResult.price
+
+        val searchRegion = when {
+            isTpSignal && tpsResult.firstTpIndex != null ->
+                primaryText.substring(0, tpsResult.firstTpIndex)
+            !isTpSignal && gemResult.priceIndex != null ->
+                primaryText.substring(0, gemResult.priceIndex)
+            else ->
+                primaryText
         }
 
         val ticker = extractTicker(searchRegion)
-        val hasGemMarker = hasGemMarker(primaryText)
-        val entryPrice = if (!isTpSignal) extractGemPrice(primaryText) else null
         log(
             "SignalParse",
             "ticker=${ticker ?: "none"}, tps=${tps.size}, gemMarker=$hasGemMarker, " +
@@ -343,25 +348,33 @@ class NotificationListener : NotificationListenerService() {
         return if (value.isFinite()) value else null
     }
 
+    private data class GemResult(
+        val price: String?,
+        val priceIndex: Int?
+    )
+
     /**
      * Gem-format anchor: returns the posted market price as a plain decimal string, or null
      * unless the post carries both the constant marker phrase and a parseable price line —
-     * a stray "current market price" mention without the marker is not a signal.
+     * a stray "current market price" mention without the marker is not a signal. Also captures
+     * the start position of the price line so trailing cashtags after it are excluded from
+     * ticker extraction.
      */
-    private fun extractGemPrice(text: String): String? {
-        if (text.isBlank()) return null
-        if (!hasGemMarker(text)) return null
+    private fun extractGemPrice(text: String): GemResult {
+        if (text.isBlank() || !hasGemMarker(text)) return GemResult(null, null)
 
         val matcher = gemPricePattern.matcher(text)
-        if (!matcher.find()) return null
+        if (!matcher.find()) return GemResult(null, null)
 
+        val priceIndex = matcher.start()
         // Comma decimal separator to dot; BigDecimal keeps the posted precision as-is.
-        val normalized = matcher.group(1)?.replace(',', '.')?.trim() ?: return null
-        return try {
+        val normalized = matcher.group(1)?.replace(',', '.')?.trim() ?: return GemResult(null, priceIndex)
+        val plain = try {
             java.math.BigDecimal(normalized).toPlainString()
         } catch (e: NumberFormatException) {
             null
         }
+        return GemResult(plain, priceIndex)
     }
 
     private fun hasGemMarker(text: String): Boolean {
