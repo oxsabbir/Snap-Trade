@@ -1,24 +1,17 @@
-import {
-  memo } from 'react';
+import { memo } from 'react';
 import { View } from '@/components/AppLayout';
 import { StyleSheet } from 'react-native';
 import { Text } from '@/components/AppText';
 
 import { CoinAvatar } from '@/components/CoinAvatar';
 import type { Holding, WalletKind } from '@/lib/kucoin/types';
-import { spacing } from '@/theme';
-import { useTheme } from '@/theme/ThemeProvider';
+import { radius, spacing } from '@/theme';
 import { createThemedStyles } from '@/theme/themedStyles';
 import { formatAmount, formatPrice } from '@/utils/format';
 import { useBalanceVisibility } from '@/state/balanceVisibility';
 
-/** `all` shows the rolled-up row; a wallet kind shows only that wallet's slice. */
 export type AssetScope = 'all' | WalletKind;
 
-const WALLET_HINT: Record<WalletKind, string> = {
-  funding: 'Your main wallet',
-  trading: 'Available to trade',
-};
 const MASK = '••••••';
 
 type Props = {
@@ -27,73 +20,114 @@ type Props = {
 };
 
 function AssetRowComponent({ holding, scope }: Props) {
-  const { colors } = useTheme();
   const { balancesVisible } = useBalanceVisibility();
   const styles = useStyles();
+
   const slice = scope === 'all' ? null : holding[scope];
   const balance = slice ? slice.balance : holding.balance;
   const value = slice ? slice.value : holding.value;
   const holds = slice ? slice.holds : holding.holds;
 
-  // A row only earns the split treatment when the currency is genuinely in both
-  // wallets, and only in the rolled-up view. Narrowed here so nothing below needs
-  // a non-null assertion.
   const { funding, trading } = holding;
-  let fundingShare = 1;
-  let splitText: string | null = null;
-
-  if (scope === 'all' && funding && trading) {
-    const combined = funding.value + trading.value;
-    fundingShare = combined > 0 ? funding.value / combined : 1;
-    splitText = balancesVisible
-      ? `${formatAmount(funding.balance)} funding · ${formatAmount(trading.balance)} trading`
-      : `${MASK} funding · ${MASK} trading`;
-  }
-
-  let subtitle: string;
-  if (splitText) {
-    subtitle = holds > 0 ? `${splitText} · ${balancesVisible ? formatAmount(holds) : MASK} on hold` : splitText;
-  } else if (scope !== 'all') {
-    subtitle = holds > 0 ? `${WALLET_HINT[scope]} · ${balancesVisible ? formatAmount(holds) : MASK} on hold` : WALLET_HINT[scope];
-  } else if (holding.price <= 0) {
-    subtitle = 'No priceable pair';
-  } else if (holds > 0) {
-    subtitle = `${balancesVisible ? formatAmount(holds) : MASK} on hold · ${balancesVisible ? `≈ $${formatPrice(holding.price)}` : MASK}`;
-  } else {
-    subtitle = balancesVisible ? `≈ $${formatPrice(holding.price)}` : MASK;
-  }
+  const hasFunding = Boolean(funding && funding.balance > 0);
+  const hasTrading = Boolean(trading && trading.balance > 0);
+  const isSplit = scope === 'all' && hasFunding && hasTrading;
+  const isOnlyFunding = scope === 'all' && hasFunding && !hasTrading;
+  const isOnlyTrading = scope === 'all' && hasTrading && !hasFunding;
 
   return (
-    <View style={styles.row}>
-      <CoinAvatar symbol={holding.currency} />
+    <View style={styles.card}>
+      {/* Top Main Row */}
+      <View style={styles.mainRow}>
+        <CoinAvatar symbol={holding.currency} size={38} />
 
-      <View style={styles.identity}>
-        <Text style={styles.currency} numberOfLines={1}>
-          {holding.currency}
-        </Text>
-        <Text style={styles.subtitle} numberOfLines={1}>
-          {subtitle}
-        </Text>
-        {splitText && balancesVisible ? (
-          <View
-            style={styles.splitTrack}
-            accessibilityRole="image"
-            accessibilityLabel="Split between funding and trading"
-          >
-            <View style={[styles.splitSegment, { flex: fundingShare, backgroundColor: colors.accent }]} />
-            <View style={[styles.splitSegment, { flex: 1 - fundingShare, backgroundColor: colors.accentSoft }]} />
+        <View style={styles.identity}>
+          <View style={styles.currencyRow}>
+            <Text style={styles.currency} numberOfLines={1}>
+              {holding.currency}
+            </Text>
+            {isOnlyTrading ? (
+              <View style={[styles.badge, styles.badgeTrading]}>
+                <Text style={styles.badgeTradingText}>Trading</Text>
+              </View>
+            ) : isOnlyFunding ? (
+              <View style={[styles.badge, styles.badgeFunding]}>
+                <Text style={styles.badgeFundingText}>Funding</Text>
+              </View>
+            ) : null}
           </View>
-        ) : null}
+          <Text style={styles.price} numberOfLines={1}>
+            {holding.price > 0
+              ? balancesVisible
+                ? `≈ $${formatPrice(holding.price)}`
+                : MASK
+              : 'No pair'}
+          </Text>
+        </View>
+
+        <View style={styles.valueBlock}>
+          <Text style={styles.value} numberOfLines={1}>
+            {holding.price > 0 ? (balancesVisible ? `$${formatPrice(value, 2)}` : MASK) : '—'}
+          </Text>
+          <Text style={styles.amount} numberOfLines={1}>
+            {balancesVisible ? `${formatAmount(balance)} ${holding.currency}` : MASK}
+          </Text>
+        </View>
       </View>
 
-      <View style={styles.valueBlock}>
-        <Text style={styles.amount} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>
-          {balancesVisible ? formatAmount(balance) : MASK}
-        </Text>
-        <Text style={styles.value} numberOfLines={1}>
-          {holding.price > 0 ? (balancesVisible ? `$${formatPrice(value, 2)}` : MASK) : '—'}
-        </Text>
-      </View>
+      {/* Dedicated Wallet Breakdown: Rendered cleanly when balance is split across wallets or has holds */}
+      {scope === 'all' && (isSplit || holds > 0) ? (
+        <View style={styles.breakdown}>
+          <View style={styles.breakdownList}>
+            {hasTrading ? (
+              <View style={styles.breakdownItem}>
+                <Text style={styles.breakdownLabel}>Trading</Text>
+                <Text style={styles.breakdownValue} numberOfLines={1}>
+                  {balancesVisible ? formatAmount(trading!.balance) : MASK}
+                </Text>
+              </View>
+            ) : null}
+
+            {hasFunding ? (
+              <View style={styles.breakdownItem}>
+                <Text style={styles.breakdownLabel}>Funding</Text>
+                <Text style={styles.breakdownValue} numberOfLines={1}>
+                  {balancesVisible ? formatAmount(funding!.balance) : MASK}
+                </Text>
+              </View>
+            ) : null}
+
+            {holds > 0 ? (
+              <View style={[styles.breakdownItem, styles.breakdownItemLocked]}>
+                <Text style={styles.lockedLabel}>In Orders</Text>
+                <Text style={styles.lockedValue} numberOfLines={1}>
+                  {balancesVisible ? formatAmount(holds) : MASK}
+                </Text>
+              </View>
+            ) : null}
+          </View>
+        </View>
+      ) : null}
+
+      {/* Filtered view (Trading or Funding tab selected) with active holds */}
+      {scope !== 'all' && holds > 0 ? (
+        <View style={styles.breakdown}>
+          <View style={styles.breakdownList}>
+            <View style={styles.breakdownItem}>
+              <Text style={styles.breakdownLabel}>Available</Text>
+              <Text style={styles.breakdownValue} numberOfLines={1}>
+                {balancesVisible ? formatAmount(slice?.available ?? 0) : MASK}
+              </Text>
+            </View>
+            <View style={[styles.breakdownItem, styles.breakdownItemLocked]}>
+              <Text style={styles.lockedLabel}>In Orders</Text>
+              <Text style={styles.lockedValue} numberOfLines={1}>
+                {balancesVisible ? formatAmount(holds) : MASK}
+              </Text>
+            </View>
+          </View>
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -102,50 +136,121 @@ export const AssetRow = memo(AssetRowComponent);
 
 const useStyles = createThemedStyles((colors) =>
   StyleSheet.create({
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: spacing.md,
-    gap: spacing.md,
-  },
-  identity: {
-    flex: 1,
-    gap: 3,
-  },
-  currency: {
-    color: colors.text,
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  subtitle: {
-    color: colors.textFaint,
-    fontSize: 11,
-  },
-  splitTrack: {
-    flexDirection: 'row',
-    height: 3,
-    borderRadius: 2,
-    overflow: 'hidden',
-    marginTop: 3,
-    gap: 1.5,
-  },
-  splitSegment: {
-    height: 3,
-  },
-  valueBlock: {
-    alignItems: 'flex-end',
-    gap: 2,
-  },
-  amount: {
-    color: colors.text,
-    fontSize: 15,
-    fontWeight: '600',
-    fontVariant: ['tabular-nums'],
-  },
-  value: {
-    color: colors.textMuted,
-    fontSize: 11,
-    fontVariant: ['tabular-nums'],
-  },
-  }),
+    card: {
+      backgroundColor: colors.surface,
+      borderRadius: radius.md,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.border,
+      padding: spacing.md,
+    },
+    mainRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.md,
+    },
+    identity: {
+      flex: 1,
+      gap: 3,
+    },
+    currencyRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+    },
+    currency: {
+      color: colors.text,
+      fontSize: 16,
+      fontWeight: '700',
+    },
+    badge: {
+      paddingHorizontal: 6,
+      paddingVertical: 1.5,
+      borderRadius: 4,
+    },
+    badgeTrading: {
+      backgroundColor: colors.upFill,
+    },
+    badgeTradingText: {
+      color: colors.upText,
+      fontSize: 10,
+      fontWeight: '700',
+    },
+    badgeFunding: {
+      backgroundColor: colors.surfaceAlt,
+    },
+    badgeFundingText: {
+      color: colors.textMuted,
+      fontSize: 10,
+      fontWeight: '600',
+    },
+    price: {
+      color: colors.textFaint,
+      fontSize: 12,
+      fontVariant: ['tabular-nums'],
+    },
+    valueBlock: {
+      alignItems: 'flex-end',
+      gap: 2,
+    },
+    value: {
+      color: colors.text,
+      fontSize: 16,
+      fontWeight: '700',
+      fontVariant: ['tabular-nums'],
+    },
+    amount: {
+      color: colors.textMuted,
+      fontSize: 12,
+      fontVariant: ['tabular-nums'],
+    },
+    breakdown: {
+      marginTop: spacing.sm,
+      paddingTop: spacing.xs,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: colors.border,
+    },
+    breakdownList: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.xs,
+      paddingTop: 4,
+    },
+    breakdownItem: {
+      flex: 1,
+      backgroundColor: colors.surfaceAlt,
+      borderRadius: radius.sm,
+      paddingHorizontal: 8,
+      paddingVertical: 5,
+      gap: 1,
+    },
+    breakdownItemLocked: {
+      backgroundColor: colors.downFill,
+    },
+    breakdownLabel: {
+      color: colors.textMuted,
+      fontSize: 9,
+      fontWeight: '600',
+      textTransform: 'uppercase',
+      letterSpacing: 0.3,
+    },
+    breakdownValue: {
+      color: colors.text,
+      fontSize: 12,
+      fontWeight: '700',
+      fontVariant: ['tabular-nums'],
+    },
+    lockedLabel: {
+      color: colors.downText,
+      fontSize: 9,
+      fontWeight: '700',
+      textTransform: 'uppercase',
+      letterSpacing: 0.3,
+    },
+    lockedValue: {
+      color: colors.downText,
+      fontSize: 12,
+      fontWeight: '700',
+      fontVariant: ['tabular-nums'],
+    },
+  })
 );

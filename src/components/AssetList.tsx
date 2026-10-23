@@ -195,10 +195,7 @@ const useStyles = createThemedStyles((colors) =>
     color: colors.accent,
   },
   body: {
-    backgroundColor: colors.surface,
-    borderRadius: radius.md,
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.sm,
+    gap: spacing.sm,
   },
   empty: {
     color: colors.textFaint,
