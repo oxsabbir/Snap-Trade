@@ -27,7 +27,13 @@ export const FloatingOrderBar = memo(function FloatingOrderBar({ symbol }: Props
   const { orders, cancelling, cancelOrder } = useOpenOrders();
 
   const symbolOrders = useMemo(
-    () => orders.filter((o) => o.symbol === symbol && !isTerminalStatus(o.status)),
+    () =>
+      orders.filter(
+        (o) =>
+          o.symbol === symbol &&
+          !isTerminalStatus(o.status) &&
+          filledFraction(o) < 1,
+      ),
     [orders, symbol],
   );
 
