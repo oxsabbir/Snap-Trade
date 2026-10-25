@@ -97,7 +97,7 @@ const DepthRowView = memo(function DepthRowView({
           <OrderMarkerIcon
             size={7}
             color={markerColor}
-            direction={side === "ask" ? "down" : "up"}
+            direction="left"
           />
         ) : null}
       </View>
