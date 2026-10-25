@@ -242,6 +242,28 @@ export function CaretDownIcon({ size = 12, color }: IconProps) {
   );
 }
 
+export function OrderMarkerIcon({
+  size = 8,
+  color,
+  direction = "right",
+}: IconProps & { direction?: "right" | "up" | "down" }) {
+  const { scheme } = useTheme();
+  const fill = color ?? (scheme === "dark" ? "#F5A623" : "#D97706");
+
+  const path =
+    direction === "up"
+      ? "M1.6 7.8C1.05 7.8 0.75 7.2 1.05 6.75L4.45 1.8C4.7 1.4 5.3 1.4 5.55 1.8L8.95 6.75C9.25 7.2 8.95 7.8 8.4 7.8H1.6Z"
+      : direction === "down"
+        ? "M1.6 2.2C1.05 2.2 0.75 2.8 1.05 3.25L4.45 8.2C4.7 8.6 5.3 8.6 5.55 8.2L8.95 3.25C9.25 2.8 8.95 2.2 8.4 2.2H1.6Z"
+        : "M2.2 1.6C2.2 1.05 2.8 0.75 3.25 1.05L8.2 4.45C8.6 4.7 8.6 5.3 8.2 5.55L3.25 8.95C2.8 9.25 2.2 8.95 2.2 8.4V1.6Z";
+
+  return (
+    <ScaledSvg width={size} height={size} viewBox="0 0 10 10" fill="none">
+      <Path d={path} fill={fill} />
+    </ScaledSvg>
+  );
+}
+
 export function LayersIcon({ size = 14, color }: IconProps) {
   const { colors } = useTheme();
   const stroke = color ?? colors.textMuted;

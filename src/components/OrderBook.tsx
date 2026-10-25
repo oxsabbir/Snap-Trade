@@ -10,6 +10,7 @@ import {
   CaretDownIcon,
   CaretUpIcon,
   LayersIcon,
+  OrderMarkerIcon,
   RowsIcon,
 } from "@/components/Icons";
 import { MidPrice } from "@/components/MidPrice";
@@ -56,10 +57,11 @@ const DepthRowView = memo(function DepthRowView({
   hasUserOrder = false,
   onPress,
 }: RowProps) {
-  const { colors } = useTheme();
+  const { colors, scheme } = useTheme();
   const styles = useStyles();
   const priceColor = side === "ask" ? colors.downText : colors.upText;
   const fill = side === "ask" ? colors.downFill : colors.upFill;
+  const markerColor = scheme === "dark" ? "#F5A623" : "#D97706";
   return (
     // `onPress` fires on release, not on touch-down, and that is deliberate. The rows sit
     // inside the screen's scroll view, so firing on press-in would fill the form every time
@@ -82,12 +84,9 @@ const DepthRowView = memo(function DepthRowView({
         ]}
       />
       {hasUserOrder ? (
-        <View
-          style={[
-            styles.userOrderDot,
-            { backgroundColor: priceColor },
-          ]}
-        />
+        <View style={styles.userOrderMarker}>
+          <OrderMarkerIcon size={8} color={markerColor} />
+        </View>
       ) : null}
       <Text style={[styles.priceText, { color: priceColor }]} numberOfLines={1}>
         {formatPrice(Number(row.price), priceDecimals)}
@@ -340,7 +339,7 @@ const useStyles = createThemedStyles((colors) =>
       alignItems: "center",
       justifyContent: "space-between",
       paddingBottom: spacing.xs,
-      paddingLeft: 8,
+      paddingLeft: 11,
     },
     headerText: {
       color: colors.textFaint,
@@ -370,16 +369,17 @@ const useStyles = createThemedStyles((colors) =>
       justifyContent: "space-between",
       overflow: "hidden",
       position: "relative",
-      paddingLeft: 8,
+      paddingLeft: 11,
     },
-    userOrderDot: {
+    userOrderMarker: {
       position: "absolute",
       left: 1,
       top: "50%",
-      marginTop: -2.5,
-      width: 5,
-      height: 5,
-      borderRadius: 2.5,
+      marginTop: -4,
+      width: 8,
+      height: 8,
+      alignItems: "center",
+      justifyContent: "center",
       zIndex: 2,
     },
     fill: {
