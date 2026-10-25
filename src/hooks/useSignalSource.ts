@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { NativeModules, Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+import { SIGNAL_DETECTION_ENABLED } from '@/lib/featureFlags';
+
 const STORAGE_KEY_ENABLED = 'signal_detection_enabled';
 const STORAGE_KEY_DISPLAY_NAME = 'signal_source:display-name';
 const DEFAULT_DISPLAY_NAME = 'Trader';
@@ -25,6 +27,19 @@ function mirrorToNative(enabled: boolean, displayName: string): void {
   void NotificationListenerModule.syncSignalSettings(enabled, displayName).catch(() => undefined);
 }
 
+/**
+ * Explicitly disables signal detection in native SharedPreferences and local storage.
+ * Called when EXPO_PUBLIC_SIGNAL_DETECTION is false so existing native builds stop detecting.
+ */
+export function disableSignalDetection(): void {
+  void AsyncStorage.setItem(STORAGE_KEY_ENABLED, 'false').catch(() => undefined);
+  mirrorToNative(false, '');
+}
+
+export function syncSignalSettings(enabled: boolean, displayName: string = ''): void {
+  mirrorToNative(enabled, displayName);
+}
+
 export type SignalSourceState = {
   displayName: string;
   setDisplayName: (value: string) => void;
@@ -33,12 +48,19 @@ export type SignalSourceState = {
   isLoading: boolean;
 };
 
-/**
- * Manages signal detection settings: enabled state and display name for the signal source.
- * Both values are persisted in AsyncStorage and mirrored into the native listener's
- * SharedPreferences so detection still works when the app process is not running.
- */
-export function useSignalSource(): SignalSourceState {
+const DISABLED_SIGNAL_SOURCE: SignalSourceState = {
+  displayName: DEFAULT_DISPLAY_NAME,
+  setDisplayName: () => {},
+  isEnabled: false,
+  setIsEnabled: () => {},
+  isLoading: false,
+};
+
+function useSignalSourceDisabled(): SignalSourceState {
+  return DISABLED_SIGNAL_SOURCE;
+}
+
+function useSignalSourceActive(): SignalSourceState {
   const [displayName, setName] = useState(DEFAULT_DISPLAY_NAME);
   const [isEnabled, setEnabled] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -99,3 +121,12 @@ export function useSignalSource(): SignalSourceState {
 
   return { displayName, setDisplayName, isEnabled, setIsEnabled, isLoading };
 }
+
+/**
+ * Manages signal detection settings: enabled state and display name for the signal source.
+ * Both values are persisted in AsyncStorage and mirrored into the native listener's
+ * SharedPreferences so detection still works when the app process is not running.
+ */
+export const useSignalSource = SIGNAL_DETECTION_ENABLED
+  ? useSignalSourceActive
+  : useSignalSourceDisabled;
