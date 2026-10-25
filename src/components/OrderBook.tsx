@@ -14,12 +14,15 @@ import {
 } from "@/components/Icons";
 import { MidPrice } from "@/components/MidPrice";
 import { useLevel2Book } from "@/hooks/useLevel2Book";
+import { useOpenOrders } from "@/hooks/useOpenOrders";
 import { useOrderBook } from "@/hooks/useOrderBook";
 import { useSymbolRules } from "@/hooks/useSymbolRules";
 import { aggregationOptions, VISIBLE_LEVELS, type DepthRow } from "@/lib/kucoin/orderbook";
+import { isTerminalStatus } from "@/state/openOrders";
 import { radius, spacing } from "@/theme";
 import { useTheme } from "@/theme/ThemeProvider";
 import { createThemedStyles } from "@/theme/themedStyles";
+import { snapToIncrement } from "@/utils/decimal";
 import { decimalsFromIncrement, formatCompactSize, formatPrice } from "@/utils/format";
 
 export type OrderBookViewMode = "split" | "bids" | "asks";
@@ -41,6 +44,7 @@ type RowProps = {
   side: "ask" | "bid";
   priceDecimals: number;
   sizeDecimals: number;
+  hasUserOrder?: boolean;
   onPress: (price: string) => void;
 };
 
@@ -49,6 +53,7 @@ const DepthRowView = memo(function DepthRowView({
   side,
   priceDecimals,
   sizeDecimals,
+  hasUserOrder = false,
   onPress,
 }: RowProps) {
   const { colors } = useTheme();
@@ -68,7 +73,7 @@ const DepthRowView = memo(function DepthRowView({
       onPress={() => onPress(row.price)}
       style={styles.row}
       accessibilityRole="button"
-      accessibilityLabel={`Price ${row.price}, total ${row.total}`}
+      accessibilityLabel={`Price ${row.price}, total ${row.total}${hasUserOrder ? ", your order placed" : ""}`}
     >
       <View
         style={[
@@ -76,6 +81,14 @@ const DepthRowView = memo(function DepthRowView({
           { width: `${row.percent}%`, backgroundColor: fill },
         ]}
       />
+      {hasUserOrder ? (
+        <View
+          style={[
+            styles.userOrderDot,
+            { backgroundColor: priceColor },
+          ]}
+        />
+      ) : null}
       <Text style={[styles.priceText, { color: priceColor }]} numberOfLines={1}>
         {formatPrice(Number(row.price), priceDecimals)}
       </Text>
@@ -104,6 +117,7 @@ function OrderBookBase({ symbol, onPriceSelect }: Props) {
   const styles = useStyles();
   const { snapshot } = useLevel2Book(symbol);
   const { rules } = useSymbolRules(symbol);
+  const { orders } = useOpenOrders();
   const [baseCurrency = "", quoteCurrency = ""] = symbol.split("-");
 
   const [aggregation, setAggregation] = useState("0.000001");
@@ -132,6 +146,33 @@ function OrderBookBase({ symbol, onPriceSelect }: Props) {
   const priceDecimals = decimalsFromIncrement(tickSize);
   const sizeDecimals = decimalsFromIncrement(baseIncrement);
 
+  /** Set of user's active order price buckets for instant dot indicator matching */
+  const userOrderPrices = useMemo(() => {
+    const askPrices = new Set<string>();
+    const bidPrices = new Set<string>();
+
+    for (const order of orders) {
+      if (order.symbol !== symbol || isTerminalStatus(order.status)) continue;
+      const bucket = snapToIncrement(order.price, aggregation, "floor") ?? order.price;
+      const normalizedOrderPrice = Number(order.price).toString();
+      const normalizedBucket = Number(bucket).toString();
+
+      if (order.side === "sell") {
+        askPrices.add(order.price);
+        askPrices.add(bucket);
+        askPrices.add(normalizedOrderPrice);
+        askPrices.add(normalizedBucket);
+      } else if (order.side === "buy") {
+        bidPrices.add(order.price);
+        bidPrices.add(bucket);
+        bidPrices.add(normalizedOrderPrice);
+        bidPrices.add(normalizedBucket);
+      }
+    }
+
+    return { askPrices, bidPrices };
+  }, [orders, symbol, aggregation]);
+
   const cycleView = () => {
     setViewMode(
       (current) =>
@@ -150,16 +191,22 @@ function OrderBookBase({ symbol, onPriceSelect }: Props) {
 
       {viewMode !== "bids" ? (
         <View style={styles.asks}>
-          {[...depth.asks].reverse().map((row, index) => (
-            <DepthRowView
-              key={`ask:${depth.asks.length - 1 - index}`}
-              row={row}
-              side="ask"
-              priceDecimals={priceDecimals}
-              sizeDecimals={sizeDecimals}
-              onPress={onPriceSelect}
-            />
-          ))}
+          {[...depth.asks].reverse().map((row, index) => {
+            const hasOrder =
+              userOrderPrices.askPrices.has(row.price) ||
+              userOrderPrices.askPrices.has(Number(row.price).toString());
+            return (
+              <DepthRowView
+                key={`ask:${depth.asks.length - 1 - index}`}
+                row={row}
+                side="ask"
+                priceDecimals={priceDecimals}
+                sizeDecimals={sizeDecimals}
+                hasUserOrder={hasOrder}
+                onPress={onPriceSelect}
+              />
+            );
+          })}
         </View>
       ) : null}
 
@@ -172,16 +219,22 @@ function OrderBookBase({ symbol, onPriceSelect }: Props) {
 
       {viewMode !== "asks" ? (
         <View style={styles.bids}>
-          {depth.bids.map((row, index) => (
-            <DepthRowView
-              key={`bid:${index}`}
-              row={row}
-              side="bid"
-              priceDecimals={priceDecimals}
-              sizeDecimals={sizeDecimals}
-              onPress={onPriceSelect}
-            />
-          ))}
+          {depth.bids.map((row, index) => {
+            const hasOrder =
+              userOrderPrices.bidPrices.has(row.price) ||
+              userOrderPrices.bidPrices.has(Number(row.price).toString());
+            return (
+              <DepthRowView
+                key={`bid:${index}`}
+                row={row}
+                side="bid"
+                priceDecimals={priceDecimals}
+                sizeDecimals={sizeDecimals}
+                hasUserOrder={hasOrder}
+                onPress={onPriceSelect}
+              />
+            );
+          })}
         </View>
       ) : null}
 
@@ -287,6 +340,7 @@ const useStyles = createThemedStyles((colors) =>
       alignItems: "center",
       justifyContent: "space-between",
       paddingBottom: spacing.xs,
+      paddingLeft: 8,
     },
     headerText: {
       color: colors.textFaint,
@@ -296,6 +350,7 @@ const useStyles = createThemedStyles((colors) =>
     },
     headerRight: {
       textAlign: "right",
+      paddingRight: 2,
     },
     // Each side grows into whatever height the taller column leaves it, anchored against the middle
     // price band: asks sit on top of it and bids under it, so the extra space falls at the far
@@ -314,6 +369,18 @@ const useStyles = createThemedStyles((colors) =>
       alignItems: "center",
       justifyContent: "space-between",
       overflow: "hidden",
+      position: "relative",
+      paddingLeft: 8,
+    },
+    userOrderDot: {
+      position: "absolute",
+      left: 1,
+      top: "50%",
+      marginTop: -2.5,
+      width: 5,
+      height: 5,
+      borderRadius: 2.5,
+      zIndex: 2,
     },
     fill: {
       position: "absolute",
