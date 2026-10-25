@@ -261,12 +261,9 @@ function TradePanelBase({
   };
 
   /**
-   * The slider spends a percentage of the balance, so it is only meaningful once the two things that
-   * percentage is measured against both exist: a price to spend at, and a balance to spend from.
-   *
-   * Without them `fillByPercent` returns nothing, so the handle used to slide while Amount and Total
-   * stayed empty, which read as a broken control rather than an incomplete one. Naming the missing
-   * piece keeps the reason visible instead of leaving a dead slider to guess at.
+   * The percentage chips divide the available balance, and remain selectable even before a price
+   * is chosen. When tapped without a price, the selected percentage is held active; once a price
+   * is selected (from the order book or typed), the amount and total are calculated immediately.
    */
   const hasPrice = isPositive(price);
   const hasBalance = isPositive(availableForSide);
@@ -274,9 +271,7 @@ function TradePanelBase({
     ? "Loading pair rules"
     : !hasBalance
       ? `No ${availableCurrency} available to ${side === "buy" ? "buy" : "sell"}`
-      : !hasPrice
-        ? "Enter a price first"
-        : null;
+      : null;
   const chipEnabled = chipBlocker === null && !isSubmitting;
 
   const applyPercent = (next: FillPercent) => {
@@ -288,6 +283,31 @@ function TradePanelBase({
     setPercent(next);
     setInlineError(null);
     if (!rules) return;
+
+    if (!hasPrice) {
+      if (side === "sell") {
+        const filled = fillByPercent(
+          side,
+          next,
+          rules,
+          "0",
+          {
+            base: baseAvailable,
+            quote: quoteAvailable,
+          },
+          effectiveFeeRate,
+        );
+        if (filled) {
+          setSize(filled.size);
+          setTotal("");
+        }
+      } else {
+        setSize("");
+        setTotal("");
+      }
+      return;
+    }
+
     const filled = fillByPercent(
       side,
       next,
@@ -307,8 +327,25 @@ function TradePanelBase({
   const onPriceChange = (text: string) => {
     const clean = sanitizeAmount(text);
     setPrice(clean);
-    clearPercent();
     setInlineError(null);
+    if (percent !== null && isPositive(clean) && rules) {
+      const filled = fillByPercent(
+        side,
+        percent,
+        rules,
+        clean,
+        {
+          base: baseAvailable,
+          quote: quoteAvailable,
+        },
+        effectiveFeeRate,
+      );
+      if (filled) {
+        setSize(filled.size);
+        setTotal(filled.total);
+        return;
+      }
+    }
     syncTotal(clean, size);
   };
 
@@ -335,14 +372,32 @@ function TradePanelBase({
 
   const onStep = (field: "price" | "size" | "total", direction: 1 | -1) => {
     if (!rules) return;
-    clearPercent();
     setInlineError(null);
     if (field === "price") {
       const next = stepAmount(price, rules.priceIncrement, direction);
       setPrice(next);
+      if (percent !== null && isPositive(next) && rules) {
+        const filled = fillByPercent(
+          side,
+          percent,
+          rules,
+          next,
+          {
+            base: baseAvailable,
+            quote: quoteAvailable,
+          },
+          effectiveFeeRate,
+        );
+        if (filled) {
+          setSize(filled.size);
+          setTotal(filled.total);
+          return;
+        }
+      }
       syncTotal(next, size);
       return;
     }
+    clearPercent();
     if (field === "size") {
       const next = stepAmount(size, rules.baseIncrement, direction);
       setSize(next);
@@ -367,19 +422,9 @@ function TradePanelBase({
    * Memoized so the 6 fillByPercent calls run only when deps change, not every render.
    */
   const activeChip = useMemo((): number | null => {
-    if (!rules || !hasPrice || !hasBalance || size === "") return null;
-    const filled = fillByPercent(
-      side,
-      percent!,
-      rules,
-      price,
-      {
-        base: baseAvailable,
-        quote: quoteAvailable,
-      },
-      effectiveFeeRate,
-    );
-    if (!filled) return null;
+    if (!rules || !hasBalance) return null;
+    if (!hasPrice) return percent;
+    if (size === "") return percent;
     // Check if current size matches any chip's calculated size exactly
     for (const chip of PERCENT_CHIPS) {
       const chipFilled = fillByPercent(
@@ -395,7 +440,7 @@ function TradePanelBase({
       );
       if (chipFilled && chipFilled.size === size) return chip;
     }
-    return null;
+    return percent;
   }, [
     rules,
     hasPrice,
