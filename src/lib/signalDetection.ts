@@ -41,6 +41,160 @@ export const IGNORED_TAGS = new Set([
   'STOPLOSS',
 ]);
 
+export const IGNORED_WORDS = new Set([
+  ...IGNORED_TAGS,
+  'DEX',
+  'CEX',
+  'UNISWAP',
+  'PANCAKESWAP',
+  'CALL',
+  'CALLS',
+  'PREMIUM',
+  'ALERT',
+  'ALERTS',
+  'UPDATE',
+  'UPDATES',
+  'NEWS',
+  'TRADE',
+  'TRADES',
+  'TRADING',
+  'SETUP',
+  'SETUPS',
+  'BUY',
+  'BUYING',
+  'BOUGHT',
+  'SELL',
+  'SELLING',
+  'SOLD',
+  'LONG',
+  'SHORT',
+  'SPOT',
+  'FUTURES',
+  'FUTURE',
+  'HOLD',
+  'HODL',
+  'ENTRIES',
+  'STOP',
+  'LOSS',
+  'TP',
+  'SL',
+  'PROFIT',
+  'PROFITS',
+  'LEVERAGE',
+  'MARGIN',
+  'RISK',
+  'MARKET',
+  'MARKETS',
+  'MCAP',
+  'MC',
+  'CAP',
+  'CAPITAL',
+  'PRICE',
+  'PRICES',
+  'VOLUME',
+  'VOL',
+  'HIGH',
+  'LOW',
+  'ATH',
+  'GEM',
+  'GEMS',
+  'COIN',
+  'COINS',
+  'TOKEN',
+  'TOKENS',
+  'PAIR',
+  'PAIRS',
+  'ALTCOIN',
+  'ALTCOINS',
+  'CRYPTO',
+  'CRYPTOS',
+  'PROJECT',
+  'PROJECTS',
+  'ALPHA',
+  'BETA',
+  'BULLISH',
+  'BEARISH',
+  'PUMP',
+  'PUMPING',
+  'DUMP',
+  'MOON',
+  'ROCKET',
+  'BOMB',
+  'LISTING',
+  'LISTED',
+  'LAUNCH',
+  'PRESALE',
+  'TODAY',
+  'TONIGHT',
+  'DAILY',
+  'WEEKLY',
+  'MONTHLY',
+  'NOW',
+  'SOON',
+  'HERE',
+  'NEXT',
+  'NEW',
+  'FIRST',
+  'LAST',
+  'BEST',
+  'TOP',
+  'BIG',
+  'HUGE',
+  'MASSIVE',
+  'EASY',
+  'GOOD',
+  'GREAT',
+  'SUPER',
+  'FREE',
+  'ON',
+  'IN',
+  'AT',
+  'TO',
+  'FOR',
+  'OF',
+  'WITH',
+  'FROM',
+  'BY',
+  'THE',
+  'THIS',
+  'THAT',
+  'THESE',
+  'THOSE',
+  'A',
+  'AN',
+  'AND',
+  'OR',
+  'IS',
+  'ARE',
+  'WAS',
+  'WERE',
+  'HAVE',
+  'HAS',
+  'HAD',
+  'WILL',
+  'CAN',
+  'COULD',
+  'WOULD',
+  'SHOULD',
+  'ABOUT',
+  'INTO',
+  'OVER',
+  'AFTER',
+  'BEFORE',
+  'UNDER',
+  'ABOVE',
+  'MORNING',
+  'EVENING',
+  'NIGHT',
+  'TRADERS',
+  'HELLO',
+  'HEY',
+  'CHECK',
+  'WATCH',
+  'LOOK',
+  'READY',
+]);
+
 function normalizeNumber(str: string): number | null {
   if (!str) return null;
   const normalized = str.replace(',', '.');
@@ -48,6 +202,33 @@ function normalizeNumber(str: string): number | null {
   if (!match) return null;
   const num = parseFloat(normalized);
   return Number.isFinite(num) ? num : null;
+}
+
+function extractFallbackTicker(text: string): string | null {
+  // Cutoff before Market Cap (MC, MCAP, Market Cap)
+  const mcMatch = text.search(/\b(?:MC|MCAP|MARKET\s*CAP)\b/i);
+  const region = mcMatch !== -1 ? text.slice(0, mcMatch) : text;
+
+  // Scan lines from top to bottom
+  const lines = region.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+
+  for (const line of lines) {
+    // Extract candidate words (letters + optional digits, starting with a letter)
+    const words = line.match(/\b[A-Za-z][A-Za-z0-9]*\b/g);
+    if (!words) continue;
+
+    // Filter out ignored words
+    const candidates = words
+      .map((w) => w.toUpperCase())
+      .filter((w) => w.length >= 2 && w.length <= 10 && !IGNORED_WORDS.has(w));
+
+    // Must have at least 1 valid candidate and line must not be a long sentence (<= 4 words total)
+    if (candidates.length >= 1 && words.length <= 4) {
+      return candidates[0];
+    }
+  }
+
+  return null;
 }
 
 function extractTicker(text: string): string | null {
@@ -67,7 +248,8 @@ function extractTicker(text: string): string | null {
     }
   }
 
-  return null;
+  // Priority 3: Fallback plain-text ticker before MC/TP
+  return extractFallbackTicker(text);
 }
 
 type TPsResult = {

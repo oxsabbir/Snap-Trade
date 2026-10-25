@@ -92,6 +92,22 @@ class NotificationListener : NotificationListenerService() {
         "STOPLOSS"
     )
 
+    private val mcPattern = Pattern.compile("(?i)\\b(?:MC|MCAP|MARKET\\s*CAP)\\b")
+    private val wordPattern = Pattern.compile("\\b[A-Za-z][A-Za-z0-9]*\\b")
+
+    private val ignoredWords = ignoredHashtags + setOf(
+        "DEX", "CEX", "UNISWAP", "PANCAKESWAP",
+        "CALL", "CALLS", "PREMIUM", "ALERT", "ALERTS", "UPDATE", "UPDATES", "NEWS",
+        "TRADE", "TRADES", "TRADING", "SETUP", "SETUPS",
+        "BUY", "BUYING", "BOUGHT", "SELL", "SELLING", "SOLD", "LONG", "SHORT", "SPOT", "FUTURES", "FUTURE", "HOLD", "HODL",
+        "ENTRIES", "STOP", "LOSS", "TP", "SL", "PROFIT", "PROFITS", "LEVERAGE", "MARGIN", "RISK",
+        "MARKET", "MARKETS", "MCAP", "MC", "CAP", "CAPITAL", "PRICE", "PRICES", "VOLUME", "VOL", "HIGH", "LOW", "ATH",
+        "GEM", "GEMS", "COIN", "COINS", "TOKEN", "TOKENS", "PAIR", "PAIRS", "ALTCOIN", "ALTCOINS", "CRYPTO", "CRYPTOS", "PROJECT", "PROJECTS", "ALPHA", "BETA", "BULLISH", "BEARISH", "PUMP", "PUMPING", "DUMP", "MOON", "ROCKET", "BOMB", "LISTING", "LISTED", "LAUNCH", "PRESALE",
+        "TODAY", "TONIGHT", "DAILY", "WEEKLY", "MONTHLY", "NOW", "SOON", "HERE", "NEXT", "NEW", "FIRST", "LAST", "BEST", "TOP", "BIG", "HUGE", "MASSIVE", "EASY", "GOOD", "GREAT", "SUPER", "FREE",
+        "ON", "IN", "AT", "TO", "FOR", "OF", "WITH", "FROM", "BY", "THE", "THIS", "THAT", "THESE", "THOSE", "A", "AN", "AND", "OR", "IS", "ARE", "WAS", "WERE", "HAVE", "HAS", "HAD", "WILL", "CAN", "COULD", "WOULD", "SHOULD", "ABOUT", "INTO", "OVER", "AFTER", "BEFORE", "UNDER", "ABOVE",
+        "MORNING", "EVENING", "NIGHT", "TRADERS", "HELLO", "HEY", "CHECK", "WATCH", "LOOK", "READY"
+    )
+
     // `TP1: 0.016`, `T.P 1 = 0,016`, `TP 1: .0160` — label, optional separator, value.
     private val tpPattern =
         Pattern.compile("(?i)(?:TP|T\\.P)\\s*[.:]?\\s*(\\d+)\\s*[=:]*\\s*([\\d,.]+)")
@@ -266,6 +282,31 @@ class NotificationListener : NotificationListenerService() {
             }
         }
 
+        // Priority 3: Fallback plain-text ticker before MC/TP
+        return extractFallbackTicker(text)
+    }
+
+    private fun extractFallbackTicker(text: String): String? {
+        val mcMatcher = mcPattern.matcher(text)
+        val region = if (mcMatcher.find()) text.substring(0, mcMatcher.start()) else text
+
+        val lines = region.lines().map { it.trim() }.filter { it.isNotEmpty() }
+        for (line in lines) {
+            val words = mutableListOf<String>()
+            val matcher = wordPattern.matcher(line)
+            while (matcher.find()) {
+                words.add(matcher.group())
+            }
+            if (words.isEmpty()) continue
+
+            val candidates = words
+                .map { it.uppercase() }
+                .filter { it.length in 2..10 && it !in ignoredWords }
+
+            if (candidates.isNotEmpty() && words.size <= 4) {
+                return candidates.first()
+            }
+        }
         return null
     }
 

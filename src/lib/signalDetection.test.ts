@@ -135,6 +135,52 @@ test('detects #UNION in gem post with trailing $q decoys at the bottom', () => {
   eq(result.entry, '0.0001155');
 });
 
+test('detects plain-text ticker Ithaca before Mc 400k and TPs', () => {
+  const text = `Ithaca
+Mc 400k👀🚀
+Tp1 0.00078
+Tp2 0.00092
+Tp3 0.00099
+Tp4 0.00122
+Tp5 0.00150
+Tp6 0.00200
+Sl 16%`;
+
+  const result = checkForSignal(makeNotification(text));
+  eq(result.isSignal, true);
+  eq(result.format, 'tp');
+  eq(result.ticker, 'ITHACA');
+  eq(result.tp1, 0.00078);
+  eq(result.tpCount, 6);
+});
+
+test('detects plain-text ticker with action word and Market Cap', () => {
+  const text = `BUY SOL NOW!
+Market Cap: 500k
+Tp1 150
+Tp2 160
+Tp3 170`;
+
+  const result = checkForSignal(makeNotification(text));
+  eq(result.isSignal, true);
+  eq(result.format, 'tp');
+  eq(result.ticker, 'SOL');
+  eq(result.tp1, 150);
+});
+
+test('detects plain-text ticker surrounded by emojis', () => {
+  const text = `🚀 P2P 🚀
+MCAP 1M
+Tp1 0.001
+Tp2 0.002
+Tp3 0.003`;
+
+  const result = checkForSignal(makeNotification(text));
+  eq(result.isSignal, true);
+  eq(result.format, 'tp');
+  eq(result.ticker, 'P2P');
+});
+
 // --- runner -----------------------------------------------------------------------------------
 
 let failures = 0;
