@@ -9,7 +9,7 @@ import type { DepthRow } from "@/lib/kucoin/orderbook";
 import type { SymbolInfo } from "@/lib/kucoin/types";
 import { compareDecimal, multiplyDecimal } from "@/utils/decimal";
 import { decimalsFromIncrement, formatPrice } from "@/utils/format";
-import { radius, spacing } from "@/theme";
+import { spacing } from "@/theme";
 import { createThemedStyles } from "@/theme/themedStyles";
 
 type Props = {
