@@ -56,7 +56,11 @@ export function useOpenOrders(): UseOpenOrders {
   return {
     orders: state.orders,
     // Terminal rows are removed by the store immediately and never count as open.
-    openCount: state.orders.filter((order) => !isTerminalStatus(order.status)).length,
+    openCount: state.orders.filter(
+      (order) =>
+        !isTerminalStatus(order.status) &&
+        (Number(order.size) <= 0 || Number(order.filledSize) < Number(order.size))
+    ).length,
     isLoading: state.isLoading,
     error: state.error,
     cancelling: state.cancelling,

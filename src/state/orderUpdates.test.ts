@@ -213,6 +213,72 @@ test('a filled frame retires the row as filled', () => {
   ok(isTerminalStatus(merged.status), 'filled must be terminal');
 });
 
+test('a match frame with remainSize 0 retires as filled immediately', () => {
+  const { order: merged } = mergeOrderUpdate(order({ status: 'open', filledSize: '0', size: '100' }), {
+    orderId: 'o1',
+    symbol: 'BTC-USDT',
+    side: 'buy',
+    type: 'match',
+    status: 'match',
+    size: '100',
+    remainSize: '0',
+    fillSize: '100',
+  });
+
+  eq(merged.status, 'filled');
+  eq(merged.filledSize, '100');
+  ok(isTerminalStatus(merged.status), 'match with remainSize 0 must be terminal');
+});
+
+test('a match frame with remainSize 0 completes a partially filled order immediately', () => {
+  const { order: merged } = mergeOrderUpdate(order({ status: 'partially_filled', filledSize: '40', size: '100' }), {
+    orderId: 'o1',
+    symbol: 'BTC-USDT',
+    side: 'buy',
+    type: 'match',
+    status: 'match',
+    remainSize: '0',
+    fillSize: '60',
+  });
+
+  eq(merged.status, 'filled');
+  eq(merged.filledSize, '100');
+  ok(isTerminalStatus(merged.status), 'completing match must be terminal');
+});
+
+test('a match frame with partial remainSize updates filledSize and status', () => {
+  const { order: merged } = mergeOrderUpdate(order({ status: 'open', filledSize: '0', size: '100' }), {
+    orderId: 'o1',
+    symbol: 'BTC-USDT',
+    side: 'buy',
+    type: 'match',
+    status: 'match',
+    size: '100',
+    remainSize: '30',
+  });
+
+  eq(merged.status, 'partially_filled');
+  eq(merged.filledSize, '70');
+  eq(isTerminalStatus(merged.status), false);
+});
+
+test('a canceled frame with remainSize 0 and canceledSize retires as cancelled', () => {
+  const { order: merged } = mergeOrderUpdate(order({ filledSize: '40', size: '100' }), {
+    orderId: 'o1',
+    symbol: 'BTC-USDT',
+    side: 'buy',
+    type: 'canceled',
+    status: 'done',
+    remainSize: '0',
+    canceledSize: '60',
+    filledSize: '40',
+    size: '100',
+  });
+
+  eq(merged.status, 'cancelled');
+  ok(isTerminalStatus(merged.status), 'cancelled with size cancelled must be terminal');
+});
+
 test('a canceled frame with size outstanding retires as cancelled', () => {
   const { order: merged } = mergeOrderUpdate(order({ filledSize: '40' }), {
     orderId: 'o1',
