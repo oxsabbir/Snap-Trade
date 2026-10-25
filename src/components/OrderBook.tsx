@@ -12,18 +12,22 @@ import {
   CaretDownIcon,
   CaretUpIcon,
   LayersIcon,
+  OrderMarkerIcon,
   RowsIcon,
   TradeIcon,
 } from "@/components/Icons";
 import { MidPrice } from "@/components/MidPrice";
 import { useLevel2Book } from "@/hooks/useLevel2Book";
+import { useOpenOrders } from "@/hooks/useOpenOrders";
 import { useOrderBook } from "@/hooks/useOrderBook";
 import { useSymbolRules } from "@/hooks/useSymbolRules";
 import { aggregationOptions, VISIBLE_LEVELS, type DepthRow } from "@/lib/kucoin/orderbook";
+import { isTerminalStatus } from "@/state/openOrders";
 import { radius, spacing } from "@/theme";
 import { useTheme } from "@/theme/ThemeProvider";
 import { QuickBuy } from "@/components/QuickBuy";
 import { createThemedStyles } from "@/theme/themedStyles";
+import { snapToIncrement } from "@/utils/decimal";
 import { decimalsFromIncrement, formatCompactSize, formatPrice } from "@/utils/format";
 
 export type OrderBookViewMode = "split" | "bids" | "asks";
@@ -48,6 +52,7 @@ type RowProps = {
   side: "ask" | "bid";
   priceDecimals: number;
   sizeDecimals: number;
+  hasUserOrder?: boolean;
   onPress: (price: string) => void;
 };
 
@@ -56,12 +61,14 @@ const DepthRowView = memo(function DepthRowView({
   side,
   priceDecimals,
   sizeDecimals,
+  hasUserOrder = false,
   onPress,
 }: RowProps) {
-  const { colors } = useTheme();
+  const { colors, scheme } = useTheme();
   const styles = useStyles();
   const priceColor = side === "ask" ? colors.downText : colors.upText;
   const fill = side === "ask" ? colors.downFill : colors.upFill;
+  const markerColor = scheme === "dark" ? "#F5A623" : "#D97706";
   return (
     // `onPress` fires on release, not on touch-down, and that is deliberate. The rows sit
     // inside the screen's scroll view, so firing on press-in would fill the form every time
@@ -75,7 +82,7 @@ const DepthRowView = memo(function DepthRowView({
       onPress={() => onPress(row.price)}
       style={styles.row}
       accessibilityRole="button"
-      accessibilityLabel={`Price ${row.price}, total ${row.total}`}
+      accessibilityLabel={`Price ${row.price}, total ${row.total}${hasUserOrder ? `, your ${side} order placed` : ""}`}
     >
       <View
         style={[
@@ -83,9 +90,18 @@ const DepthRowView = memo(function DepthRowView({
           { width: `${row.percent}%`, backgroundColor: fill },
         ]}
       />
-      <Text style={[styles.priceText, { color: priceColor }]} numberOfLines={1}>
-        {formatPrice(Number(row.price), priceDecimals)}
-      </Text>
+      <View style={styles.priceGroup}>
+        <Text style={[styles.priceText, { color: priceColor }]} numberOfLines={1}>
+          {formatPrice(Number(row.price), priceDecimals)}
+        </Text>
+        {hasUserOrder ? (
+          <OrderMarkerIcon
+            size={7}
+            color={markerColor}
+            direction="left"
+          />
+        ) : null}
+      </View>
       <Text style={styles.totalText} numberOfLines={1}>
         {formatCompactSize(Number(row.total), sizeDecimals)}
       </Text>
@@ -117,6 +133,7 @@ function OrderBookBase({ symbol, takerFeeRate, onPriceSelect, onInitialSnapshot,
     onInitialSnapshot?.(symbol);
   }, [snapshot, symbol, onInitialSnapshot]);
   const { rules } = useSymbolRules(symbol);
+  const { orders } = useOpenOrders();
   const [quickBuyOverride, setQuickBuyOverride] = useState<boolean | null>(null);
   const showQuickBuy = quickBuyOverride ?? quickBuyByDefault;
   const [baseCurrency = "", quoteCurrency = ""] = symbol.split("-");
@@ -153,6 +170,34 @@ function OrderBookBase({ symbol, takerFeeRate, onPriceSelect, onInitialSnapshot,
   const options = useMemo(() => aggregationOptions(tickSize), [tickSize]);
   const priceDecimals = decimalsFromIncrement(tickSize);
   const sizeDecimals = decimalsFromIncrement(baseIncrement);
+
+  /** Set of user's active order price buckets for instant indicator matching */
+  const userOrderPrices = useMemo(() => {
+    const askPrices = new Set<string>();
+    const bidPrices = new Set<string>();
+
+    for (const order of orders) {
+      if (order.symbol !== symbol || isTerminalStatus(order.status)) continue;
+      const bucket =
+        snapToIncrement(order.price, aggregation, "floor") ?? order.price;
+      const normalizedOrderPrice = Number(order.price).toString();
+      const normalizedBucket = Number(bucket).toString();
+
+      if (order.side === "sell") {
+        askPrices.add(order.price);
+        askPrices.add(bucket);
+        askPrices.add(normalizedOrderPrice);
+        askPrices.add(normalizedBucket);
+      } else if (order.side === "buy") {
+        bidPrices.add(order.price);
+        bidPrices.add(bucket);
+        bidPrices.add(normalizedOrderPrice);
+        bidPrices.add(normalizedBucket);
+      }
+    }
+
+    return { askPrices, bidPrices };
+  }, [orders, symbol, aggregation]);
   const connectionColor = status === "live"
     ? colors.up
     : status === "offline" ? colors.downText : colors.textFaint;
@@ -198,16 +243,22 @@ function OrderBookBase({ symbol, takerFeeRate, onPriceSelect, onInitialSnapshot,
           </View>
         ) : (
           <View style={[styles.asks, { height: depthRowsHeight }]}>
-            {[...depth.asks].reverse().map((row, index) => (
-              <DepthRowView
-                key={`ask:${depth.asks.length - 1 - index}`}
-                row={row}
-                side="ask"
-                priceDecimals={priceDecimals}
-                sizeDecimals={sizeDecimals}
-                onPress={onPriceSelect}
-              />
-            ))}
+            {[...depth.asks].reverse().map((row, index) => {
+              const hasOrder =
+                userOrderPrices.askPrices.has(row.price) ||
+                userOrderPrices.askPrices.has(Number(row.price).toString());
+              return (
+                <DepthRowView
+                  key={`ask:${depth.asks.length - 1 - index}`}
+                  row={row}
+                  side="ask"
+                  priceDecimals={priceDecimals}
+                  sizeDecimals={sizeDecimals}
+                  hasUserOrder={hasOrder}
+                  onPress={onPriceSelect}
+                />
+              );
+            })}
           </View>
         )
       ) : null}
@@ -221,16 +272,22 @@ function OrderBookBase({ symbol, takerFeeRate, onPriceSelect, onInitialSnapshot,
 
       {viewMode !== "asks" ? (
         <View style={[styles.bids, { height: depthRowsHeight }]}>
-          {depth.bids.map((row, index) => (
-            <DepthRowView
-              key={`bid:${index}`}
-              row={row}
-              side="bid"
-              priceDecimals={priceDecimals}
-              sizeDecimals={sizeDecimals}
-              onPress={onPriceSelect}
-            />
-          ))}
+          {depth.bids.map((row, index) => {
+            const hasOrder =
+              userOrderPrices.bidPrices.has(row.price) ||
+              userOrderPrices.bidPrices.has(Number(row.price).toString());
+            return (
+              <DepthRowView
+                key={`bid:${index}`}
+                row={row}
+                side="bid"
+                priceDecimals={priceDecimals}
+                sizeDecimals={sizeDecimals}
+                hasUserOrder={hasOrder}
+                onPress={onPriceSelect}
+              />
+            );
+          })}
         </View>
       ) : null}
 
@@ -386,6 +443,11 @@ const useStyles = createThemedStyles((colors) =>
       alignItems: "center",
       justifyContent: "space-between",
       overflow: "hidden",
+    },
+    priceGroup: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 3,
     },
     fill: {
       position: "absolute",
