@@ -6,8 +6,10 @@ permissions:
   contents: write
 
 jobs:
-  build:
+  check-version:
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
     steps:
       - uses: actions/checkout@v4
 
@@ -26,6 +28,23 @@ jobs:
           echo "version=$V" >> "$GITHUB_OUTPUT"
           echo "Releasing v$V"
 
+  build:
+    needs: check-version
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - flavor: plain
+            signal_detection: 'false'
+            output_name: app-release-plain.apk
+          - flavor: signal
+            signal_detection: 'true'
+            output_name: app-release-sd-incl.apk
+    env:
+      EXPO_PUBLIC_SIGNAL_DETECTION: ${{ matrix.signal_detection }}
+    steps:
+      - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -38,9 +57,7 @@ jobs:
 
       - run: npm ci
 
-      - name: Generate Android project with signal detection
-        env:
-          EXPO_PUBLIC_SIGNAL_DETECTION: 'true'
+      - name: Generate Android project
         run: npx expo prebuild --platform android --no-install
 
       - uses: gradle/actions/setup-gradle@v4
@@ -48,15 +65,13 @@ jobs:
           gradle-version: wrapper
           build-root-directory: android
 
-      - name: Build APK with signal detection
-        env:
-          EXPO_PUBLIC_SIGNAL_DETECTION: 'true'
+      - name: Build release APK
         working-directory: android
         run: |
           chmod +x gradlew
-          ./gradlew clean assembleRelease
+          ./gradlew assembleRelease
 
-      - name: Align and sign APK with signal detection
+      - name: Align and sign APK
         env:
           KS_PASS: ${{ secrets.KS_PASS }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
@@ -65,61 +80,46 @@ jobs:
           echo "$KEYSTORE_B64" | base64 -d > $RUNNER_TEMP/release.p12
           BT=$(ls -d $ANDROID_HOME/build-tools/* | sort -V | tail -1)
           APK=$(ls android/app/build/outputs/apk/release/*.apk | head -1)
-          $BT/zipalign -p -f 4 "$APK" "$RUNNER_TEMP/aligned-signal.apk"
+          $BT/zipalign -p -f 4 "$APK" "$RUNNER_TEMP/aligned.apk"
           $BT/apksigner sign \
             --ks $RUNNER_TEMP/release.p12 \
             --ks-type PKCS12 \
             --ks-key-alias "$KEY_ALIAS" \
             --ks-pass env:KS_PASS \
             --key-pass env:KS_PASS \
-            --out app-release-sd-incl.apk "$RUNNER_TEMP/aligned-signal.apk"
-          $BT/apksigner verify app-release-sd-incl.apk
-
-      - name: Generate Android project without signal detection
-        env:
-          EXPO_PUBLIC_SIGNAL_DETECTION: 'false'
-        run: |
-          rm -rf android
-          npx expo prebuild --platform android --no-install
-
-      - name: Build APK without signal detection
-        env:
-          EXPO_PUBLIC_SIGNAL_DETECTION: 'false'
-        working-directory: android
-        run: |
-          chmod +x gradlew
-          ./gradlew clean assembleRelease
-
-      - name: Align and sign APK without signal detection
-        env:
-          KS_PASS: ${{ secrets.KS_PASS }}
-          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-          KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
-        run: |
-          echo "$KEYSTORE_B64" | base64 -d > $RUNNER_TEMP/release.p12
-          BT=$(ls -d $ANDROID_HOME/build-tools/* | sort -V | tail -1)
-          APK=$(ls android/app/build/outputs/apk/release/*.apk | head -1)
-          $BT/zipalign -p -f 4 "$APK" "$RUNNER_TEMP/aligned-nosignal.apk"
-          $BT/apksigner sign \
-            --ks $RUNNER_TEMP/release.p12 \
-            --ks-type PKCS12 \
-            --ks-key-alias "$KEY_ALIAS" \
-            --ks-pass env:KS_PASS \
-            --key-pass env:KS_PASS \
-            --out app-release-plain.apk "$RUNNER_TEMP/aligned-nosignal.apk"
-          $BT/apksigner verify app-release-plain.apk
+            --out "${{ matrix.output_name }}" "$RUNNER_TEMP/aligned.apk"
+          $BT/apksigner verify "${{ matrix.output_name }}"
           rm $RUNNER_TEMP/release.p12
 
       - uses: actions/upload-artifact@v4
         with:
-          name: private-signal-apk-v${{ steps.v.outputs.version }}
+          name: ${{ matrix.output_name }}
+          path: ${{ matrix.output_name }}
+
+  release:
+    needs: [check-version, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: app-release-plain.apk
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: app-release-sd-incl.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: private-signal-apk-v${{ needs.check-version.outputs.version }}
           path: app-release-sd-incl.apk
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ steps.v.outputs.version }}
-          name: Release v${{ steps.v.outputs.version }}
+          tag_name: v${{ needs.check-version.outputs.version }}
+          name: Release v${{ needs.check-version.outputs.version }}
           make_latest: true
           generate_release_notes: true
           files: |
