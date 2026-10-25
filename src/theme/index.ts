@@ -1,51 +1,53 @@
 export const darkColors = {
-  bg: '#121212',
-  surface: '#1A1A1A',
-  surfaceAlt: '#242424',
-  border: '#2E2E2E',
-  text: '#FFFFFF',
-  textMuted: '#838383',
-  textFaint: '#5C5C5C', // decorative only (placeholders)
-  accent: '#00B47D',
-  accentSoft: 'rgba(0,180,125,0.42)',
-  up: '#00B47D',
-  down: '#EB4D5D',
-  upText: '#00B47D',
-  downText: '#EB4D5D',
-  warning: '#F0B90B',
-  upFill: 'rgba(0,180,125,0.08)',
-  downFill: 'rgba(235,77,93,0.08)',
-  gridLine: '#1F1F1F',
-  gridBorder: '#2E2E2E',
-  overlay: 'rgba(0,0,0,0.55)',
-  shadow: '#000000',
-  onAccent: '#FFFFFF',
+  bg: "#121212",
+  surface: "#1A1A1A",
+  surfaceAlt: "#242424",
+  border: "#2E2E2E",
+  text: "#FFFFFF",
+  textMuted: "#838383",
+  textFaint: "#5C5C5C", // decorative only (placeholders)
+  accent: "#00B47D",
+  accentSoft: "rgba(0,180,125,0.42)",
+  up: "#00B47D",
+  down: "#EB4D5D",
+  upText: "#00B47D",
+  downText: "#EB4D5D",
+  warning: "#F0B90B",
+  upFill: "rgba(0,180,125,0.08)",
+  downFill: "rgba(235,77,93,0.08)",
+  gridLine: "#1F1F1F",
+  gridBorder: "#2E2E2E",
+  overlay: "rgba(0,0,0,0.55)",
+  shadow: "#000000",
+  onAccent: "#FFFFFF",
+  quickBarBG: "rgba(55, 176, 7, 0.25)",
 };
 
 export type ThemeColors = Record<keyof typeof darkColors, string>;
 
 export const lightColors: ThemeColors = {
-  bg: '#FFFFFF',
-  surface: '#F7F7F7',
-  surfaceAlt: '#F2F2F2',
-  border: '#E6E6E6',
-  text: '#121212',
-  textMuted: '#767676',
-  textFaint: '#B3B3B3',
-  accent: '#00B47D',
-  accentSoft: 'rgba(0,180,125,0.42)',
-  up: '#00B47D',
-  down: '#EB4D5D',
-  upText: '#00805A',
-  downText: '#CF2F44',
-  warning: '#F0B90B',
-  upFill: 'rgba(0,180,125,0.10)',
-  downFill: 'rgba(235,77,93,0.10)',
-  gridLine: '#F0F0F0',
-  gridBorder: '#E6E6E6',
-  overlay: 'rgba(0,0,0,0.4)',
-  shadow: '#000000',
-  onAccent: '#FFFFFF',
+  bg: "#FFFFFF",
+  surface: "#F7F7F7",
+  surfaceAlt: "#F2F2F2",
+  border: "#E6E6E6",
+  text: "#121212",
+  textMuted: "#767676",
+  textFaint: "#B3B3B3",
+  accent: "#00B47D",
+  accentSoft: "rgba(0,180,125,0.42)",
+  up: "#00B47D",
+  down: "#EB4D5D",
+  upText: "#00805A",
+  downText: "#CF2F44",
+  warning: "#F0B90B",
+  upFill: "rgba(0,180,125,0.10)",
+  downFill: "rgba(235,77,93,0.10)",
+  gridLine: "#F0F0F0",
+  gridBorder: "#E6E6E6",
+  overlay: "rgba(0,0,0,0.4)",
+  shadow: "#000000",
+  onAccent: "#FFFFFF",
+  quickBarBG: "rgba(240, 158, 76, 0.25)",
 };
 
 /** Alias so existing imports keep working during the migration. */
@@ -93,13 +95,14 @@ export function standardChartHeight(windowHeight: number): number {
   // Guard the degenerate cases rather than letting them through: Math.round(NaN) is NaN, and
   // both Math.min and Math.max propagate it, so an unusable number here would collapse the
   // chart instead of falling back to the smallest sensible height.
-  if (!Number.isFinite(windowHeight) || windowHeight <= 0) return CHART_MIN_HEIGHT;
+  if (!Number.isFinite(windowHeight) || windowHeight <= 0)
+    return CHART_MIN_HEIGHT;
   return Math.min(
     CHART_MAX_HEIGHT,
     Math.max(
       CHART_MIN_HEIGHT,
-      Math.round(windowHeight * CHART_HEIGHT_RATIO) - CHART_HEIGHT_REDUCTION
-    )
+      Math.round(windowHeight * CHART_HEIGHT_RATIO) - CHART_HEIGHT_REDUCTION,
+    ),
   );
 }
 
@@ -117,7 +120,7 @@ export function stableChartHeight(
   current: number,
   previousWidth: number,
   width: number,
-  windowHeight: number
+  windowHeight: number,
 ): number {
   if (width === previousWidth) return current;
   return standardChartHeight(windowHeight);
