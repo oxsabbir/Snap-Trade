@@ -1,10 +1,7 @@
-import {
-  memo,
-  useMemo,
-  useState } from "react";
-import { Pressable, View } from '@/components/AppLayout';
-import { Modal, StyleSheet } from 'react-native';
-import { Text } from '@/components/AppText';
+import { memo, useMemo, useState } from "react";
+import { Pressable, View } from "@/components/AppLayout";
+import { Modal, StyleSheet } from "react-native";
+import { Text } from "@/components/AppText";
 
 import {
   CaretDownIcon,
@@ -18,13 +15,21 @@ import { useLevel2Book } from "@/hooks/useLevel2Book";
 import { useOpenOrders } from "@/hooks/useOpenOrders";
 import { useOrderBook } from "@/hooks/useOrderBook";
 import { useSymbolRules } from "@/hooks/useSymbolRules";
-import { aggregationOptions, VISIBLE_LEVELS, type DepthRow } from "@/lib/kucoin/orderbook";
+import {
+  aggregationOptions,
+  VISIBLE_LEVELS,
+  type DepthRow,
+} from "@/lib/kucoin/orderbook";
 import { isTerminalStatus } from "@/state/openOrders";
 import { radius, spacing } from "@/theme";
 import { useTheme } from "@/theme/ThemeProvider";
 import { createThemedStyles } from "@/theme/themedStyles";
 import { snapToIncrement } from "@/utils/decimal";
-import { decimalsFromIncrement, formatCompactSize, formatPrice } from "@/utils/format";
+import {
+  decimalsFromIncrement,
+  formatCompactSize,
+  formatPrice,
+} from "@/utils/format";
 
 export type OrderBookViewMode = "split" | "bids" | "asks";
 
@@ -75,7 +80,7 @@ const DepthRowView = memo(function DepthRowView({
       onPress={() => onPress(row.price)}
       style={styles.row}
       accessibilityRole="button"
-      accessibilityLabel={`Price ${row.price}, total ${row.total}${hasUserOrder ? ", your order placed" : ""}`}
+      accessibilityLabel={`Price ${row.price}, total ${row.total}${hasUserOrder ? `, your ${side} order placed` : ""}`}
     >
       <View
         style={[
@@ -83,14 +88,19 @@ const DepthRowView = memo(function DepthRowView({
           { width: `${row.percent}%`, backgroundColor: fill },
         ]}
       />
-      {hasUserOrder ? (
-        <View style={styles.userOrderMarker}>
-          <OrderMarkerIcon size={8} color={markerColor} />
-        </View>
-      ) : null}
-      <Text style={[styles.priceText, { color: priceColor }]} numberOfLines={1}>
-        {formatPrice(Number(row.price), priceDecimals)}
-      </Text>
+
+      <View style={styles.priceGroup}>
+        <Text style={[styles.priceText, { color: priceColor }]} numberOfLines={1}>
+          {formatPrice(Number(row.price), priceDecimals)}
+        </Text>
+        {hasUserOrder ? (
+          <OrderMarkerIcon
+            size={7}
+            color={markerColor}
+            direction={side === "ask" ? "down" : "up"}
+          />
+        ) : null}
+      </View>
       <Text style={styles.totalText} numberOfLines={1}>
         {formatCompactSize(Number(row.total), sizeDecimals)}
       </Text>
@@ -152,7 +162,8 @@ function OrderBookBase({ symbol, onPriceSelect }: Props) {
 
     for (const order of orders) {
       if (order.symbol !== symbol || isTerminalStatus(order.status)) continue;
-      const bucket = snapToIncrement(order.price, aggregation, "floor") ?? order.price;
+      const bucket =
+        snapToIncrement(order.price, aggregation, "floor") ?? order.price;
       const normalizedOrderPrice = Number(order.price).toString();
       const normalizedBucket = Number(bucket).toString();
 
@@ -339,7 +350,6 @@ const useStyles = createThemedStyles((colors) =>
       alignItems: "center",
       justifyContent: "space-between",
       paddingBottom: spacing.xs,
-      paddingLeft: 11,
     },
     headerText: {
       color: colors.textFaint,
@@ -368,19 +378,11 @@ const useStyles = createThemedStyles((colors) =>
       alignItems: "center",
       justifyContent: "space-between",
       overflow: "hidden",
-      position: "relative",
-      paddingLeft: 11,
     },
-    userOrderMarker: {
-      position: "absolute",
-      left: 1,
-      top: "50%",
-      marginTop: -4,
-      width: 8,
-      height: 8,
+    priceGroup: {
+      flexDirection: "row",
       alignItems: "center",
-      justifyContent: "center",
-      zIndex: 2,
+      gap: 3,
     },
     fill: {
       position: "absolute",
