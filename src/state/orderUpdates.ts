@@ -17,7 +17,7 @@
  * why a sparse `received` frame — which carries no size figures at all — must never be allowed to
  * overwrite a fill the row already knows about. Guarding that is the whole point of `mergeOrderUpdate`.
  */
-import { compareDecimal } from '@/utils/decimal';
+import { compareDecimal, subtractDecimal } from '@/utils/decimal';
 
 import type { SpotOrderWallet } from '@/lib/kucoin/orders';
 import type { OrderSide } from '@/lib/kucoin/types';
@@ -142,7 +142,11 @@ export function resolveStatus(
   size: string,
   filledSize: string
 ): OrderStatus {
-  const fullyFilled = greaterThanZero(size) && atLeast(filledSize, size);
+  const kind = messageKind(raw);
+  const isCanceled = kind === 'canceled' || kind === 'cancelled' || greaterThanZero(fieldString(raw, 'canceledSize') ?? '0');
+  const remain = fieldString(raw, 'remainSize');
+  const remainIsZero = !isCanceled && remain !== null && (compareDecimal(remain, '0') ?? 1) <= 0;
+  const fullyFilled = remainIsZero || (greaterThanZero(size) && atLeast(filledSize, size));
 
   const fromMessage = statusFromWebSocketMessage(raw, fullyFilled);
   if (fromMessage) return fromMessage;
@@ -165,7 +169,7 @@ export function resolveStatus(
     if (!isActive) return fullyFilled ? 'filled' : 'cancelled';
   }
 
-  return greaterThanZero(filledSize) && !fullyFilled ? 'partially_filled' : 'open';
+  return fullyFilled ? 'filled' : greaterThanZero(filledSize) ? 'partially_filled' : 'open';
 }
 
 /**
@@ -200,7 +204,27 @@ export function normalizeOrder(
   if (!orderId) return null;
 
   const size = fieldString(raw, 'size', 'originSize') ?? '0';
-  const filledSize = fieldString(raw, 'filledSize', 'dealSize') ?? '0';
+  let filledSize = fieldString(raw, 'filledSize', 'dealSize') ?? '0';
+
+  const kind = messageKind(raw);
+  const isCanceled = kind === 'canceled' || kind === 'cancelled' || greaterThanZero(fieldString(raw, 'canceledSize') ?? '0');
+  const remain = fieldString(raw, 'remainSize');
+  const remainIsZero = !isCanceled && remain !== null && (compareDecimal(remain, '0') ?? 1) <= 0;
+
+  if (remainIsZero && greaterThanZero(size)) {
+    filledSize = size;
+  } else if (remain !== null && greaterThanZero(remain) && greaterThanZero(size) && atLeast(size, remain)) {
+    const derived = subtractDecimal(size, remain);
+    if (derived && atLeast(derived, filledSize)) {
+      filledSize = derived;
+    }
+  } else if (filledSize === '0') {
+    const fillOrMatch = fieldString(raw, 'fillSize', 'matchSize');
+    if (fillOrMatch && greaterThanZero(size) && atLeast(fillOrMatch, size)) {
+      filledSize = size;
+    }
+  }
+
   const wallet = raw.wallet === 'trade_hf' || raw.wallet === 'trade' ? raw.wallet : fallbackWallet;
   const now = Date.now();
 
@@ -238,9 +262,30 @@ export function mergeOrderUpdate(
 
   const size = hasValue(raw, 'size') || hasValue(raw, 'originSize') ? incoming.size : existing.size;
 
+  const kind = messageKind(raw);
+  const isCanceled = kind === 'canceled' || kind === 'cancelled' || greaterThanZero(fieldString(raw, 'canceledSize') ?? '0');
+  const remain = fieldString(raw, 'remainSize');
+  const remainIsZero = !isCanceled && remain !== null && (compareDecimal(remain, '0') ?? 1) <= 0;
+
   let filledSize = existing.filledSize;
-  if ((hasValue(raw, 'filledSize') || hasValue(raw, 'dealSize')) && atLeast(incoming.filledSize, existing.filledSize)) {
+  if (remainIsZero && greaterThanZero(size)) {
+    filledSize = size;
+  } else if (remain !== null && greaterThanZero(remain) && greaterThanZero(size) && atLeast(size, remain)) {
+    const derived = subtractDecimal(size, remain);
+    if (derived && atLeast(derived, existing.filledSize)) {
+      filledSize = derived;
+    }
+  } else if ((hasValue(raw, 'filledSize') || hasValue(raw, 'dealSize')) && atLeast(incoming.filledSize, existing.filledSize)) {
     filledSize = incoming.filledSize;
+  } else if (hasValue(raw, 'fillSize') || hasValue(raw, 'matchSize')) {
+    const fillOrMatch = fieldString(raw, 'fillSize', 'matchSize');
+    if (fillOrMatch && greaterThanZero(size) && atLeast(fillOrMatch, size)) {
+      filledSize = size;
+    }
+  }
+
+  if (greaterThanZero(size) && atLeast(filledSize, size)) {
+    filledSize = size;
   }
 
   const resolved = resolveStatus(raw, size, filledSize);
@@ -248,6 +293,9 @@ export function mergeOrderUpdate(
   let status = existing.status;
   if (!isTerminalStatus(existing.status) && STATUS_RANK[resolved] >= STATUS_RANK[existing.status]) {
     status = resolved;
+  }
+  if (!isCanceled && (remainIsZero || (greaterThanZero(size) && atLeast(filledSize, size)))) {
+    status = 'filled';
   }
 
   const order: OpenOrder = {

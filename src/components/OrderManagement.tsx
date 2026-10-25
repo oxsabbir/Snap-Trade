@@ -189,7 +189,12 @@ export const OrderManagement = memo(function OrderManagement({
   const usdtBalance = available["USDT"] ?? "0";
 
   const visibleOrders = useMemo(
-    () => orders.filter((order) => order.status === "open" || order.status === "partially_filled"),
+    () =>
+      orders.filter(
+        (order) =>
+          (order.status === "open" || order.status === "partially_filled") &&
+          filledFraction(order) < 1,
+      ),
     [orders],
   );
 
