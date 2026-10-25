@@ -25,6 +25,19 @@ function mirrorToNative(enabled: boolean, displayName: string): void {
   void NotificationListenerModule.syncSignalSettings(enabled, displayName).catch(() => undefined);
 }
 
+/**
+ * Explicitly disables signal detection in native SharedPreferences and local storage.
+ * Called when EXPO_PUBLIC_SIGNAL_DETECTION is false so existing native builds stop detecting.
+ */
+export function disableSignalDetection(): void {
+  void AsyncStorage.setItem(STORAGE_KEY_ENABLED, 'false').catch(() => undefined);
+  mirrorToNative(false, '');
+}
+
+export function syncSignalSettings(enabled: boolean, displayName: string = ''): void {
+  mirrorToNative(enabled, displayName);
+}
+
 export type SignalSourceState = {
   displayName: string;
   setDisplayName: (value: string) => void;

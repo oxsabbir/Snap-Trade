@@ -9,7 +9,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { initialWindowMetrics, SafeAreaProvider } from 'react-native-safe-area-context';
 import { usePrivateFeed } from '@/hooks/usePrivateFeed';
 import { useSignalDeepLink } from '@/hooks/useSignalDeepLink';
-import { useSignalSource } from '@/hooks/useSignalSource';
+import { disableSignalDetection, useSignalSource } from '@/hooks/useSignalSource';
 import { SIGNAL_DETECTION_ENABLED } from '@/lib/featureFlags';
 
 import { ActiveCoinProvider } from '@/state/activeCoin';
@@ -114,7 +114,7 @@ function RootNavigator() {
         {SIGNAL_DETECTION_ENABLED ? <Stack.Screen name="permissions" /> : null}
       </Stack>
       {isConnected ? <PrivateFeedRuntime /> : null}
-      {SIGNAL_DETECTION_ENABLED ? <SignalSettingsRuntime /> : null}
+      <SignalSettingsRuntime />
       {isLoading ? (
         <View style={styles.bootOverlay}>
           <ActivityIndicator color={colors.accent} />
@@ -132,6 +132,7 @@ function PrivateFeedRuntime() {
 /**
  * Mounted once so the signal settings hydrate and mirror into the native listener's
  * SharedPreferences on every launch, not only when the Account tab happens to be opened.
+ * When SIGNAL_DETECTION_ENABLED is false, it explicitly ensures native detection is disabled.
  *
  * Deferred past the first interactions so its two AsyncStorage reads and the native
  * `syncSignalSettings` round-trip do not compete with the first paint. Nothing depends on the
@@ -141,12 +142,17 @@ function SignalSettingsRuntime() {
   const [shouldHydrate, setShouldHydrate] = useState(false);
 
   useEffect(() => {
+    if (!SIGNAL_DETECTION_ENABLED) {
+      disableSignalDetection();
+      return;
+    }
     // Idle callback rather than the deprecated InteractionManager: hydration is not tied to
     // transition completion — it only needs a moment when the JS thread is not busy.
     const task = requestIdleCallback(() => setShouldHydrate(true));
     return () => cancelIdleCallback(task);
   }, []);
 
+  if (!SIGNAL_DETECTION_ENABLED) return null;
   return shouldHydrate ? <SignalSettingsHydrator /> : null;
 }
 
