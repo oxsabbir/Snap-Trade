@@ -109,6 +109,7 @@ function PercentChips({
           >
             <Text
               numberOfLines={1}
+              ellipsizeMode="clip"
               style={[
                 styles.chipText,
                 compact && styles.chipTextCompact,
@@ -902,29 +903,29 @@ const useStyles = createThemedStyles((colors) => StyleSheet.create({
     flexDirection: "row",
     backgroundColor: colors.surfaceAlt,
     borderRadius: radius.pill,
-    padding: 4,
-    gap: 4,
+    padding: 3,
+    gap: 2,
     width: "100%",
   },
   chipContainerCompact: {
-    padding: 3,
-    gap: 2,
+    padding: 2,
+    gap: 1,
   },
   chip: {
     flex: 1,
     minWidth: 0,
-    minHeight: 36,
-    paddingHorizontal: 8,
-    paddingVertical: 8,
+    minHeight: 34,
+    paddingHorizontal: 2,
+    paddingVertical: 6,
     alignItems: "center",
     justifyContent: "center",
     // Match the radius to half the height; the global scaler grows both together so the
     // selected chip remains a capsule instead of relying on an oversized pill radius.
-    borderRadius: 18,
+    borderRadius: 17,
   },
   chipCompact: {
-    paddingHorizontal: 2,
-    paddingVertical: 2,
+    paddingHorizontal: 1,
+    paddingVertical: 3,
   },
   chipInactive: {
     backgroundColor: "transparent",
@@ -939,9 +940,11 @@ const useStyles = createThemedStyles((colors) => StyleSheet.create({
     fontSize: 12,
     fontWeight: "600",
     fontVariant: ["tabular-nums"],
+    textAlign: "center",
+    includeFontPadding: false,
   },
   chipTextCompact: {
-    letterSpacing: -0.2,
+    letterSpacing: -0.3,
   },
   chipTextInactive: {
     color: colors.textMuted,
