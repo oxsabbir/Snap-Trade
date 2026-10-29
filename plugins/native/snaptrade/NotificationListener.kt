@@ -19,7 +19,8 @@ import java.util.regex.Pattern
  *
  * The app process can be dead (swiped from recents) when a notification lands, so the whole
  * decision — package gate, toggle, trusted display names, and the format-specific anchors
- * (ticker + TPs for TP posts, ticker + marker + market price for gem posts) — has to be made
+ * (ticker + TPs for TP posts, ticker + marker + market price for gem posts, ticker + buy
+ * context + `CMP <price>` for cmp posts) — has to be made
  * here. The settings the JS side owns are mirrored into the same SharedPreferences file this
  * service reads; see [NotificationListenerModule.syncSignalSettings].
  *
@@ -125,6 +126,12 @@ class NotificationListener : NotificationListenerService() {
     private val gemPricePattern =
         Pattern.compile("(?i)current\\s+market\\s+price\\s*[-–:]?\\s*([\\d.,]+)")
 
+    // Cmp-post marker: `Buying CMP 0.000552 Keeping high targets SL manage`. Only the letters
+    // and digits are compared, so emoji and X formatting cannot hide a `buy`/`Buying` context;
+    // the anchor that fires the signal is the literal `CMP <price>`, an exact closing price.
+    private val cmpPricePattern =
+        Pattern.compile("(?i)\\bCMP\\b\\s*[-–:=]?\\s*([\\d.,]+)")
+
     override fun onCreate() {
         super.onCreate()
         log("ListenerCreated", "service created")
@@ -173,13 +180,17 @@ class NotificationListener : NotificationListenerService() {
         val isTpSignal = tps.size >= 3
         val hasGemMarker = hasGemMarker(primaryText)
         val gemResult = if (!isTpSignal) extractGemPrice(primaryText) else GemResult(null, null)
-        val entryPrice = gemResult.price
+        val cmpResult =
+            if (!isTpSignal && gemResult.price == null) extractCmpPrice(primaryText) else CmpResult(null, null)
+        val entryPrice = gemResult.price ?: cmpResult.price
 
         val searchRegion = when {
             isTpSignal && tpsResult.firstTpIndex != null ->
                 primaryText.substring(0, tpsResult.firstTpIndex)
             !isTpSignal && gemResult.priceIndex != null ->
                 primaryText.substring(0, gemResult.priceIndex)
+            !isTpSignal && cmpResult.priceIndex != null ->
+                primaryText.substring(0, cmpResult.priceIndex)
             else ->
                 primaryText
         }
@@ -188,7 +199,8 @@ class NotificationListener : NotificationListenerService() {
         log(
             "SignalParse",
             "ticker=${ticker ?: "none"}, tps=${tps.size}, gemMarker=$hasGemMarker, " +
-                "gemPrice=${entryPrice ?: "none"}, inputChars=${primaryText.length}"
+                "gemPrice=${gemResult.price ?: "none"}, cmpPrice=${cmpResult.price ?: "none"}, " +
+                "inputChars=${primaryText.length}"
         )
         if (ticker == null) {
             log("Decision", "not signal (ticker=none, tps=${tps.size})")
@@ -197,13 +209,15 @@ class NotificationListener : NotificationListenerService() {
 
         // Format 1 (TP posts): a cashtag/hashtag plus at least three numbered take-profits.
         // Format 2 (gem posts): a cashtag/hashtag plus the marker phrase and a market price line.
+        // Format 3 (cmp posts): a cashtag/hashtag plus a buy context marker and a `CMP <price>`.
         // The trailing cashtag list in gem posts is a decoy — only the first cashtag is
         // ever taken as the ticker.
         if (!isTpSignal && entryPrice == null) {
             log(
                 "Decision",
                 "not signal (ticker=$ticker, tps=${tps.size}, " +
-                    "gemMarker=$hasGemMarker, gemPrice=${entryPrice ?: "none"})"
+                    "gemMarker=$hasGemMarker, gemPrice=${gemResult.price ?: "none"}, " +
+                    "cmpPrice=${cmpResult.price ?: "none"})"
             )
             return
         }
@@ -216,7 +230,11 @@ class NotificationListener : NotificationListenerService() {
         }
         lastLaunchByTicker[ticker] = now
 
-        val format = if (isTpSignal) "tp" else "gem"
+        val format = when {
+            isTpSignal -> "tp"
+            gemResult.price != null -> "gem"
+            else -> "cmp"
+        }
         val tp1 = if (isTpSignal) extractTp1(primaryText) else null
         val pricePart = entryPrice?.let { ", price=$it" } ?: ""
         val tpPart = tp1?.let { ", tp1=$it" } ?: ""
@@ -394,6 +412,11 @@ class NotificationListener : NotificationListenerService() {
         val priceIndex: Int?
     )
 
+    private data class CmpResult(
+        val price: String?,
+        val priceIndex: Int?
+    )
+
     /**
      * Gem-format anchor: returns the posted market price as a plain decimal string, or null
      * unless the post carries both the constant marker phrase and a parseable price line —
@@ -421,6 +444,33 @@ class NotificationListener : NotificationListenerService() {
     private fun hasGemMarker(text: String): Boolean {
         val normalized = text.lowercase().filter { it.isLetterOrDigit() }
         return gemMarker in normalized
+    }
+
+    /**
+     * Cmp-format anchor: returns the posted `CMP` price as a plain decimal string, or null
+     * unless the post carries both a buy context marker (`Buy`, `Buying`, …) and a parseable
+     * `CMP <price>` — e.g. `Buying CMP 0.000552`. Also captures the start position of the
+     * price line so trailing cashtags after it are excluded from ticker extraction.
+     */
+    private fun extractCmpPrice(text: String): CmpResult {
+        if (text.isBlank() || !hasBuyMarker(text)) return CmpResult(null, null)
+
+        val matcher = cmpPricePattern.matcher(text)
+        if (!matcher.find()) return CmpResult(null, null)
+
+        val priceIndex = matcher.start()
+        // Comma decimal separator to dot; BigDecimal keeps the posted precision as-is.
+        val normalized = matcher.group(1)?.replace(',', '.')?.trim() ?: return CmpResult(null, priceIndex)
+        return try {
+            CmpResult(java.math.BigDecimal(normalized).toPlainString(), priceIndex)
+        } catch (e: NumberFormatException) {
+            CmpResult(null, priceIndex)
+        }
+    }
+
+    private fun hasBuyMarker(text: String): Boolean {
+        val normalized = text.lowercase().filter { it.isLetterOrDigit() }
+        return "buy" in normalized
     }
 
     private fun launchTradeScreen(ticker: String, entryPrice: String? = null, tp1: String? = null) {

@@ -2,10 +2,22 @@
  * Live Level 2 depth for one spot pair over KuCoin's public feed.
  *
  * `/market/level2:{symbol}` only pushes *changes*, so a book built from the socket alone starts
- * empty and fills in one diff at a time. The class therefore reseeds from the REST snapshot on
- * every connect, applies each change to that book at whatever rate it arrives, and only then
- * emits a full snapshot on a timer. Merging is cheap and lossless; the throttled emit is what
- * keeps the UI at a sane frame rate.
+ * empty and fills in one diff at a time. The class therefore reseeds from the REST snapshot and
+ * maintains KuCoin's required calibration on top of it:
+ *
+ *  1. Seed: the REST snapshot carries the book plus its `sequence`; it is applied and emitted
+ *     immediately, so the UI paints without waiting for the socket.
+ *  2. Gate: each frame carries `sequenceStart`/`sequenceEnd`. A frame that ends at or before the
+ *     book's sequence is stale and dropped. A frame that starts past `sequenceEnd + 1` means the
+ *     stream has a gap — missed "size=0" deletes would leave consumed levels hanging in the book
+ *     forever (the stuck-ask bug) — so the class resyncs itself instead of applying it.
+ *  3. Buffer & replay: while a resync's REST call is in flight, frames are held rather than
+ *     applied; once the fresh seed lands they are replayed under the same rules and live
+ *     application resumes. Nothing is missed and nothing is double-applied.
+ *  4. Heal: a silent REST reseed runs periodically, and immediately whenever the book crosses
+ *     itself (best bid above best ask — proof of corruption), so no drift outlives those checks.
+ *
+ * Merging is cheap and lossless; the throttled emit is what keeps the UI at a sane frame rate.
  */
 import { request } from './client';
 import { fetchBullet, invalidateBullet } from './socket';
@@ -20,8 +32,19 @@ export type Level2Listener = {
 };
 
 /** How often a merged book is handed to the UI, whatever rate the socket pushes at. */
-const EMIT_MS = 150;
+const EMIT_MS = 100;
 const MAX_BACKOFF_MS = 15_000;
+
+/** Levels held per side, far beyond anything the UI can ever display. */
+const BOOK_LIMIT = 1_000;
+/** Frames held while a reseed is in flight. */
+const BUFFER_LIMIT = 400;
+/** Minimum spacing between self-healing reseeds, so glitches cannot trigger a storm. */
+const RESYNC_MIN_GAP_MS = 2_000;
+/** Failed reseeds tolerated on one connection before falling back to a full reconnect. */
+const RESYNC_RETRIES = 5;
+/** Silent REST reconcile while the connection looks healthy. */
+const RECONCILE_MS = 30_000;
 
 function compare(a: string, b: string): number {
   return compareDecimal(a, b) ?? 0;
@@ -31,22 +54,39 @@ function compareToZero(value: string): number {
   return compareDecimal(value, '0') ?? 1;
 }
 
+/** Accepts the sequence number in either the REST string form or the frame number form. */
+function toSequence(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string') {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return null;
+}
+
 type RawLevel2 = {
-  sequence?: string;
+  sequence?: unknown;
   change?: string;
   changes?: { asks?: unknown; bids?: unknown };
   asks?: unknown;
   bids?: unknown;
+  sequenceStart?: unknown;
+  sequenceEnd?: unknown;
   timestamp?: number;
 };
 
 /** The REST seed for the incremental feed. Public data, so no signing. */
 export async function fetchOrderBookSnapshot(symbol: string): Promise<Level2Snapshot> {
-  const data = await request<{ asks?: unknown; bids?: unknown }>(
+  const data = await request<{ sequence?: unknown; asks?: unknown; bids?: unknown }>(
     '/market/orderbook/level2_100',
     { query: { symbol } }
   );
-  return { symbol, asks: parseLevels(data.asks), bids: parseLevels(data.bids) };
+  return {
+    symbol,
+    asks: parseLevels(data.asks),
+    bids: parseLevels(data.bids),
+    sequence: toSequence(data.sequence) ?? undefined,
+  };
 }
 
 export class Level2Socket {
@@ -54,9 +94,18 @@ export class Level2Socket {
   private pingTimer: ReturnType<typeof setInterval> | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
+  private reconcileTimer: ReturnType<typeof setInterval> | null = null;
+  private resyncTimer: ReturnType<typeof setTimeout> | null = null;
   private attempt = 0;
   private stopped = true;
   private dirty = false;
+  /** Sequence number of the last applied frame or seed; null until the first seed lands. */
+  private bookSequence: number | null = null;
+  /** Held frames while a reseed is in flight; null means live application. */
+  private buffer: RawLevel2[] | null = null;
+  private resyncing = false;
+  private resyncAttempts = 0;
+  private lastResyncAt = 0;
   private readonly asks = new Map<string, string>();
   private readonly bids = new Map<string, string>();
 
@@ -76,6 +125,10 @@ export class Level2Socket {
     this.clearTimers();
     this.asks.clear();
     this.bids.clear();
+    this.bookSequence = null;
+    this.buffer = null;
+    this.resyncing = false;
+    this.resyncAttempts = 0;
     // Drop a book that was merged but not yet emitted, so a stopped socket cannot deliver the
     // previous pair's depth into whatever view has moved on.
     this.dirty = false;
@@ -87,14 +140,21 @@ export class Level2Socket {
     if (this.pingTimer) clearInterval(this.pingTimer);
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     if (this.flushTimer) clearTimeout(this.flushTimer);
+    if (this.reconcileTimer) clearInterval(this.reconcileTimer);
+    if (this.resyncTimer) clearTimeout(this.resyncTimer);
     this.pingTimer = null;
     this.reconnectTimer = null;
     this.flushTimer = null;
+    this.reconcileTimer = null;
+    this.resyncTimer = null;
   }
 
   private async connect(): Promise<void> {
     if (this.stopped) return;
     this.listener.onStatus('connecting');
+    this.buffer = null;
+    this.resyncAttempts = 0;
+    this.lastResyncAt = 0;
 
     // Fetch bullet token and initial order book REST snapshot concurrently
     const [serverResult, snapshotResult] = await Promise.allSettled([
@@ -110,10 +170,10 @@ export class Level2Socket {
     const server = serverResult.value;
 
     if (snapshotResult.status === 'fulfilled' && snapshotResult.value) {
-      const snapshot = snapshotResult.value;
-      if (this.stopped) return;
-      this.replace(snapshot.asks, snapshot.bids);
-      // Immediately deliver initial snapshot so the UI renders the orderbook with zero delay!
+      // Immediately deliver initial snapshot so the UI renders the orderbook with zero delay.
+      // The socket's first frames must line up with this seed's sequence, and any changes that
+      // happened during the fetch are caught by the gap check below rather than lost.
+      this.seed(snapshotResult.value);
       this.listener.onSnapshot(this.snapshot());
     }
 
@@ -140,6 +200,10 @@ export class Level2Socket {
         }
       }, Math.max(server.pingInterval / 2, 5_000));
       this.listener.onStatus('live');
+      // Heals a missing seed right away, and then keeps the book honest every interval. If the
+      // seed did land and no frames were missed, the resync is a cheap no-op reseed.
+      this.reconcileTimer = setInterval(() => void this.resync(), RECONCILE_MS);
+      if (this.bookSequence === null) void this.resync();
       if (this.dirty) this.markDirty();
     };
 
@@ -152,6 +216,11 @@ export class Level2Socket {
         return;
       }
       if (message.type !== 'message' || !message.data) return;
+      if (this.buffer !== null) {
+        this.buffer.push(message.data);
+        if (this.buffer.length > BUFFER_LIMIT) this.buffer.shift();
+        return;
+      }
       if (this.apply(message.data)) this.markDirty();
     };
 
@@ -160,8 +229,7 @@ export class Level2Socket {
     };
 
     socket.onclose = (event: WebSocketCloseEvent) => {
-      if (this.pingTimer) clearInterval(this.pingTimer);
-      this.pingTimer = null;
+      this.clearTimers();
       if (this.socket === socket) this.socket = null;
       if (event?.code === 4001 || event?.code === 4002) {
         invalidateBullet();
@@ -175,12 +243,38 @@ export class Level2Socket {
     this.bids.clear();
     for (const level of asks) this.asks.set(level.price, level.size);
     for (const level of bids) this.bids.set(level.price, level.size);
+    this.trim();
+  }
+
+  /** Applies a REST snapshot as the book's new base, replacing everything that was there. */
+  private seed(snapshot: Level2Snapshot): void {
+    this.replace(snapshot.asks, snapshot.bids);
+    this.bookSequence = snapshot.sequence ?? null;
   }
 
   private apply(data: RawLevel2): boolean {
     if (data.changes) {
+      const start = toSequence(data.sequenceStart);
+      const end = toSequence(data.sequenceEnd);
+
+      // A frame whose latest covered change is already applied carries nothing new.
+      if (end !== null && this.bookSequence !== null && end <= this.bookSequence) return false;
+
+      // A frame that starts past the book's sequence means frames were missed between the two —
+      // most critically their "size=0" deletes. Applying it anyway would resurrect old levels
+      // and never remove consumed ones, so the stream is reseeded first.
+      if (start !== null && this.bookSequence !== null && start > this.bookSequence + 1) {
+        this.requestResync();
+        return false;
+      }
+
       let changed = this.applySide(data.changes.asks, this.asks);
       if (this.applySide(data.changes.bids, this.bids)) changed = true;
+
+      if (end !== null && (this.bookSequence === null || end > this.bookSequence)) {
+        this.bookSequence = end;
+      }
+      if (changed && this.isCrossed()) this.requestResync();
       return changed;
     }
 
@@ -188,6 +282,8 @@ export class Level2Socket {
     const snapshotBids = parseLevels(data.bids);
     if (snapshotAsks.length > 0 || snapshotBids.length > 0) {
       this.replace(snapshotAsks, snapshotBids);
+      const seq = toSequence(data.sequenceEnd ?? data.sequence);
+      if (seq !== null) this.bookSequence = seq;
       return true;
     }
 
@@ -195,14 +291,26 @@ export class Level2Socket {
     return false;
   }
 
+  /**
+   * `changes` entries are `[price, size, sequence]`. Each entry's sequence is the *last*
+   * modification of that price, so an entry at or before the book's sequence is a duplicate of
+   * something already applied and must be ignored; the size on it is not newer.
+   */
   private applySide(value: unknown, book: Map<string, string>): boolean {
-    const levels = parseLevels(value);
+    if (!Array.isArray(value)) return false;
     let changed = false;
-    for (const level of levels) {
-      if (compareToZero(level.size) === 0) {
-        if (book.delete(level.price)) changed = true;
+    for (const entry of value) {
+      if (!Array.isArray(entry)) continue;
+      const [price, size, seq] = entry as unknown[];
+      if (typeof price !== 'string' || typeof size !== 'string') continue;
+      const sequence = toSequence(seq);
+      if (sequence !== null && this.bookSequence !== null && sequence <= this.bookSequence) {
+        continue;
+      }
+      if (compareToZero(size) === 0) {
+        if (book.delete(price)) changed = true;
       } else {
-        book.set(level.price, level.size);
+        book.set(price, size);
         changed = true;
       }
     }
@@ -210,9 +318,22 @@ export class Level2Socket {
   }
 
   /**
-   * The v1 `change` string carries no side, so a level already in the book is updated where it
-   * lives and a new level is placed by comparing its price with the current best. That matches
-   * the book the snapshot established.
+   * A crossed book (best bid above best ask) cannot happen on the exchange side; it only
+   * happens when a side holds levels the other side has moved past — i.e. drift. Treat it as a
+   * trigger for a reseed rather than a state the UI should render.
+   */
+  private isCrossed(): boolean {
+    if (this.asks.size === 0 || this.bids.size === 0) return false;
+    const bestAsk = this.best(this.asks, 'min');
+    const bestBid = this.best(this.bids, 'max');
+    if (bestAsk === null || bestBid === null) return false;
+    return compare(bestBid, bestAsk) > 0;
+  }
+
+  /**
+   * The v1 `change` string carries no side and no sequence, so a level already in the book is
+   * updated where it lives and a new level is placed by comparing its price with the current
+   * best. That matches the book the snapshot established.
    */
   private applyChangeString(change: string): boolean {
     let changed = false;
@@ -248,7 +369,7 @@ export class Level2Socket {
       this.bids.set(price, size);
       return true;
     }
-    // No book context yet; the next snapshot will correct the side.
+    // No book context yet; the next resync will correct the side.
     this.bids.set(price, size);
     return true;
   }
@@ -266,6 +387,72 @@ export class Level2Socket {
       }
     }
     return winner;
+  }
+
+  /** Keeps the maps bounded by dropping the levels farthest from the best quote. */
+  private trim(): void {
+    if (this.asks.size > BOOK_LIMIT) {
+      const prices = [...this.asks.keys()].sort((a, b) => compare(b, a)).slice(0, this.asks.size - BOOK_LIMIT);
+      for (const price of prices) this.asks.delete(price);
+    }
+    if (this.bids.size > BOOK_LIMIT) {
+      const prices = [...this.bids.keys()].sort((a, b) => compare(a, b)).slice(0, this.bids.size - BOOK_LIMIT);
+      for (const price of prices) this.bids.delete(price);
+    }
+  }
+
+  /**
+   * Detects drift and reseeds over it: frames are buffered while the REST call runs so the
+   * gap is bridged without loss, then replayed under the sequence rules.
+   */
+  private requestResync(): void {
+    if (this.stopped || this.socket === null || this.resyncing) return;
+    const now = Date.now();
+    if (now - this.lastResyncAt < RESYNC_MIN_GAP_MS) return;
+    this.lastResyncAt = now;
+    void this.resync();
+  }
+
+  private async resync(): Promise<void> {
+    if (this.stopped || this.socket === null || this.resyncing) return;
+    this.resyncing = true;
+    if (this.buffer === null) this.buffer = [];
+    const socketAtStart = this.socket;
+
+    try {
+      const snapshot = await fetchOrderBookSnapshot(this.symbol);
+      if (this.stopped || this.socket !== socketAtStart) return;
+
+      this.seed(snapshot);
+      const replay = this.buffer;
+      this.buffer = null;
+      for (const frame of replay) {
+        // Gap checks inside `apply` are inert here: `resyncing` makes `requestResync` a no-op,
+        // and the per-entry rules gate whatever replay overlaps the new seed.
+        this.apply(frame);
+      }
+      this.resyncAttempts = 0;
+      // `seed` replaced the whole book, so the UI needs the fresh map even if no replayed frame
+      // reported a change.
+      this.markDirty();
+    } catch {
+      if (this.stopped || this.socket !== socketAtStart) return;
+      this.resyncAttempts += 1;
+      if (this.resyncAttempts >= RESYNC_RETRIES) {
+        // The connection itself is unhealthy in a way reseeding cannot fix; the close handler
+        // schedules a full reconnect, which reseeds from scratch.
+        this.socket?.close();
+        return;
+      }
+      if (this.resyncTimer === null) {
+        this.resyncTimer = setTimeout(() => {
+          this.resyncTimer = null;
+          void this.resync();
+        }, Math.min(1000 * 2 ** (this.resyncAttempts - 1), 5_000));
+      }
+    } finally {
+      this.resyncing = false;
+    }
   }
 
   private markDirty(): void {

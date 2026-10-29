@@ -8,7 +8,7 @@ export type XNotification = {
   packageName: string;
 };
 
-export type SignalFormat = 'tp' | 'gem';
+export type SignalFormat = 'tp' | 'gem' | 'cmp';
 
 export type SignalCheckResult = {
   isSignal: boolean;
@@ -16,7 +16,7 @@ export type SignalCheckResult = {
   ticker: string | null;
   tp1: number | null;
   tpCount: number;
-  /** Market price from a gem-format post, as the plain decimal string it was posted as. */
+  /** Market price from a gem- or cmp-format post, as the plain decimal string it was posted as. */
   entry: string | null;
 };
 
@@ -299,6 +299,26 @@ function hasGemMarker(text: string): boolean {
 }
 
 /**
+ * Cmp-format anchor, mirroring the native listener: a "buy" context marker (covers `Buying`,
+ * `Buy`, … after letters/digits-only normalization) plus a literal `CMP <price>` — e.g.
+ * `$CHO on Kucoin Buying CMP 0.000552 Keeping high targets SL manage`. The word `CMP` is the
+ * anchor because it carries an exact closing price, unlike prose ("high targets", "SL manage").
+ */
+function hasBuyMarker(text: string): boolean {
+  const normalized = text.toLowerCase().replace(/[^a-z0-9]/g, '');
+  return normalized.includes('buy');
+}
+
+function extractCmpEntry(text: string): { entry: string | null; priceIndex: number | null } {
+  if (!hasBuyMarker(text)) return { entry: null, priceIndex: null };
+  const match = text.match(/\bCMP\b\s*[-–:=]?\s*([\d.,]+)/i);
+  if (!match || match.index === undefined) return { entry: null, priceIndex: null };
+  const normalized = match[1].replace(',', '.');
+  const valid = /^\d+(\.\d+)?$/.test(normalized) ? normalized : null;
+  return { entry: valid, priceIndex: match.index };
+}
+
+/**
  * Gem-format anchor, mirroring the native listener: the constant marker phrase plus a
  * `Current market price - X $` line. Returns the price as the plain posted decimal string
  * and the character index where the price line starts (used as a cutoff for decoys).
@@ -325,20 +345,27 @@ export function checkForSignal(notification: XNotification): SignalCheckResult {
 
   // Format 1: cashtag/hashtag + ≥3 numbered TPs (ticker searched before the first TP).
   // Format 2: cashtag/hashtag + gem marker + market price (ticker searched before market price).
-  // Trailing cashtag lists at the bottom of both formats are decoys and excluded by the cutoff.
+  // Format 3: cashtag/hashtag + buy marker + a literal `CMP <price>`.
+  // Trailing cashtag lists at the bottom of all formats are decoys and excluded by the cutoff.
   const isTpSignal = tpCount >= 3;
   const gemResult = isTpSignal ? { entry: null, priceIndex: null } : extractGemEntry(primaryText);
-  const entry = gemResult.entry;
+  const cmpResult =
+    isTpSignal || gemResult.entry
+      ? { entry: null, priceIndex: null }
+      : extractCmpEntry(primaryText);
+  const entry = gemResult.entry ?? cmpResult.entry;
 
+  const cutoffIndex = gemResult.priceIndex ?? cmpResult.priceIndex;
   const searchRegion =
     isTpSignal && firstTpIndex !== null
       ? primaryText.slice(0, firstTpIndex)
-      : !isTpSignal && gemResult.priceIndex !== null
-        ? primaryText.slice(0, gemResult.priceIndex)
+      : !isTpSignal && cutoffIndex !== null
+        ? primaryText.slice(0, cutoffIndex)
         : primaryText;
 
   const ticker = extractTicker(searchRegion);
-  const format: SignalFormat | null = isTpSignal ? 'tp' : entry !== null ? 'gem' : null;
+  const format: SignalFormat | null =
+    isTpSignal ? 'tp' : gemResult.entry !== null ? 'gem' : cmpResult.entry !== null ? 'cmp' : null;
   const isSignal = ticker !== null && format !== null;
 
   return { isSignal, format, ticker, tp1, tpCount, entry };

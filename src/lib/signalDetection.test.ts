@@ -135,6 +135,62 @@ test('detects #UNION in gem post with trailing $q decoys at the bottom', () => {
   eq(result.entry, '0.0001155');
 });
 
+test('detects the lite cmp format with cashtag ($CHO on Kucoin)', () => {
+  const text = `$CHO on Kucoin Buying CMP 0.000552 Keeping high targets SL manage`;
+
+  const result = checkForSignal(makeNotification(text));
+  eq(result.isSignal, true);
+  eq(result.format, 'cmp');
+  eq(result.ticker, 'CHO');
+  eq(result.entry, '0.000552');
+});
+
+test('detects the lite cmp format across wrapped X lines', () => {
+  const text = `$CHO on Kucoin
+
+Buying CMP 0.000552
+
+Keeping high targets
+SL manage`;
+
+  const result = checkForSignal(makeNotification(text));
+  eq(result.isSignal, true);
+  eq(result.format, 'cmp');
+  eq(result.ticker, 'CHO');
+  eq(result.entry, '0.000552');
+});
+
+test('detects the lite cmp format with colon separator and trailing decoys', () => {
+  const text = `$CHO on Kucoin Buying CMP: 0.000552 Keeping high targets SL manage $BTC $ETH`;
+
+  const result = checkForSignal(makeNotification(text));
+  eq(result.isSignal, true);
+  eq(result.format, 'cmp');
+  eq(result.ticker, 'CHO');
+  eq(result.entry, '0.000552');
+});
+
+test('ignores a CMP price mention without the buying context', () => {
+  const text = `$CHO market review. CMP 0.000552 while we wait for confirmation`;
+
+  const result = checkForSignal(makeNotification(text));
+  eq(result.isSignal, false);
+  eq(result.format, null);
+});
+
+test('gem entry wins over a stray CMP mention in the same post', () => {
+  const text = `$SKY
+Buying this GEM on #KuCoin
+Current market price - 0.0007306 $
+CMP update above`;
+
+  const result = checkForSignal(makeNotification(text));
+  eq(result.isSignal, true);
+  eq(result.format, 'gem');
+  eq(result.ticker, 'SKY');
+  eq(result.entry, '0.0007306');
+});
+
 test('detects plain-text ticker Ithaca before Mc 400k and TPs', () => {
   const text = `Ithaca
 Mc 400k👀🚀

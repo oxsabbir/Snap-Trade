@@ -9,7 +9,7 @@ import {
 
 /**
  * Turns incoming depth messages into the rows the column draws.
- * Level2Socket already bounds snapshot emissions to at most every 150ms.
+ * Level2Socket already bounds snapshot emissions to at most every 100ms.
  * Deriving depth via useMemo computes the depth rows synchronously on each snapshot
  * without any cascading renders or artificial delay timers.
  *
