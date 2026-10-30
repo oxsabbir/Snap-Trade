@@ -5,8 +5,11 @@
  * empty and fills in one diff at a time. The class therefore reseeds from the REST snapshot and
  * maintains KuCoin's required calibration on top of it:
  *
- *  1. Seed: the REST snapshot carries the book plus its `sequence`; it is applied and emitted
- *     immediately, so the UI paints without waiting for the socket.
+ *  1. Socket first: only the token gates the connection. The WebSocket opens while the REST
+ *     snapshot is still in flight, and the seed paints the moment it arrives — closer to
+ *     instant on slow networks. A seed that arrives after the live stream has already run
+ *     ahead of it is discarded (seeding stale levels would create the very not-buyable ghosts
+ *     the engine exists to prevent) and the race heals via the gap/reseed rules instead.
  *  2. Gate: each frame carries `sequenceStart`/`sequenceEnd`. A frame that ends at or before the
  *     book's sequence is stale and dropped. A frame that starts past `sequenceEnd + 1` means the
  *     stream has a gap — most critically its "size=0" deletes — so the class asks for a reseed.
@@ -166,30 +169,45 @@ export class Level2Socket {
     this.resyncAttempts = 0;
     this.lastResyncAt = 0;
 
-    // Fetch bullet token and initial order book REST snapshot concurrently
-    const [serverResult, snapshotResult] = await Promise.allSettled([
-      fetchBullet(),
-      fetchOrderBookSnapshot(this.symbol),
-    ]);
-    if (this.stopped) return;
-
-    if (serverResult.status === 'rejected') {
+    // The WebSocket's only true prerequisite is the token. The REST seed is a UI need, not a
+    // connection need — awaiting it before touching the socket added one full round trip of
+    // "connecting" on slow networks (on mobile data that was the visible sluggish connect).
+    // Token in hand → socket opens immediately; the seed is picked up mid-flight whenever it
+    // arrives, and if the live stream has already run ahead of it the gap rules handle it.
+    let server: Awaited<ReturnType<typeof fetchBullet>>;
+    try {
+      server = await fetchBullet();
+    } catch {
       this.scheduleReconnect();
       return;
     }
-    const server = serverResult.value;
-
-    if (snapshotResult.status === 'fulfilled' && snapshotResult.value) {
-      // Immediately deliver initial snapshot so the UI renders the orderbook with zero delay.
-      // The socket's first frames must line up with this seed's sequence, and any changes that
-      // happened during the fetch are caught by the gap check below rather than lost.
-      this.seed(snapshotResult.value);
-      this.listener.onSnapshot(this.snapshot());
-    }
+    if (this.stopped) return;
 
     const url = `${server.endpoint}?token=${encodeURIComponent(server.token)}&pingInterval=${server.pingInterval}`;
     const socket = new WebSocket(url);
     this.socket = socket;
+
+    void fetchOrderBookSnapshot(this.symbol)
+      .then((snapshot) => {
+        if (this.stopped || this.socket !== socket) return;
+        // Live frames may already have been applied while this fetch was in flight, so only a
+        // snapshot NEWER than what the book holds is a valid seed. Seeding an older snapshot
+        // would overwrite fresh levels with stale ones — resurrecting exactly the not-buyable
+        // prices this engine exists to prevent — so it is discarded and a reseed does the
+        // authoritative heal instead. Same outcome as the seed-first order, minus the delay.
+        const seq = toSequence(snapshot.sequence);
+        if (seq === null || this.bookSequence === null || seq > this.bookSequence) {
+          this.seed(snapshot);
+          this.listener.onSnapshot(this.snapshot());
+        } else {
+          this.requestResync();
+        }
+      })
+      .catch(() => {
+        // No seed is survivable, but never silently: nudge the heal so the book is replaced by
+        // an authoritative snapshot either way — `resync` owns its own retries and backoff.
+        this.requestResync();
+      });
 
     // Every handler re-checks `stopped`, because close() is asynchronous and a frame already in
     // the event queue can still run after stop() returned.
