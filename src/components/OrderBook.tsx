@@ -234,6 +234,7 @@ function OrderBookBase({ symbol, takerFeeRate, onPriceSelect, onInitialSnapshot,
         showQuickBuy ? (
           <View style={[styles.asks, { height: quickBuyHeight }]}>
             <QuickBuy
+              symbol={symbol}
               asks={depth.asks}
               quoteCurrency={quoteCurrency}
               rules={rules ?? null}

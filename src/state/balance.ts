@@ -152,6 +152,34 @@ export function refreshBalance(): void {
 }
 
 /**
+ * Re-reads the balance and resolves once that read has landed in the store.
+ *
+ * `refreshBalance` is fire-and-forget because its callers render, so nothing waits on it. The
+ * replace flow in QuickBuy cannot work that way: it sizes the follow-up order against funds
+ * released by a cancel, and passing the selection before those funds are in the store would
+ * make the form compute "All" from a pre-cancel zero. When a read is already running, the
+ * caller waits for it and then forces one more, because a change could have landed mid-read.
+ */
+export async function awaitBalanceRefresh(): Promise<BalanceState> {
+  emit({ isRefreshing: state.available !== EMPTY });
+  if (inFlight === null) {
+    inFlight = load().finally(() => {
+      inFlight = null;
+    });
+  } else {
+    const prior = inFlight;
+    await prior;
+    if (inFlight === null) {
+      inFlight = load().finally(() => {
+        inFlight = null;
+      });
+    }
+  }
+  await inFlight;
+  return getBalanceState();
+}
+
+/**
  * Fills the balance the first time something needs it, and does nothing thereafter.
  *
  * This exists because the route and the order form both mount and both need a balance, and they

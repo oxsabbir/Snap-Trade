@@ -9,13 +9,18 @@
  *     immediately, so the UI paints without waiting for the socket.
  *  2. Gate: each frame carries `sequenceStart`/`sequenceEnd`. A frame that ends at or before the
  *     book's sequence is stale and dropped. A frame that starts past `sequenceEnd + 1` means the
- *     stream has a gap — missed "size=0" deletes would leave consumed levels hanging in the book
- *     forever (the stuck-ask bug) — so the class resyncs itself instead of applying it.
- *  3. Buffer & replay: while a resync's REST call is in flight, frames are held rather than
- *     applied; once the fresh seed lands they are replayed under the same rules and live
- *     application resumes. Nothing is missed and nothing is double-applied.
- *  4. Heal: a silent REST reseed runs periodically, and immediately whenever the book crosses
- *     itself (best bid above best ask — proof of corruption), so no drift outlives those checks.
+ *     stream has a gap — most critically its "size=0" deletes — so the class asks for a reseed.
+ *     But the frame is also applied live, without advancing trust past what its per-entry
+ *     sequences prove: dropping it instead froze the whole book for the reseed window, and on
+ *     fast markets that window is the norm — the REST seed is always older than the socket's
+ *     first pushed frames, so a gapped frame arrives the moment subscribing finishes.
+ *  3. Buffer & replay: while a reseed's REST call is in flight, frames are held *and* applied
+ *     live. Once the fresh seed lands they are replayed under the per-entry sequence rules,
+ *     which skip anything the live application already covered — the heal stays lossless
+ *     without ever pausing what the user sees.
+ *  4. Heal: a silent REST reseed runs periodically, and whenever the book crosses itself
+ *     (best bid above best ask — proof of corruption) the crossing is caught at emit time, so
+ *     no drift outlives those checks.
  *
  * Merging is cheap and lossless; the throttled emit is what keeps the UI at a sane frame rate.
  */
@@ -39,8 +44,13 @@ const MAX_BACKOFF_MS = 15_000;
 const BOOK_LIMIT = 1_000;
 /** Frames held while a reseed is in flight. */
 const BUFFER_LIMIT = 400;
-/** Minimum spacing between self-healing reseeds, so glitches cannot trigger a storm. */
-const RESYNC_MIN_GAP_MS = 2_000;
+/**
+ * Minimum spacing between self-healing reseeds. Deliberately short: gapped frames are applied
+ * live now, so a reseed costs nothing but one REST call, and finishing the heal inside a single
+ * round trip (~200–500ms) is what keeps a consumed level from lingering long enough to be
+ * mistaken for a price that is still buyable.
+ */
+const RESYNC_MIN_GAP_MS = 500;
 /** Failed reseeds tolerated on one connection before falling back to a full reconnect. */
 const RESYNC_RETRIES = 5;
 /** Silent REST reconcile while the connection looks healthy. */
@@ -216,10 +226,13 @@ export class Level2Socket {
         return;
       }
       if (message.type !== 'message' || !message.data) return;
+      // While a reseed is in flight the frame is both applied live and held for the post-seed
+      // replay. Applying costs nothing extra — the per-entry sequence rules make the two passes
+      // idempotent over each other — and it is what keeps the book stepping during the REST
+      // round trip instead of holding whatever was on screen when the reseed started.
       if (this.buffer !== null) {
         this.buffer.push(message.data);
         if (this.buffer.length > BUFFER_LIMIT) this.buffer.shift();
-        return;
       }
       if (this.apply(message.data)) this.markDirty();
     };
@@ -261,11 +274,13 @@ export class Level2Socket {
       if (end !== null && this.bookSequence !== null && end <= this.bookSequence) return false;
 
       // A frame that starts past the book's sequence means frames were missed between the two —
-      // most critically their "size=0" deletes. Applying it anyway would resurrect old levels
-      // and never remove consumed ones, so the stream is reseeded first.
+      // most critically their "size=0" deletes. A reseed is requested, but the frame is applied
+      // anyway: its entries carry their own sequences and are newer than the book, so the top of
+      // the book keeps moving while the heal is in flight. Common on fast markets, where the
+      // gap between the REST seed and the socket's live stream is the ordinary first contact —
+      // dropping frames here was exactly what froze the ask side during fast moves.
       if (start !== null && this.bookSequence !== null && start > this.bookSequence + 1) {
         this.requestResync();
-        return false;
       }
 
       let changed = this.applySide(data.changes.asks, this.asks);
@@ -274,7 +289,6 @@ export class Level2Socket {
       if (end !== null && (this.bookSequence === null || end > this.bookSequence)) {
         this.bookSequence = end;
       }
-      if (changed && this.isCrossed()) this.requestResync();
       return changed;
     }
 
@@ -448,7 +462,7 @@ export class Level2Socket {
         this.resyncTimer = setTimeout(() => {
           this.resyncTimer = null;
           void this.resync();
-        }, Math.min(1000 * 2 ** (this.resyncAttempts - 1), 5_000));
+        }, Math.min(500 * 2 ** (this.resyncAttempts - 1), 3_000));
       }
     } finally {
       this.resyncing = false;
@@ -462,6 +476,11 @@ export class Level2Socket {
       this.flushTimer = null;
       if (this.stopped || !this.dirty) return;
       this.dirty = false;
+      // The crossed-book check lives at emit time rather than per frame: `best()` scans every
+      // level on both sides, and during fast markets that ran dozens of times a second against
+      // a 1000-level book. Once per emit it is one scan per 100ms — imperceptible — and the
+      // reseed it triggers heals the same drift.
+      if (this.isCrossed()) this.requestResync();
       this.listener.onSnapshot(this.snapshot());
     }, EMIT_MS);
   }
