@@ -2,8 +2,9 @@ import {
   memo,
   useCallback,
   useMemo,
+  useRef,
   useState } from "react";
-import { View } from '@/components/AppLayout';
+import { Pressable, View } from '@/components/AppLayout';
 import { ActivityIndicator, FlatList, Keyboard, RefreshControl, type ListRenderItem, StyleSheet } from 'react-native';
 import { Text } from '@/components/AppText';
 import { useIsFocused } from "expo-router";
@@ -22,6 +23,7 @@ import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { searchMarkets, type QuoteFilter } from "@/lib/kucoin/market";
 import type { SpotMarket } from "@/lib/kucoin/types";
 import { useFavorites } from "@/state/favorites";
+import { CloseIcon } from "@/components/Icons";
 import { spacing } from "@/theme";
 import { useTheme } from "@/theme/ThemeProvider";
 import { createThemedStyles } from "@/theme/themedStyles";
@@ -133,10 +135,12 @@ const MarketsList = memo(function MarketsList({
 export default function MarketsScreen() {
   const { markets, isLoading, isRefreshing, error, lastUpdated, refresh } =
     useSpotMarkets(useIsFocused());
+  const { colors } = useTheme();
   const styles = useStyles();
   const [search, setSearch] = useState("");
   const [tab, setTab] = useState<TabValue>("All");
   const [isSearchFocused, setIsSearchFocused] = useState(false);
+  const searchInputRef = useRef<any>(null);
 
   // Favorites outlive this screen — the store persists them to AsyncStorage, so a star sticks
   // across restarts and appears identically on the next cold start.
@@ -184,6 +188,15 @@ export default function MarketsScreen() {
     setIsSearchFocused(false);
   }, []);
 
+  /** Leaves search mode entirely: drops the query, the keyboard, and the suggestion panel. */
+  const exitSearch = useCallback(() => {
+    searchInputRef.current?.blur();
+    setSearch("");
+    setIsSearchFocused(false);
+    setTab("All");
+    Keyboard.dismiss();
+  }, []);
+
   /** Filters the list; it never records the query, only running a search does. */
   const commitSearch = useCallback((query: string) => {
     setSearch(query);
@@ -207,14 +220,28 @@ export default function MarketsScreen() {
             {lastUpdated ? ` · ${formatTime(lastUpdated)}` : ""}
           </Text>
         </View>
-        <SearchBar
-          value={search}
-          onChangeText={setSearch}
-          onFocus={handleSearchFocus}
-          onBlur={handleSearchBlur}
-          onSubmit={handleSubmit}
-          placeholder="Search coin, e.g. BTC"
-        />
+        <View style={styles.searchRow}>
+          <SearchBar
+            inputRef={searchInputRef}
+            value={search}
+            onChangeText={setSearch}
+            onFocus={handleSearchFocus}
+            onBlur={handleSearchBlur}
+            onSubmit={handleSubmit}
+            placeholder="Search coin, e.g. BTC"
+          />
+          {isSearchFocused && (
+            <Pressable
+              onPress={exitSearch}
+              hitSlop={12}
+              style={styles.cancelButton}
+              accessibilityRole="button"
+              accessibilityLabel="Cancel search"
+            >
+              <CloseIcon size={20} color={colors.textMuted} />
+            </Pressable>
+          )}
+        </View>
       </View>
 
       {/*
@@ -345,6 +372,14 @@ const useStyles = createThemedStyles((colors) =>
     },
     tabs: {
       paddingBottom: spacing.md,
+    },
+    searchRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.sm,
+    },
+    cancelButton: {
+      padding: spacing.xs,
     },
     listContent: {
       paddingHorizontal: spacing.lg,

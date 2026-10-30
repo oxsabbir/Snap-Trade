@@ -1,3 +1,4 @@
+import type { ComponentRef, Ref } from "react";
 import { Pressable, View } from '@/components/AppLayout';
 import { StyleSheet } from 'react-native';
 import { TextInput } from '@/components/AppText';
@@ -14,6 +15,8 @@ type Props = {
   onBlur?: () => void;
   onSubmit?: () => void;
   placeholder?: string;
+  /** Assigned so the owner can blur (cancel out of search mode) from outside. */
+  inputRef?: Ref<ComponentRef<typeof TextInput>>;
 };
 
 export function SearchBar({
@@ -23,6 +26,7 @@ export function SearchBar({
   onBlur,
   onSubmit,
   placeholder = 'Search coin',
+  inputRef,
 }: Props) {
   const { colors, scheme } = useTheme();
   const styles = useStyles();
@@ -32,6 +36,7 @@ export function SearchBar({
         <SearchIcon />
       </View>
       <TextInput
+        ref={inputRef}
         value={value}
         onChangeText={onChangeText}
         onFocus={onFocus}
