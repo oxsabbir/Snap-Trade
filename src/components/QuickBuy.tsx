@@ -253,8 +253,11 @@ const useStyles = createThemedStyles((colors) =>
       justifyContent: "center",
       overflow: "hidden",
       borderWidth: StyleSheet.hairlineWidth,
-      borderColor: colors.border,
-      backgroundColor: colors.surfaceAlt,
+      // Tinted green card with a green border — deliberately NOT the book-row look (transparent
+      // background, no border), so quick buy reads as something you press rather than a depth
+      // level you read.
+      borderColor: colors.accentSoft,
+      backgroundColor: colors.upFill,
     },
     buttonDisabled: {
       opacity: 0.55,

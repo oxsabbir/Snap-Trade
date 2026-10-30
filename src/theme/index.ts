@@ -20,7 +20,9 @@ export const darkColors = {
   overlay: "rgba(0,0,0,0.55)",
   shadow: "#000000",
   onAccent: "#FFFFFF",
-  quickBarBG: "rgba(55, 176, 7, 0.25)",
+  // Same teal family as `up`/`accent` — the fill bar sits beside green text, a green border and
+  // a green-tinted card, so the older raw yellow-green hue read as two different greens.
+  quickBarBG: "rgba(0, 180, 125, 0.26)",
 };
 
 export type ThemeColors = Record<keyof typeof darkColors, string>;
@@ -39,7 +41,10 @@ export const lightColors: ThemeColors = {
   down: "#EB4D5D",
   upText: "#00805A",
   downText: "#CF2F44",
-  warning: "#F0B90B",
+  // Dark amber rather than the dark mode's #F0B90B: that yellow is ~2:1 against near-white —
+  // invisible — while this holds readable contrast and still reads as "caution" everywhere the
+  // token is used (slippage warning, fills, indicators).
+  warning: "#B45309",
   upFill: "rgba(0,180,125,0.10)",
   downFill: "rgba(235,77,93,0.10)",
   gridLine: "#F0F0F0",
@@ -47,7 +52,10 @@ export const lightColors: ThemeColors = {
   overlay: "rgba(0,0,0,0.4)",
   shadow: "#000000",
   onAccent: "#FFFFFF",
-  quickBarBG: "rgba(240, 158, 76, 0.25)",
+  // Green, in step with the dark palette: the quick-buy fill bar is a *buy* indicator, and the
+  // light palette had it switching to an orange wash that disagreed with the green percentage
+  // text and border drawn over it.
+  quickBarBG: "rgba(0, 150, 80, 0.22)",
 };
 
 /** Alias so existing imports keep working during the migration. */
