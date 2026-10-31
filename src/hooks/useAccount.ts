@@ -5,8 +5,9 @@ import { buildPortfolio, fetchAccounts, type Portfolio } from '@/lib/kucoin/acco
 import { fetchAllTickers } from '@/lib/kucoin/market';
 import { fetchAccountInfo } from '@/lib/kucoin/profile';
 import { describeError } from '@/lib/kucoin/errors';
-import type { AccountInfo, PortfolioAsset } from '@/lib/kucoin/types';
+import type { AccountInfo, PortfolioAsset, Ticker } from '@/lib/kucoin/types';
 import { useApiCredentials } from '@/state/apiCredentials';
+import { recordPortfolioSnapshot } from '@/state/portfolioHistory';
 
 const POLL_INTERVAL_MS = 30_000;
 
@@ -18,6 +19,8 @@ export type AccountState = {
   assets: PortfolioAsset[];
   total: number;
   accountInfo: AccountInfo | null;
+  /** Raw tickers behind `portfolio`'s prices, shared with PnL so it needs no second fetch. */
+  tickers: Ticker[];
   error: string | null;
   lastUpdated: number | null;
   refresh: () => void;
@@ -39,6 +42,7 @@ export function useAccount(): AccountState {
 
   const [status, setStatus] = useState<AccountStatus>('loading');
   const [portfolio, setPortfolio] = useState<Portfolio>(EMPTY_PORTFOLIO);
+  const [tickers, setTickers] = useState<Ticker[]>([]);
   const [accountInfo, setAccountInfo] = useState<AccountInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<number | null>(null);
@@ -48,6 +52,8 @@ export function useAccount(): AccountState {
     const next = buildPortfolio(accounts, ticker);
     if (!mountedRef.current) return;
     setPortfolio(next);
+    setTickers(ticker);
+    recordPortfolioSnapshot(next.total);
     setLastUpdated(Date.now());
     setError(null);
     setStatus('ready');
@@ -115,6 +121,7 @@ export function useAccount(): AccountState {
     assets: portfolio.assets,
     total: portfolio.total,
     accountInfo,
+    tickers,
     error,
     lastUpdated,
     refresh,

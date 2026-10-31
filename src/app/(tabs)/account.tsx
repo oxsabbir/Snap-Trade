@@ -22,7 +22,7 @@ function maskApiKey(apiKey: string | null): string {
 }
 
 export default function AccountScreen() {
-  const { status, portfolio, accountInfo, lastUpdated, error, refresh } = useAccount();
+  const { status, portfolio, accountInfo, tickers, lastUpdated, error, refresh } = useAccount();
   const profile = useProfile();
   const { apiKey, disconnect } = useApiCredentials();
   const { colors } = useTheme();
@@ -115,6 +115,7 @@ export default function AccountScreen() {
             onRename={setDisplayName}
             accountInfo={accountInfo}
             portfolio={portfolio}
+            tickers={tickers}
             lastUpdated={lastUpdated}
           />
 

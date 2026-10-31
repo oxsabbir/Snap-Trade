@@ -52,9 +52,9 @@ function toNumber(value: string | undefined): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-type PriceIndex = { usdt: Map<string, number>; btc: Map<string, number> };
+export type PriceIndex = { usdt: Map<string, number>; btc: Map<string, number> };
 
-function buildPriceIndex(tickers: Ticker[]): PriceIndex {
+export function buildPriceIndex(tickers: Ticker[]): PriceIndex {
   const usdt = new Map<string, number>();
   const btc = new Map<string, number>();
 
@@ -78,7 +78,7 @@ function buildPriceIndex(tickers: Ticker[]): PriceIndex {
  * USDT value of one unit. Direct USDT pair first, then via BTC for the long tail of
  * altcoins that only quote against BTC. Zero means "unpriceable", not "worth nothing".
  */
-function unitPrice(currency: string, prices: PriceIndex): number {
+export function unitPrice(currency: string, prices: PriceIndex): number {
   const direct = prices.usdt.get(currency);
   if (direct !== undefined) return direct;
 
