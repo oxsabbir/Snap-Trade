@@ -42,7 +42,13 @@ export type Level2Listener = {
 
 /** How often a merged book is handed to the UI, whatever rate the socket pushes at. */
 const EMIT_MS = 100;
-const MAX_BACKOFF_MS = 15_000;
+/**
+ * Reconnect wait cap, reached only after escalating failures (1s → 2s → 4s → 5s). Shorts cap
+ * because the common mobile-data failure is one-sided: the route dies while KuCoin stays fine,
+ * and the path is usually usable again within seconds — a long wall of waiting would just be
+ * dead green-dot time. Foregrounding the app retries instantly regardless.
+ */
+const MAX_BACKOFF_MS = 5_000;
 
 /**
  * A stalled handshake never fires onopen/onerror/onclose, so the connecting phase needs its

@@ -2,7 +2,13 @@ import { AppState } from 'react-native';
 
 const BASE_URL = 'https://api.kucoin.com';
 const REQUEST_TIMEOUT_MS = 10_000;
-const MAX_BACKOFF_MS = 15_000;
+/**
+ * Reconnect wait cap, reached only after escalating failures (1s → 2s → 4s → 5s). Shorts cap
+ * because the common mobile-data failure is one-sided: the route dies while KuCoin stays fine,
+ * and the path is usually usable again within seconds — a long wall of waiting would just be
+ * dead green-dot time. Foregrounding the app retries instantly regardless.
+ */
+const MAX_BACKOFF_MS = 5_000;
 const THROTTLE_MS = 200;
 
 /** Deadlines for socket health, mirroring `level2.ts` (carrier-safe reconnects). */

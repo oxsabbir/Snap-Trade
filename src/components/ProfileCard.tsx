@@ -7,9 +7,9 @@ import { Pressable, View } from '@/components/AppLayout';
 import { StyleSheet, type NativeSyntheticEvent, type TextInput as NativeTextInput, type TextInputSubmitEditingEventData } from 'react-native';
 import { Text, TextInput } from '@/components/AppText';
 
-import { AccountPnl } from '@/components/AccountPnl';
 import { Avatar } from '@/components/Avatar';
 import { EyeIcon, EyeOffIcon } from '@/components/Icons';
+import { TodayPnl } from '@/components/TodayPnl';
 import type { Portfolio } from '@/lib/kucoin/account';
 import type { AccountInfo, Ticker } from '@/lib/kucoin/types';
 import { radius, spacing } from '@/theme';
@@ -141,6 +141,8 @@ function ProfileCardComponent({ displayName, onRename, accountInfo, portfolio, t
         {money(portfolio.total)}
       </Text>
 
+      {tickers && tickers.length > 0 ? <TodayPnl tickers={tickers} /> : null}
+
       <View style={styles.walletRow}>
         <WalletPill
           label="Funding"
@@ -153,8 +155,6 @@ function ProfileCardComponent({ displayName, onRename, accountInfo, portfolio, t
           count={portfolio.trading.assets.length}
         />
       </View>
-
-      {tickers && tickers.length > 0 ? <AccountPnl tickers={tickers} /> : null}
 
       <View style={styles.footer}>
         <Text style={styles.footerText}>

@@ -17,7 +17,13 @@
 import { request } from '@/lib/kucoin/client';
 import { getCachedCredentials } from '@/lib/kucoin/credentials';
 
-const MAX_BACKOFF_MS = 15_000;
+/**
+ * Reconnect wait cap, reached only after escalating failures (1s → 2s → 4s → 5s). Shorts cap
+ * because the common mobile-data failure is one-sided: the route dies while KuCoin stays fine,
+ * and the path is usually usable again within seconds — a long wall of waiting would just be
+ * dead green-dot time. Foregrounding the app retries instantly regardless.
+ */
+const MAX_BACKOFF_MS = 5_000;
 const BULLET_TTL_MS = 60 * 60 * 1000; // tokens last 24h; re-fetch hourly to stay well inside it
 
 const ORDER_TOPIC = '/spotMarket/tradeOrdersV2';
