@@ -1,7 +1,14 @@
+import { AppState } from 'react-native';
+
 const BASE_URL = 'https://api.kucoin.com';
 const REQUEST_TIMEOUT_MS = 10_000;
 const MAX_BACKOFF_MS = 15_000;
 const THROTTLE_MS = 200;
+
+/** Deadlines for socket health, mirroring `level2.ts` (carrier-safe reconnects). */
+const CONNECT_TIMEOUT_MS = 10_000;
+const LIVENESS_MS = 25_000;
+const LIVENESS_CHECK_MS = 5_000;
 
 export type TickerUpdate = {
   symbol: string;
@@ -99,8 +106,13 @@ export class TickerSocket {
   private socket: WebSocket | null = null;
   private pingTimer: ReturnType<typeof setInterval> | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private connectTimer: ReturnType<typeof setTimeout> | null = null;
+  private liveTimer: ReturnType<typeof setInterval> | null = null;
+  /** Last moment the server demonstrably answered (a tick or a pong). */
+  private lastMessageAt = 0;
   private attempt = 0;
   private stopped = true;
+  private appStateSubscription: { remove(): void } | null = null;
   private latest: TickerUpdate | null = null;
   private pendingSize = 0;
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -114,11 +126,22 @@ export class TickerSocket {
   start(): void {
     if (!this.stopped) return;
     this.stopped = false;
+    // Android tears down cellular routes while the app is backgrounded; coming back to the
+    // foreground is the natural moment to stop waiting out a long backoff and try again now.
+    this.appStateSubscription?.remove();
+    this.appStateSubscription = AppState.addEventListener('change', (state) => {
+      if (state !== 'active' || this.stopped || this.reconnectTimer === null) return;
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+      void this.connect();
+    });
     void this.connect();
   }
 
   stop(): void {
     this.stopped = true;
+    this.appStateSubscription?.remove();
+    this.appStateSubscription = null;
     this.clearTimers();
     // Drop anything already parsed but not yet flushed. Without this a tick that
     // arrived just before stop() is still delivered by its pending throttle timer,
@@ -134,9 +157,13 @@ export class TickerSocket {
     if (this.pingTimer) clearInterval(this.pingTimer);
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     if (this.flushTimer) clearTimeout(this.flushTimer);
+    if (this.connectTimer) clearTimeout(this.connectTimer);
+    if (this.liveTimer) clearInterval(this.liveTimer);
     this.pingTimer = null;
     this.reconnectTimer = null;
     this.flushTimer = null;
+    this.connectTimer = null;
+    this.liveTimer = null;
   }
 
   private async connect(): Promise<void> {
@@ -156,12 +183,33 @@ export class TickerSocket {
     const socket = new WebSocket(url);
     this.socket = socket;
 
+    // A handshake can stall forever without ever firing onopen/onerror/onclose; without this
+    // deadline the chart's status dot sits on "connecting" indefinitely.
+    this.connectTimer = setTimeout(() => {
+      this.connectTimer = null;
+      if (this.stopped || this.socket !== socket || socket.readyState === WebSocket.OPEN) {
+        return;
+      }
+      socket.onopen = socket.onerror = socket.onmessage = socket.onclose = null;
+      try {
+        socket.close();
+      } catch {
+        // Some runtimes refuse to close a CONNECTING socket; dropping the reference is enough.
+      }
+      this.socket = null;
+      this.scheduleReconnect();
+    }, CONNECT_TIMEOUT_MS);
+
     // Every handler below re-checks `stopped`. Closing a WebSocket is asynchronous and
     // does not discard work the JS event loop has already dispatched, so a message or
     // error from the previous symbol can still run after stop() returned. Callers rely
     // on a stopped socket being completely inert.
     socket.onopen = () => {
       if (this.stopped) return;
+      if (this.connectTimer) {
+        clearTimeout(this.connectTimer);
+        this.connectTimer = null;
+      }
       this.attempt = 0;
       socket.send(
         JSON.stringify({
@@ -171,32 +219,49 @@ export class TickerSocket {
           response: true,
         })
       );
+      this.lastMessageAt = Date.now();
       this.pingTimer = setInterval(() => {
         if (socket.readyState === WebSocket.OPEN) {
           socket.send(JSON.stringify({ id: Date.now().toString(), type: 'ping' }));
         }
       }, Math.max(server.pingInterval / 2, 5_000));
+      // While OPEN but route-dead (carrier NAT drop), a send vanishes silently and no close
+      // event ever arrives; the server ponging our pings is the only honest heartbeat.
+      this.liveTimer = setInterval(() => {
+        if (this.stopped || socket.readyState !== WebSocket.OPEN) return;
+        if (Date.now() - this.lastMessageAt > LIVENESS_MS) {
+          socket.close();
+        }
+      }, LIVENESS_CHECK_MS);
       this.listener.onStatus('live');
     };
 
     socket.onmessage = (event: WebSocketMessageEvent) => {
       if (this.stopped) return;
+      this.lastMessageAt = Date.now();
+      const raw = String(event.data);
+      // The server also pings with a bare string frame; answering keeps its keepalive
+      // satisfied, which is what a carrier-imposed idle timeout measures.
+      if (raw === 'ping') {
+        if (socket.readyState === WebSocket.OPEN) socket.send('pong');
+        return;
+      }
       let message: { type?: string; subject?: string; data?: RawTicker };
       try {
-        message = JSON.parse(String(event.data));
+        message = JSON.parse(raw);
       } catch {
         return;
       }
       if (message.type !== 'message' || message.subject !== 'trade.ticker' || !message.data) return;
 
-      const raw = message.data;
+      const tick = message.data;
       const update: TickerUpdate = {
         symbol: this.symbol,
-        price: Number(raw.price),
-        size: Number(raw.size),
-        time: Number(raw.time),
-        bestAsk: Number(raw.bestAsk),
-        bestBid: Number(raw.bestBid),
+        price: Number(tick.price),
+        size: Number(tick.size),
+        time: Number(tick.time),
+        bestAsk: Number(tick.bestAsk),
+        bestBid: Number(tick.bestBid),
       };
       if (!Number.isFinite(update.price)) return;
 

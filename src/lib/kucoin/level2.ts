@@ -31,6 +31,7 @@ import { request } from './client';
 import { fetchBullet, invalidateBullet } from './socket';
 import { parseLevels, type Level2Snapshot, type PriceLevel } from './orderbook';
 import { compareDecimal } from '@/utils/decimal';
+import { AppState } from 'react-native';
 
 export type Level2Status = 'connecting' | 'live' | 'offline';
 
@@ -42,6 +43,18 @@ export type Level2Listener = {
 /** How often a merged book is handed to the UI, whatever rate the socket pushes at. */
 const EMIT_MS = 100;
 const MAX_BACKOFF_MS = 15_000;
+
+/**
+ * A stalled handshake never fires onopen/onerror/onclose, so the connecting phase needs its
+ * own deadline. Carrier networks (mobile data especially) stall the TLS/WS upgrade regularly.
+ */
+const CONNECT_TIMEOUT_MS = 10_000;
+/**
+ * A socket whose route died silently (carrier NAT drop — normal on mobile data) still reads
+ * OPEN on both ends; the only honest signal is server traffic within this window.
+ */
+const LIVENESS_MS = 25_000;
+const LIVENESS_CHECK_MS = 5_000;
 
 /** Levels held per side, far beyond anything the UI can ever display. */
 const BOOK_LIMIT = 1_000;
@@ -109,6 +122,10 @@ export class Level2Socket {
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
   private reconcileTimer: ReturnType<typeof setInterval> | null = null;
   private resyncTimer: ReturnType<typeof setTimeout> | null = null;
+  private connectTimer: ReturnType<typeof setTimeout> | null = null;
+  private liveTimer: ReturnType<typeof setInterval> | null = null;
+  /** Last moment the server demonstrably answered (a data frame or a pong). */
+  private lastMessageAt = 0;
   private attempt = 0;
   private stopped = true;
   private dirty = false;
@@ -127,14 +144,27 @@ export class Level2Socket {
     private readonly listener: Level2Listener
   ) {}
 
+  private appStateSubscription: { remove(): void } | null = null;
+
   start(): void {
     if (!this.stopped) return;
     this.stopped = false;
+    // Android tears down cellular routes while the app is backgrounded; coming back to the
+    // foreground is the natural moment to stop waiting out a long backoff and try again now.
+    this.appStateSubscription?.remove();
+    this.appStateSubscription = AppState.addEventListener('change', (state) => {
+      if (state !== 'active' || this.stopped || this.reconnectTimer === null) return;
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+      void this.connect();
+    });
     void this.connect();
   }
 
   stop(): void {
     this.stopped = true;
+    this.appStateSubscription?.remove();
+    this.appStateSubscription = null;
     this.clearTimers();
     this.asks.clear();
     this.bids.clear();
@@ -155,11 +185,15 @@ export class Level2Socket {
     if (this.flushTimer) clearTimeout(this.flushTimer);
     if (this.reconcileTimer) clearInterval(this.reconcileTimer);
     if (this.resyncTimer) clearTimeout(this.resyncTimer);
+    if (this.connectTimer) clearTimeout(this.connectTimer);
+    if (this.liveTimer) clearInterval(this.liveTimer);
     this.pingTimer = null;
     this.reconnectTimer = null;
     this.flushTimer = null;
     this.reconcileTimer = null;
     this.resyncTimer = null;
+    this.connectTimer = null;
+    this.liveTimer = null;
   }
 
   private async connect(): Promise<void> {
@@ -187,6 +221,23 @@ export class Level2Socket {
     const socket = new WebSocket(url);
     this.socket = socket;
 
+    // A handshake can stall forever without ever firing onopen/onerror/onclose; without this
+    // deadline the status dot sits on "connecting" indefinitely and no retry is engaged.
+    this.connectTimer = setTimeout(() => {
+      this.connectTimer = null;
+      if (this.stopped || this.socket !== socket || socket.readyState === WebSocket.OPEN) {
+        return;
+      }
+      socket.onopen = socket.onerror = socket.onmessage = socket.onclose = null;
+      try {
+        socket.close();
+      } catch {
+        // Some runtimes refuse to close a CONNECTING socket; dropping the reference is enough.
+      }
+      this.socket = null;
+      this.scheduleReconnect();
+    }, CONNECT_TIMEOUT_MS);
+
     void fetchOrderBookSnapshot(this.symbol)
       .then((snapshot) => {
         if (this.stopped || this.socket !== socket) return;
@@ -213,6 +264,10 @@ export class Level2Socket {
     // the event queue can still run after stop() returned.
     socket.onopen = () => {
       if (this.stopped) return;
+      if (this.connectTimer) {
+        clearTimeout(this.connectTimer);
+        this.connectTimer = null;
+      }
       this.attempt = 0;
       socket.send(
         JSON.stringify({
@@ -222,11 +277,20 @@ export class Level2Socket {
           response: true,
         })
       );
+      this.lastMessageAt = Date.now();
       this.pingTimer = setInterval(() => {
         if (socket.readyState === WebSocket.OPEN) {
           socket.send(JSON.stringify({ id: Date.now().toString(), type: 'ping' }));
         }
       }, Math.max(server.pingInterval / 2, 5_000));
+      // While OPEN but route-dead (carrier NAT drop), a send vanishes silently and no close
+      // event ever arrives; the server ponging our pings is the only honest heartbeat.
+      this.liveTimer = setInterval(() => {
+        if (this.stopped || socket.readyState !== WebSocket.OPEN) return;
+        if (Date.now() - this.lastMessageAt > LIVENESS_MS) {
+          socket.close();
+        }
+      }, LIVENESS_CHECK_MS);
       this.listener.onStatus('live');
       // Heals a missing seed right away, and then keeps the book honest every interval. If the
       // seed did land and no frames were missed, the resync is a cheap no-op reseed.
@@ -237,9 +301,17 @@ export class Level2Socket {
 
     socket.onmessage = (event: WebSocketMessageEvent) => {
       if (this.stopped) return;
+      this.lastMessageAt = Date.now();
+      const raw = String(event.data);
+      // The server also pings with a bare string frame; answering keeps its keepalive
+      // satisfied, which is what a carrier-imposed idle timeout measures.
+      if (raw === 'ping') {
+        if (socket.readyState === WebSocket.OPEN) socket.send('pong');
+        return;
+      }
       let message: { type?: string; data?: RawLevel2 };
       try {
-        message = JSON.parse(String(event.data));
+        message = JSON.parse(raw);
       } catch {
         return;
       }
