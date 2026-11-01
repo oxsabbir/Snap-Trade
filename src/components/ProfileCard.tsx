@@ -154,7 +154,7 @@ function ProfileCardComponent({ displayName, onRename, accountInfo, portfolio, t
         />
       </View>
 
-      {tickers ? <AccountPnl total={portfolio.total} tickers={tickers} /> : null}
+      {tickers && tickers.length > 0 ? <AccountPnl tickers={tickers} /> : null}
 
       <View style={styles.footer}>
         <Text style={styles.footerText}>

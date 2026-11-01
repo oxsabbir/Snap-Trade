@@ -7,9 +7,18 @@ import { fetchAccountInfo } from '@/lib/kucoin/profile';
 import { describeError } from '@/lib/kucoin/errors';
 import type { AccountInfo, PortfolioAsset, Ticker } from '@/lib/kucoin/types';
 import { useApiCredentials } from '@/state/apiCredentials';
-import { recordPortfolioSnapshot } from '@/state/portfolioHistory';
 
 const POLL_INTERVAL_MS = 30_000;
+
+/**
+ * Last good portfolio + tickers, kept at module level so a remount (navigating back to the
+ * tab, or switching to the markets tab and home) paints the previous data instantly and
+ * refreshes silently, instead of resetting to an empty portfolio and a spinner with a
+ * multi-second redownload.
+ */
+let cachedPortfolio: Portfolio | null = null;
+let cachedTickers: Ticker[] = [];
+let cachedAccountInfo: AccountInfo | null = null;
 
 export type AccountStatus = 'loading' | 'disconnected' | 'ready' | 'error';
 
@@ -40,10 +49,10 @@ export function useAccount(): AccountState {
   const mountedRef = useRef(true);
   const { isConnected } = useApiCredentials();
 
-  const [status, setStatus] = useState<AccountStatus>('loading');
-  const [portfolio, setPortfolio] = useState<Portfolio>(EMPTY_PORTFOLIO);
-  const [tickers, setTickers] = useState<Ticker[]>([]);
-  const [accountInfo, setAccountInfo] = useState<AccountInfo | null>(null);
+  const [status, setStatus] = useState<AccountStatus>(cachedPortfolio ? 'ready' : 'loading');
+  const [portfolio, setPortfolio] = useState<Portfolio>(cachedPortfolio ?? EMPTY_PORTFOLIO);
+  const [tickers, setTickers] = useState<Ticker[]>(cachedTickers);
+  const [accountInfo, setAccountInfo] = useState<AccountInfo | null>(cachedAccountInfo);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<number | null>(null);
 
@@ -53,7 +62,8 @@ export function useAccount(): AccountState {
     if (!mountedRef.current) return;
     setPortfolio(next);
     setTickers(ticker);
-    recordPortfolioSnapshot(next.total);
+    cachedPortfolio = next;
+    cachedTickers = ticker;
     setLastUpdated(Date.now());
     setError(null);
     setStatus('ready');
@@ -67,7 +77,9 @@ export function useAccount(): AccountState {
   const loadAccountInfo = useCallback(() => {
     void fetchAccountInfo().then(
       (info) => {
-        if (mountedRef.current) setAccountInfo(info);
+        if (!mountedRef.current) return;
+        cachedAccountInfo = info;
+        setAccountInfo(info);
       },
       () => undefined
     );
@@ -111,7 +123,9 @@ export function useAccount(): AccountState {
   }, [load]);
 
   const refresh = useCallback(() => {
-    setStatus((current) => (current === 'disconnected' ? current : 'loading'));
+    // With a warm cache the data on screen is seconds old already — showing the loading
+    // state would flash a spinner over live numbers for the whole fetch.
+    if (!cachedPortfolio) setStatus('loading');
     void load();
   }, [load]);
 

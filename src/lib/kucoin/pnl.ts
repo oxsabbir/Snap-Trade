@@ -1,87 +1,72 @@
 /**
  * Account PnL over a calendar window (Today / Week / Month / All).
  *
- * KuCoin's spot API has no account-level PnL endpoint, but the pieces it does expose are
- * enough to build the number KuCoin's own asset card shows: the portfolio's value change over
- * the window, minus the money the user moved onto or off the exchange themselves:
+ * KuCoin's spot API has no account-level PnL endpoint, so this builds the number from the
+ * records KuCoin *does* export: the signed `GET /fills` trade history. Every fill belongs to
+ * the account, arrives regardless of when the app was installed, and carries price/size/funds/
+ * fee — enough to reconstruct realized spot trading PnL exactly the way an exchange does:
  *
- *   pnl = current − baseline − depositsUSD + withdrawalsUSD
+ *   per fill, buys grow one average-cost inventory position per symbol,
+ *   sells release inventory at its current average cost, and the difference between the
+ *   proceeds and that cost — after converting fees into quote value — is realized PnL.
  *
- * Without the flow correction, funding the account would read as pure profit. Deposits and
- * withdrawals come from the signed v1 ledger endpoints (`/deposits`, `/withdrawals`) in the
- * coin they moved; a short-tail coin like KCS is priced with the same USDT/BTC index the
- * portfolio builder uses, from one shared (60s-cached) ticker snapshot.
+ * For a window (Today/Week/Month), trades made *before* the window still matter when their
+ * inventory is sold inside it, so the engine backfills each traded symbol from pages ending at
+ * the window start. A committed backfill cap keeps worst-case request counts bounded; symbols
+ * whose history is deeper than the cap behave conservatively (unknown-cost sells contribute
+ * zero and the reading is flagged `partial`, so it can never inflate).
  */
-import { request } from './client';
+import {
+  fetchFills,
+  type Fill,
+} from './fills';
 import { fetchAllTickers } from './market';
 import type { AllTickersResponse, Ticker } from './types';
 import { buildPriceIndex, unitPrice, type PriceIndex } from './portfolio';
-import {
-  earliestSnapshot,
-  snapshotAfter,
-  snapshotBefore,
-  type PortfolioSnapshot,
-} from '@/state/portfolioHistory';
 
 export type PnlRange = 'today' | 'week' | 'month' | 'all';
 
 export type PnlReading = {
-  /** Corrected USD PnL; null when the window has no baseline to measure against yet. */
+  /** Realized spot trading PnL converted to USD-equivalent value; null while computing. */
   change: number | null;
-  /** Change against the assets present at the window start (baseline plus the flow). */
-  percent: number | null;
-  /** Amount the user moved in minus moved out, over the window. Shown as a footnote. */
-  flow: number;
-  loading: boolean;
+  /** Window sells that released known inventory (completed round trips). */
+  trades: number;
+  /** A traded symbol's pre-window history hit its backfill cap — some cost basis unknown. */
+  partial: boolean;
 };
 
-type LedgerEntry = { currency: string; amount: number };
+/** Account-wide scan page count per range (100 fills per page on KuCoin's /fills). */
+const WINDOW_PAGES: Record<PnlRange, number> = {
+  today: 5,
+  week: 10,
+  month: 20,
+  all: 60,
+};
 
-const LEDGER_MAX_PAGES = 5;
+/** Pages walked backwards per traded symbol to rebuild inventory from before the window. */
+const BACKFILL_PAGES = 4;
 
-/** Local midnight-based boundaries, matching how the tabs read ("today", "this month"). */
-export function startOfRange(
-  range: PnlRange,
-  now: number = Date.now(),
-): number | null {
-  const date = new Date(now);
-  switch (range) {
-    case 'today':
-      date.setHours(0, 0, 0, 0);
-      return date.getTime();
-    case 'week':
-      return now - 7 * 24 * 60 * 60 * 1000;
-    case 'month': {
-      date.setDate(1);
-      date.setHours(0, 0, 0, 0);
-      return date.getTime();
-    }
-    case 'all':
-      return null; // Anchor point is the earliest snapshot, decided by the caller's history.
-  }
-}
+const PAGE_SIZE = 100;
+/** Parallelism cap for per-symbol backfills, to stay polite to the Management rate pool. */
+const BACKFILL_CONCURRENCY = 4;
+const RANGE_TTL_MS = 60_000;
 
-/** The value the window is measured from: last reading before it, or the first one inside. */
-export function baselineSnapshot(
-  range: PnlRange,
-  history: readonly PortfolioSnapshot[],
-): PortfolioSnapshot | null {
-  if (history.length === 0) return null;
-  if (range === 'all') return history[0] ?? null;
-  const start = startOfRange(range);
-  if (start === null) return null;
-  return snapshotBefore(start) ?? snapshotAfter(start);
-}
+type CachedReading = { at: number; reading: Promise<PnlReading> };
 
-// --- Pricing ---
+const cache = new Map<PnlRange, CachedReading>();
 
+/**
+ * Prices for converting fees charged in a third currency (and e.g. fees in a base we need as
+ * quote value). Seeded from the tickers the account fetch already produced so a cold tab
+ * usually needs no extra public round-trip.
+ */
 let priceIndexCache: { at: number; index: PriceIndex } | null = null;
 const PRICE_INDEX_TTL_MS = 60_000;
 
-/**
- * One ticker round-trip shared by every PnL lookup in the minute after it lands. Tickers also
- * feed the portfolio total on the account screen, so a fresh cache is fine, never stale.
- */
+export function seedPriceIndex(tickers: Ticker[]): void {
+  priceIndexCache = { at: Date.now(), index: buildPriceIndex(tickers) };
+}
+
 async function priceIndex(): Promise<PriceIndex> {
   if (priceIndexCache && Date.now() - priceIndexCache.at < PRICE_INDEX_TTL_MS) {
     return priceIndexCache.index;
@@ -92,131 +77,218 @@ async function priceIndex(): Promise<PriceIndex> {
   return index;
 }
 
-function refreshPriceIndexCache(tickers: Ticker[]): void {
-  priceIndexCache = { at: Date.now(), index: buildPriceIndex(tickers) };
-}
-
-// --- Deposits & withdrawals ledger ---
-
-type LedgerPage = {
-  currentPage?: unknown;
-  totalPage?: unknown;
-  items?: unknown;
-};
-
-function isSuccessfulResult(status: unknown): boolean {
-  return typeof status === 'string' && status.toUpperCase().includes('SUCCESS');
-}
-
-/** Amount plus currency pairs from a KuCoin ledger row; nothing without both is usable. */
-function toLedgerEntry(raw: unknown): LedgerEntry | null {
-  if (!raw || typeof raw !== 'object') return null;
-  const r = raw as Record<string, unknown>;
-  if (!isSuccessfulResult(r.status)) return null;
-  const currency = typeof r.currency === 'string' ? r.currency : null;
-  const amount =
-    typeof r.amount === 'number'
-      ? r.amount
-      : typeof r.amount === 'string'
-        ? Number(r.amount)
-        : NaN;
-  if (!currency || !Number.isFinite(amount)) return null;
-  return { currency, amount };
+/** Local-calendar boundaries; "All" starts at epoch 0 since fills give us full history. */
+export function startOfRange(range: PnlRange, now: number = Date.now()): number {
+  const date = new Date(now);
+  switch (range) {
+    case 'today':
+      date.setHours(0, 0, 0, 0);
+      return date.getTime();
+    case 'week':
+      return now - 7 * 24 * 60 * 60 * 1000;
+    case 'month':
+      date.setDate(1);
+      date.setHours(0, 0, 0, 0);
+      return date.getTime();
+    case 'all':
+      return 0;
+  }
 }
 
 /**
- * Walks one of the two ledger endpoints page by page up to a sane cap. Deposits and
- * withdrawals scale with how active the user is, so a bound keeps worst-case requests short;
- * a page cap shows up as a slightly short correction, never as a wrong sign.
+ * One average-cost position per symbol, quoted in the symbol's quote currency. Buy fees and
+ * sell fees are folded in at quote value, exactly how a realized-PnL ledger must treat them.
  */
-async function fetchLedger(
-  path: 'deposits' | 'withdrawals',
-  startAt: number,
-): Promise<LedgerEntry[]> {
-  const out: LedgerEntry[] = [];
+type Position = {
+  /** Base units currently held. */
+  size: number;
+  /** Quote cost of those units — combined average-cost basis for sells. */
+  cost: number;
+  /** Rough base units ever sold without known inventory — the `partial` signal. */
+  unknownSold: number;
+};
+
+function quoteOf(symbol: string): string {
+  const index = symbol.lastIndexOf('-');
+  return index >= 0 ? symbol.slice(index + 1) : symbol;
+}
+
+/** Converts one fill's fee into the symbol's quote currency (or 0 when unpriceable). */
+function feeInQuote(fee: Fill, price: PriceIndex): number {
+  const amount = Number(fee.fee);
+  if (!Number.isFinite(amount) || amount === 0) return 0;
+  const currency = fee.feeCurrency;
+  if (currency === quoteOf(fee.symbol)) return amount;
+  if (currency === fee.symbol.slice(0, fee.symbol.indexOf('-'))) {
+    const unit = Number(fee.price);
+    return Number.isFinite(unit) ? amount * unit : 0;
+  }
+  if (!currency) return 0;
+  return amount * unitPrice(currency, price);
+}
+
+/**
+ * Replays one fill against the position. Buys extend inventory (quote value + fee). Sells
+ * return the released inventory's realized PnL; a sell that out-runs known inventory earns 0
+ * and marks the position partial rather than being booked at the full proceeds.
+ */
+/**
+ * Replays one fill against the position. Buys extend inventory (quote value + fee) and return
+ * null. Sells return the released inventory's realized PnL; a sell that out-runs known
+ * inventory earns 0 and marks the position partial rather than being booked at full proceeds.
+ */
+function apply(pos: Position, fill: Fill, price: PriceIndex): number | null {
+  const unit = Number(fill.price);
+  const size = Number(fill.size);
+  const fee = feeInQuote(fill, price);
+  if (!Number.isFinite(unit) || !Number.isFinite(size) || size <= 0) return null;
+
+  if (fill.side === 'buy') {
+    const value = Number(fill.funds);
+    const cost = (Number.isFinite(value) && value > 0 ? value : unit * size) + fee;
+    // Average-cost accounting: extend the position, blend the cost into the basis.
+    pos.cost += cost;
+    pos.size += size;
+    return null;
+  }
+
+  const value = Number(fill.funds);
+  const proceeds = (Number.isFinite(value) && value > 0 ? value : unit * size) - fee;
+  if (!Number.isFinite(proceeds)) return null;
+  if (pos.size <= 0) {
+    pos.unknownSold += size;
+    return null;
+  }
+  const sold = Math.min(pos.size, size);
+  const basis = (pos.cost / pos.size) * sold;
+  pos.size -= sold;
+  pos.cost -= basis;
+  if (sold < size) pos.unknownSold += size - sold;
+  return proceeds - basis;
+}
+
+/** Pages of /fills, newest-first; reversed into chronological order for replay. */
+async function fetchBackward(
+  symbol: string | null,
+  maxPages: number,
+  startAt?: number,
+  endAt?: number,
+): Promise<Fill[]> {
+  const out: Fill[] = [];
   let page = 1;
-  while (page <= LEDGER_MAX_PAGES) {
-    const data = await request<LedgerPage | unknown[]>(`${path}`, {
-      signed: true,
-      query: { startAt, pageSize: 100, currentPage: page },
+  while (page <= maxPages) {
+    const result = await fetchFills(symbol, {
+      page,
+      startAt,
+      endAt,
+      pageSize: PAGE_SIZE,
     });
-    const payload: LedgerPage = Array.isArray(data) ? { items: data } : data;
-    const items = Array.isArray(payload.items) ? payload.items : [];
-    for (const raw of items) {
-      const entry = toLedgerEntry(raw);
-      if (entry) out.push(entry);
-    }
-    const totalPage =
-      typeof payload.totalPage === 'number' ? payload.totalPage : 1;
-    const currentPage =
-      typeof payload.currentPage === 'number' ? payload.currentPage : page;
-    if (page >= totalPage || currentPage >= totalPage) break;
+    out.push(...result.items);
+    if (!result.hasMore) break;
     page += 1;
+  }
+  return out.reverse();
+}
+
+function dedupe(sorted: Fill[]): Fill[] {
+  const seen = new Set<string>();
+  const out: Fill[] = [];
+  for (const fill of sorted) {
+    const key = `${fill.tradeId}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(fill);
   }
   return out;
 }
 
-/** Value of a ledger entry in USD, using the shared price index (0 when unpriceable). */
-function entryValue(entry: LedgerEntry, index: PriceIndex): number {
-  return entry.amount * unitPrice(entry.currency, index);
-}
+const emptyPosition = (): Position => ({ size: 0, cost: 0, unknownSold: 0 });
 
 /**
- * Net money the user moved onto the exchange over the window: deposits minus withdrawals.
- * A positive flow means the window's asset growth is partly new money, not PnL.
+ * The reading for one range: one account-wide `/fills` scan since the window start, then a
+ * per-symbol backtrack to rebuild the inventory each window sell released, then one exact
+ * average-cost replay per traded symbol.
  */
-export async function fetchNetFlowUsd(startAt: number): Promise<number> {
-  const [deposits, withdrawals] = await Promise.all([
-    fetchLedger('deposits', startAt),
-    fetchLedger('withdrawals', startAt),
-  ]);
-  const index = await priceIndex();
-  return (
-    deposits.reduce((sum, entry) => sum + entryValue(entry, index), 0) -
-    withdrawals.reduce((sum, entry) => sum + entryValue(entry, index), 0)
-  );
-}
-
-/**
- * Computes the reading for one window. The caller seeds the ticker cache from the portfolio
- * fetch it already drives, so a cold tab usually needs no extra public round-trip at all.
- */
-export async function computePnlReading(
+async function computeReading(
   range: PnlRange,
-  currentTotal: number,
-  history: readonly PortfolioSnapshot[],
-  tickers?: Ticker[],
-  seedFlowCache?: Map<PnlRange, number>,
+  index: PriceIndex,
 ): Promise<PnlReading> {
-  if (tickers) refreshPriceIndexCache(tickers);
-  const baseline = baselineSnapshot(range, history);
-  if (!baseline) {
-    return { change: null, percent: null, flow: 0, loading: false };
+  const startAt = startOfRange(range);
+
+  // Buys and sells inside the window, account-wide (the API returns newest first, so it is
+  // reversed into chronological replay order).
+  const windowFills = dedupe(
+    await fetchBackward(null, WINDOW_PAGES[range], startAt || undefined),
+  );
+  if (windowFills.length === 0) {
+    return { change: 0, trades: 0, partial: false };
   }
 
-  const flowStart =
-    range === 'all' ? baseline.t : startOfRange(range) ?? baseline.t;
-  let flow: number | undefined = seedFlowCache?.get(range);
-  if (flow === undefined) {
-    flow = await fetchNetFlowUsd(flowStart);
-    seedFlowCache?.set(range, flow);
+  // Buys made before the window are invisible to the account-wide pull, yet their inventory
+  // is what the window's sells release — so each traded symbol gets its own history fetched
+  // with a boundary at the window start and replayed from a clean position.
+  const tradedSymbols = [...new Set(windowFills.filter((f) => f.side === 'sell').map((f) => f.symbol))];
+  const backfilled = new Map<string, Fill[]>();
+  for (let i = 0; i < tradedSymbols.length; i += BACKFILL_CONCURRENCY) {
+    const batch = tradedSymbols.slice(i, i + BACKFILL_CONCURRENCY);
+    await Promise.all(
+      batch.map(async (symbol) => {
+        try {
+          backfilled.set(symbol, dedupe(await fetchBackward(symbol, BACKFILL_PAGES, undefined, startAt)));
+        } catch {
+          // Backfill failure degrades the symbol to partial accounting; it never blocks the
+          // whole reading.
+        }
+      }),
+    );
   }
 
-  const change = currentTotal - baseline.v - flow;
-  const baseAssets = baseline.v + flow;
-  const percent = baseAssets > 0 ? (change / baseAssets) * 100 : null;
-  return { change, percent, flow, loading: false };
+  let realized = 0;
+  let trades = 0;
+  let partial = false;
+  for (const symbol of tradedSymbols) {
+    const pos = emptyPosition();
+    let soldCount = 0;
+    for (const fill of dedupe([
+      ...(backfilled.get(symbol) ?? []),
+      ...windowFills.filter((f) => f.symbol === symbol),
+    ])) {
+      // Buys only build inventory — apply() returns null for them; sells return realized gain.
+      const gain = apply(pos, fill, index);
+      if (gain !== null) {
+        realized += gain;
+        soldCount += 1;
+      }
+    }
+    trades += soldCount;
+    if (pos.unknownSold > 0) partial = true;
+  }
+
+  return { change: realized, trades, partial };
 }
 
 /**
- * Seeds the module price cache and returns the shared flow cache the account tab can hold
- * across tab switches for the lifetime of the screen.
+ * The reading for one range, memoized for a minute so switching tabs (or coming back to the
+ * screen) reuses the same in-flight or settled result instead of re-scanning history.
  */
-export function createFlowCache(): Map<PnlRange, number> {
-  return new Map();
+export function pnlReading(range: PnlRange): Promise<PnlReading> {
+  const hit = cache.get(range);
+  if (hit && Date.now() - hit.at < RANGE_TTL_MS) return hit.reading;
+
+  const task = (async () => {
+    const index = await priceIndex();
+    return computeReading(range, index);
+  })();
+  const entry: CachedReading = { at: Date.now(), reading: task };
+  cache.set(range, entry);
+  task.catch(() => {
+    if (cache.get(range) === entry) cache.delete(range);
+  });
+  return task;
 }
 
-/** Exposed for tests and callers that want the "All" anchor without recomputing. */
-export function allRangeBaseline(): PortfolioSnapshot | null {
-  return earliestSnapshot();
+/** Best for tab switches: the last computed reading before its cache entry expires. */
+export function cachedPnlReading(range: PnlRange): Promise<PnlReading> | null {
+  const hit = cache.get(range);
+  return hit && Date.now() - hit.at < RANGE_TTL_MS ? hit.reading : null;
 }

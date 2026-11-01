@@ -72,17 +72,30 @@ export type FillQuery = {
   page?: number;
   /** Only fills at or after this epoch-millisecond time. */
   startAt?: number;
+  /** Only fills at or before this epoch-millisecond time (PnL window backfills use it). */
+  endAt?: number;
+  /** Page-size override; KuCoin caps /fills at 100. */
+  pageSize?: number;
 };
 
-export async function fetchFills(symbol: string, query: FillQuery = {}): Promise<FillPage> {
+/**
+ * `/fills` for one symbol, or for the whole spot account when no symbol is given (the PnL
+ * engine scans window-wide; a per-symbol loop would cost one request chain per pair).
+ */
+export async function fetchFills(
+  symbol: string | null,
+  query: FillQuery = {},
+): Promise<FillPage> {
   const page = query.page ?? 1;
+  const pageSize = query.pageSize ?? FILLS_PAGE_SIZE;
   const data = await request<unknown>('/fills', {
     signed: true,
     query: {
-      symbol,
-      pageSize: FILLS_PAGE_SIZE,
+      ...(symbol ? { symbol } : {}),
+      pageSize,
       currentPage: page,
       ...(query.startAt ? { startAt: query.startAt } : {}),
+      ...(query.endAt ? { endAt: query.endAt } : {}),
     },
   });
   const list = Array.isArray(data) ? data : (data as { items?: unknown[] } | null)?.items ?? [];
@@ -91,6 +104,6 @@ export async function fetchFills(symbol: string, query: FillQuery = {}): Promise
   const hasMore =
     typeof totalPage === 'number' && totalPage > 0
       ? page < totalPage
-      : items.length >= FILLS_PAGE_SIZE;
+      : items.length >= pageSize;
   return { items, hasMore, page };
 }
