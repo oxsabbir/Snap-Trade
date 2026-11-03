@@ -87,10 +87,14 @@ function OrderRow({
           <View
             style={[
               styles.statusBadge,
-              isPartiallyFilled && { backgroundColor: isBuy ? colors.upFill : colors.downFill },
+              {
+                // "Open" is an active, live order, so it wears the green fill; a partially
+                // filled one keeps the side's color (green for buy, red for sell) instead.
+                backgroundColor: isPartiallyFilled ? (isBuy ? colors.upFill : colors.downFill) : colors.upFill,
+              },
             ]}
           >
-            <Text style={[styles.status, isPartiallyFilled && { color: sideTextColor }]}>
+            <Text style={[styles.status, { color: isPartiallyFilled ? sideTextColor : colors.upText }]}>
               {statusLabel}
             </Text>
           </View>
@@ -457,7 +461,9 @@ const useStyles = createThemedStyles((colors) => StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    minHeight: 24,
+    // Matches the enlarged Cancel All chip (1.2x the original sizing) so the row's declared
+    // height covers the chip instead of letting its text padding drive the header's height.
+    minHeight: 29,
     // Breathing room between the header row and the first order card, so the count line and
     // the cancel chip don't crowd the card's header when scrolling fast.
     paddingHorizontal: 2,
@@ -471,16 +477,18 @@ const useStyles = createThemedStyles((colors) => StyleSheet.create({
   },
   // A plain text button: no fill, green like a confirmative action, so the always-visible
   // control sits quiet next to the count unless its action is wanted.
+  // Sized 1.2x the original chip (min 29 height, 5px sides, 12px type) — the tap target was
+  // too easy to miss at the baseline size for an action that wipes every order.
   cancelAllChip: {
-    minHeight: 24,
-    paddingHorizontal: spacing.xs,
+    minHeight: 29,
+    paddingHorizontal: 5,
     justifyContent: "center",
     alignItems: "center",
     borderRadius: radius.sm,
   },
   cancelAllChipText: {
     color: colors.upText,
-    fontSize: 10,
+    fontSize: 12,
     fontWeight: "700",
     letterSpacing: 0.2,
   },
@@ -535,10 +543,8 @@ const useStyles = createThemedStyles((colors) => StyleSheet.create({
     paddingHorizontal: spacing.sm,
     paddingVertical: spacing.xs,
     borderRadius: radius.pill,
-    backgroundColor: colors.surfaceAlt,
   },
   status: {
-    color: colors.textMuted,
     fontSize: 10,
     fontWeight: "700",
   },
@@ -609,7 +615,9 @@ const useStyles = createThemedStyles((colors) => StyleSheet.create({
   headerActions: {
     flexDirection: "row",
     alignItems: "center",
-    gap: spacing.xs,
+    // Widened from xs: the status chip and the Cancel chip sat too close together, and two
+    // independently tappable controls need a clear seam between them.
+    gap: spacing.sm,
     flexShrink: 1,
   },
   // The per-card cancel is the one destructive action in the row, so it carries a solid red
