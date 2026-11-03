@@ -105,6 +105,11 @@ export async function fetchBulletServers(): Promise<CachedBullet> {
   return bulletPromise;
 }
 
+export async function fetchBullet(): Promise<BulletServer> {
+  const bullet = await fetchBulletServers();
+  return bullet.servers[0]!;
+}
+
 export function invalidateBullet(): void {
   cachedBullet = null;
 }
