@@ -12,7 +12,7 @@ const MAX_BACKOFF_MS = 5_000;
 const THROTTLE_MS = 200;
 
 /** Deadlines for socket health, mirroring `level2.ts` (carrier-safe reconnects). */
-const CONNECT_TIMEOUT_MS = 10_000;
+const CONNECT_TIMEOUT_MS = 25_000;
 const LIVENESS_MS = 25_000;
 const LIVENESS_CHECK_MS = 5_000;
 

@@ -54,7 +54,7 @@ const MAX_BACKOFF_MS = 5_000;
  * A stalled handshake never fires onopen/onerror/onclose, so the connecting phase needs its
  * own deadline. Carrier networks (mobile data especially) stall the TLS/WS upgrade regularly.
  */
-const CONNECT_TIMEOUT_MS = 10_000;
+const CONNECT_TIMEOUT_MS = 25_000;
 /**
  * A socket whose route died silently (carrier NAT drop — normal on mobile data) still reads
  * OPEN on both ends; the only honest signal is server traffic within this window.
