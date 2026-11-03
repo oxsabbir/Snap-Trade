@@ -28,7 +28,7 @@
  * Merging is cheap and lossless; the throttled emit is what keeps the UI at a sane frame rate.
  */
 import { request } from './client';
-import { fetchBullet, invalidateBullet } from './socket';
+import { fetchBulletServers, invalidateBullet } from './socket';
 import { parseLevels, type Level2Snapshot, type PriceLevel } from './orderbook';
 import { compareDecimal } from '@/utils/decimal';
 import { AppState } from 'react-native';
@@ -214,14 +214,20 @@ export class Level2Socket {
     // "connecting" on slow networks (on mobile data that was the visible sluggish connect).
     // Token in hand → socket opens immediately; the seed is picked up mid-flight whenever it
     // arrives, and if the live stream has already run ahead of it the gap rules handle it.
-    let server: Awaited<ReturnType<typeof fetchBullet>>;
+    let bullet: Awaited<ReturnType<typeof fetchBulletServers>>;
     try {
-      server = await fetchBullet();
+      bullet = await fetchBulletServers();
     } catch {
       this.scheduleReconnect();
       return;
     }
     if (this.stopped) return;
+
+    // One instance server per retry attempt: after a full sweep, refresh the bullet too, so
+    // a dead cache (too-far edge or expired token) costs at most one sweep before fresh data.
+    const servers = bullet.servers;
+    const server = servers[this.attempt % servers.length]!;
+    if (this.attempt > 0 && this.attempt % servers.length === 0) invalidateBullet();
 
     const url = `${server.endpoint}?token=${encodeURIComponent(server.token)}&pingInterval=${server.pingInterval}`;
     const socket = new WebSocket(url);

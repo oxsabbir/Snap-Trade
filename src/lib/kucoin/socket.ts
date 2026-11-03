@@ -59,12 +59,18 @@ type Listener = {
 
 type BulletServer = BulletResponse['instanceServers'][number] & { token: string };
 
-type CachedBullet = BulletServer & { expiresAt: number };
+type CachedBullet = { token: string; servers: BulletServer[]; expiresAt: number };
 let cachedBullet: CachedBullet | null = null;
-let bulletPromise: Promise<BulletServer> | null = null;
+let bulletPromise: Promise<CachedBullet> | null = null;
 const BULLET_TTL_MS = 60 * 60 * 1000; // 1 hour (KuCoin tokens last 24h)
 
-export async function fetchBullet(): Promise<BulletServer> {
+/**
+ * Fetches the public token and **all** the instance servers KuCoin offers, callers rotating
+ * across them (see `level2.ts`): different endpoints are different CDN edges, and carrier-
+ * class paths (Grameenphone in particular) routinely break the route to one while the rest
+ * remain reachable — so a single forced choice turned one dead edge into an hour-long lock.
+ */
+export async function fetchBulletServers(): Promise<CachedBullet> {
   const now = Date.now();
   if (cachedBullet && cachedBullet.expiresAt > now) {
     return cachedBullet;
@@ -85,7 +91,7 @@ export async function fetchBullet(): Promise<BulletServer> {
       }
       const data: CachedBullet = {
         token: payload.data.token,
-        ...payload.data.instanceServers[0]!,
+        servers: payload.data.instanceServers.map((entry) => ({ ...entry, token: payload.data!.token! })),
         expiresAt: now + BULLET_TTL_MS,
       };
       cachedBullet = data;
@@ -176,14 +182,20 @@ export class TickerSocket {
     if (this.stopped) return;
     this.listener.onStatus('connecting');
 
-    let server: Awaited<ReturnType<typeof fetchBullet>>;
+    let bullet: Awaited<ReturnType<typeof fetchBulletServers>>;
     try {
-      server = await fetchBullet();
+      bullet = await fetchBulletServers();
     } catch {
       this.scheduleReconnect();
       return;
     }
     if (this.stopped) return;
+
+    // One instance server per retry attempt: after a full sweep, refresh the bullet too, so
+    // a dead cache (too-far edge or expired token) costs at most one sweep before fresh data.
+    const servers = bullet.servers;
+    const server = servers[this.attempt % servers.length]!;
+    if (this.attempt > 0 && this.attempt % servers.length === 0) invalidateBullet();
 
     const url = `${server.endpoint}?token=${encodeURIComponent(server.token)}&pingInterval=${server.pingInterval}`;
     const socket = new WebSocket(url);
