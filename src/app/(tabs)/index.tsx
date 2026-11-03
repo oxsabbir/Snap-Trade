@@ -21,6 +21,7 @@ import { useSpotMarkets } from "@/hooks/useSpotMarkets";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { searchMarkets, type QuoteFilter } from "@/lib/kucoin/market";
 import type { SpotMarket } from "@/lib/kucoin/types";
+import { useFavorites } from "@/state/favorites";
 import { spacing } from "@/theme";
 import { useTheme } from "@/theme/ThemeProvider";
 import { createThemedStyles } from "@/theme/themedStyles";
@@ -135,17 +136,11 @@ export default function MarketsScreen() {
   const styles = useStyles();
   const [search, setSearch] = useState("");
   const [tab, setTab] = useState<TabValue>("All");
-  const [favorites, setFavorites] = useState<Set<string>>(() => new Set());
   const [isSearchFocused, setIsSearchFocused] = useState(false);
 
-  const toggleFavorite = useCallback((symbol: string) => {
-    setFavorites((previous) => {
-      const next = new Set(previous);
-      if (next.has(symbol)) next.delete(symbol);
-      else next.add(symbol);
-      return next;
-    });
-  }, []);
+  // Favorites outlive this screen — the store persists them to AsyncStorage, so a star sticks
+  // across restarts and appears identically on the next cold start.
+  const { favorites, toggleFavorite } = useFavorites();
 
   const sortedMarkets = useMemo(
     () => [...markets].sort((a, b) => b.quoteVolume - a.quoteVolume),
