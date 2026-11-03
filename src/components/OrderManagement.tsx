@@ -186,10 +186,17 @@ export const OrderManagement = memo(function OrderManagement({
   const styles = useStyles();
   const [activeTab, setActiveTab] = useState(0);
 
-  const { orders, isLoading, error, cancelling, cancelOrder, cancelAll } = useOpenOrders();
+  const { orders, openCount, isLoading, error, cancelling, cancelOrder, cancelAll } = useOpenOrders();
+
+  // The tab itself carries the live count, so a user on the Assets tab can see orders waiting
+  // without switching. Terminal rows are already excluded by the store.
+  const tabs = useMemo(() => {
+    const labels = [...TABS] as string[];
+    if (openCount > 0) labels[0] = `Open Orders (${openCount})`;
+    return labels;
+  }, [openCount]);
 
   const usdtBalance = available["USDT"] ?? "0";
-
   const visibleOrders = useMemo(
     () =>
       orders.filter(
@@ -283,7 +290,7 @@ export const OrderManagement = memo(function OrderManagement({
 
   return (
     <View style={styles.container}>
-      <TabBar tabs={TABS} activeIndex={activeTab} onPress={setActiveTab} />
+      <TabBar tabs={tabs} activeIndex={activeTab} onPress={setActiveTab} />
       {content}
     </View>
   );
