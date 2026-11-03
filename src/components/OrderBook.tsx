@@ -124,7 +124,7 @@ const DepthRowView = memo(function DepthRowView({
 function OrderBookBase({ symbol, onPriceSelect }: Props) {
   const { colors } = useTheme();
   const styles = useStyles();
-  const { snapshot } = useLevel2Book(symbol);
+  const { snapshot, status } = useLevel2Book(symbol);
   const { rules } = useSymbolRules(symbol);
   const { orders } = useOpenOrders();
   const [baseCurrency = "", quoteCurrency = ""] = symbol.split("-");
@@ -190,10 +190,28 @@ function OrderBookBase({ symbol, onPriceSelect }: Props) {
     );
   };
 
+  // One glanceable indicator for the depth feed's health: green while diffs stream in, red
+  // once the connection is provably lost, gray while a handshake is still in flight.
+  const connectionColor = status === "live"
+    ? colors.up
+    : status === "offline" ? colors.downText : colors.textFaint;
+  const connectionLabel = status === "live"
+    ? "Connected"
+    : status === "offline" ? "Lost" : "Connecting";
+
   return (
     <View style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.headerText}>Price ({quoteCurrency})</Text>
+        <View
+          style={[
+            styles.connectionDot,
+            { backgroundColor: connectionColor },
+            status === "live" && styles.connectionDotLive,
+          ]}
+          accessibilityRole="image"
+          accessibilityLabel={`Order book ${connectionLabel.toLowerCase()}`}
+        />
         <Text style={[styles.headerText, styles.headerRight]}>
           Total ({baseCurrency})
         </Text>
@@ -350,6 +368,19 @@ const useStyles = createThemedStyles((colors) =>
       alignItems: "center",
       justifyContent: "space-between",
       paddingBottom: spacing.xs,
+    },
+    connectionDot: {
+      width: 8,
+      height: 8,
+      borderRadius: 4,
+      marginHorizontal: spacing.xs,
+    },
+    connectionDotLive: {
+      shadowColor: colors.up,
+      shadowOffset: { width: 0, height: 0 },
+      shadowOpacity: 0.9,
+      shadowRadius: 6,
+      elevation: 4,
     },
     headerText: {
       color: colors.textFaint,
