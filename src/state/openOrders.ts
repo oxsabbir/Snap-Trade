@@ -355,20 +355,14 @@ export function applyOrderUpdate(message: unknown): void {
  * confirmed. Removing it optimistically instead would leave nothing on screen to show that
  * spinner on, and nothing to come back to if the exchange refuses.
  */
-export async function cancelOpenOrder(orderId: string): Promise<boolean> {
-  if (state.cancelling.has(orderId)) return false;
-  const order = state.orders.find((o) => o.orderId === orderId);
-  if (!order) return false;
-
-  emit({ cancelling: new Set([...state.cancelling, orderId]), error: null });
+async function cancelOne(order: OpenOrder): Promise<boolean> {
+  emit({ cancelling: new Set([...state.cancelling, order.orderId]), error: null });
 
   try {
     // The HF book refuses to cancel without the pair, and every row knows its own.
-    await cancelOrder(orderId, { wallet: order.wallet, symbol: order.symbol });
-    unconfirmed.delete(orderId);
-    emit({ orders: state.orders.filter((o) => o.orderId !== orderId) });
-    // Reconciles anything that filled or changed while the cancel was in flight.
-    void loadOpenOrders();
+    await cancelOrder(order.orderId, { wallet: order.wallet, symbol: order.symbol });
+    unconfirmed.delete(order.orderId);
+    emit({ orders: state.orders.filter((o) => o.orderId !== order.orderId) });
     // The frozen funds are released on the exchange's side, and the balance feed pushes the new
     // figure directly; this re-reads once as a safety net.
     reconcileBalanceAfterChange();
@@ -380,9 +374,8 @@ export async function cancelOpenOrder(orderId: string): Promise<boolean> {
     // `order_not_exist_or_not_allow_to_cancel`. That is not a failure to show the user — the order
     // is simply no longer open, so retire the row and re-read instead of surfacing an error.
     if (isOrderGoneError(caught)) {
-      unconfirmed.delete(orderId);
-      emit({ orders: state.orders.filter((o) => o.orderId !== orderId), error: null });
-      void loadOpenOrders();
+      unconfirmed.delete(order.orderId);
+      emit({ orders: state.orders.filter((o) => o.orderId !== order.orderId), error: null });
       reconcileBalanceAfterChange();
       scheduleCostBasisRefresh(order.symbol);
       return true;
@@ -391,7 +384,80 @@ export async function cancelOpenOrder(orderId: string): Promise<boolean> {
     return false;
   } finally {
     const cancelling = new Set(state.cancelling);
-    cancelling.delete(orderId);
+    cancelling.delete(order.orderId);
     emit({ cancelling });
   }
+}
+
+export async function cancelOpenOrder(orderId: string): Promise<boolean> {
+  if (state.cancelling.has(orderId)) return false;
+  const order = state.orders.find((o) => o.orderId === orderId);
+  if (!order) return false;
+  const ok = await cancelOne(order);
+  if (ok) void loadOpenOrders();
+  return ok;
+}
+
+/** Cancel requests per burst; the DELETE /orders/{id} endpoint is rate-limited per account. */
+const CANCEL_ALL_BATCH = 4;
+
+/**
+ * Cancels every still-open order across both spot books.
+ *
+ * All rows dim at once (their `cancelling` flags are set up front, so an in-flight sweep is
+ * never visually confused with progress), then the requests go out in small batches — a burst
+ * keeps the panel's promise the same way a single-row cancel does, just multiplied. Each
+ * resolved order leaves the list individually, and one failed cancel only leaves its failing
+ * row behind; the sweep never aborts on it.
+ */
+export async function cancelAllOpenOrders(): Promise<boolean> {
+  // Same visibility rule the panel uses: terminal rows are already gone from here, and a fully
+  // filled order has nothing left to cancel.
+  const targets = state.orders.filter(
+    (order) =>
+      !isTerminalStatus(order.status) &&
+      (Number(order.size) <= 0 || Number(order.filledSize) < Number(order.size))
+  );
+  if (targets.length === 0) return false;
+
+  const withSymbols = new Set<string>();
+  emit({ cancelling: new Set([...state.cancelling, ...targets.map((o) => o.orderId)]), error: null });
+
+  let succeeded = 0;
+  for (let i = 0; i < targets.length; i += CANCEL_ALL_BATCH) {
+    await Promise.all(
+      targets.slice(i, i + CANCEL_ALL_BATCH).map(async (order) => {
+        try {
+          await cancelOrder(order.orderId, { wallet: order.wallet, symbol: order.symbol });
+          unconfirmed.delete(order.orderId);
+          emit({ orders: state.orders.filter((o) => o.orderId !== order.orderId) });
+          succeeded += 1;
+          withSymbols.add(order.symbol);
+        } catch (caught) {
+          // An already-gone order counts as cancelled: the row retires and the sweep continues.
+          if (isOrderGoneError(caught)) {
+            unconfirmed.delete(order.orderId);
+            emit({ orders: state.orders.filter((o) => o.orderId !== order.orderId), error: null });
+            succeeded += 1;
+            withSymbols.add(order.symbol);
+          } else {
+            emit({ error: describeError(caught, 'Cancel failed.') });
+          }
+        } finally {
+          const cancelling = new Set(state.cancelling);
+          cancelling.delete(order.orderId);
+          emit({ cancelling });
+        }
+      }),
+    );
+  }
+
+  // Reconciles anything that filled or changed while the sweep was in flight, releasing or
+  // re-freezing funds across every cancelled symbol in one pass.
+  if (succeeded > 0) {
+    reconcileBalanceAfterChange();
+    for (const symbol of withSymbols) scheduleCostBasisRefresh(symbol);
+  }
+  void loadOpenOrders();
+  return succeeded > 0;
 }

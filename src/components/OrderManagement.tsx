@@ -83,15 +83,29 @@ function OrderRow({
             </Text>
           </View>
         </View>
-        <View
-          style={[
-            styles.statusBadge,
-            isPartiallyFilled && { backgroundColor: isBuy ? colors.upFill : colors.downFill },
-          ]}
-        >
-          <Text style={[styles.status, isPartiallyFilled && { color: sideTextColor }]}>
-            {statusLabel}
-          </Text>
+        <View style={styles.headerActions}>
+          <View
+            style={[
+              styles.statusBadge,
+              isPartiallyFilled && { backgroundColor: isBuy ? colors.upFill : colors.downFill },
+            ]}
+          >
+            <Text style={[styles.status, isPartiallyFilled && { color: sideTextColor }]}>
+              {statusLabel}
+            </Text>
+          </View>
+          <Pressable
+            onPress={onCancel}
+            disabled={isCancelling}
+            style={[styles.cancelChip, isCancelling && styles.cancelBtnDisabled]}
+            accessibilityRole="button"
+            accessibilityLabel={`Cancel order ${order.orderId.slice(0, 8)}`}
+            hitSlop={8}
+          >
+            <Text style={styles.cancelChipText}>
+              {isCancelling ? "… cancelling" : "Cancel"}
+            </Text>
+          </Pressable>
         </View>
       </View>
 
@@ -121,20 +135,8 @@ function OrderRow({
       </View>
 
       <View style={styles.rowFooter}>
-        <View style={styles.fillDetails}>
-          <Text style={styles.filled}>{formatFilledDisplay(order)} {order.symbol.split("-")[0]}</Text>
-          <Text style={styles.remaining}>Remaining {formatAmount(remaining)}</Text>
-        </View>
-        <Pressable
-          onPress={onCancel}
-          disabled={isCancelling}
-          style={[styles.cancelBtn, isCancelling && styles.cancelBtnDisabled]}
-          accessibilityRole="button"
-          accessibilityLabel={`Cancel order ${order.orderId.slice(0, 8)}`}
-          hitSlop={8}
-        >
-          <Text style={styles.cancelBtnText}>{isCancelling ? "Cancelling…" : "Cancel order"}</Text>
-        </Pressable>
+        <Text style={styles.filled}>{formatFilledDisplay(order)} {order.symbol.split("-")[0]}</Text>
+        <Text style={styles.remaining}>Remaining {formatAmount(remaining)}</Text>
       </View>
     </View>
   );
@@ -184,7 +186,7 @@ export const OrderManagement = memo(function OrderManagement({
   const styles = useStyles();
   const [activeTab, setActiveTab] = useState(0);
 
-  const { orders, isLoading, error, cancelling, cancelOrder } = useOpenOrders();
+  const { orders, isLoading, error, cancelling, cancelOrder, cancelAll } = useOpenOrders();
 
   const usdtBalance = available["USDT"] ?? "0";
 
@@ -204,6 +206,14 @@ export const OrderManagement = memo(function OrderManagement({
     },
     [cancelOrder],
   );
+
+  const handleCancelAll = useCallback(() => {
+    void cancelAll();
+  }, [cancelAll]);
+
+  // The sweep dims every row at once, so "every visible row is mid-cancel" is the honest signal
+  // that the whole list is being cleared — used for the chip's label and its disabled state.
+  const cancellingAll = visibleOrders.length > 0 && cancelling.size >= visibleOrders.length;
 
   // Only a genuinely empty list is a loading state. A refresh runs in the background after every
   // cancel, and replacing live rows with a spinner then would throw away what the user just did.
@@ -238,6 +248,25 @@ export const OrderManagement = memo(function OrderManagement({
           // A plain column, not a scroll view: the route already owns one for the whole screen
           // and a list nested inside it fights the user for the same gesture.
           <View style={styles.list}>
+            {visibleOrders.length > 1 ? (
+              <View style={styles.listHeader}>
+                <Text style={styles.listCount}>
+                  {visibleOrders.length === 1 ? "1 open order" : `${visibleOrders.length} open orders`}
+                </Text>
+                <Pressable
+                  onPress={handleCancelAll}
+                  disabled={cancellingAll}
+                  style={[styles.cancelAllChip, cancellingAll && styles.cancelBtnDisabled]}
+                  accessibilityRole="button"
+                  accessibilityLabel="Cancel all open orders"
+                  hitSlop={8}
+                >
+                  <Text style={styles.cancelAllChipText}>
+                    {cancellingAll ? "Cancelling all…" : "Cancel all"}
+                  </Text>
+                </Pressable>
+              </View>
+            ) : null}
             {visibleOrders.map((order) => (
               <OrderRow
                 key={order.orderId}
@@ -417,6 +446,33 @@ const useStyles = createThemedStyles((colors) => StyleSheet.create({
   list: {
     gap: spacing.sm,
   },
+  listHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    minHeight: 24,
+    paddingHorizontal: 2,
+  },
+  listCount: {
+    color: colors.textFaint,
+    fontSize: 11,
+    fontWeight: "600",
+    fontVariant: ["tabular-nums"],
+  },
+  cancelAllChip: {
+    minHeight: 24,
+    paddingHorizontal: spacing.sm,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: colors.downFill,
+    borderRadius: radius.pill,
+  },
+  cancelAllChipText: {
+    color: colors.downText,
+    fontSize: 10,
+    fontWeight: "700",
+    letterSpacing: 0.2,
+  },
   row: {
     gap: spacing.sm,
     padding: spacing.md,
@@ -528,10 +584,6 @@ const useStyles = createThemedStyles((colors) => StyleSheet.create({
     justifyContent: "space-between",
     gap: spacing.sm,
   },
-  fillDetails: {
-    flex: 1,
-    gap: 2,
-  },
   filled: {
     color: colors.text,
     fontSize: 11,
@@ -543,20 +595,27 @@ const useStyles = createThemedStyles((colors) => StyleSheet.create({
     fontSize: 10,
     fontVariant: ["tabular-nums"],
   },
-  cancelBtn: {
-    minHeight: 40,
-    paddingHorizontal: spacing.md,
+  headerActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs,
+    flexShrink: 1,
+  },
+  cancelChip: {
+    minHeight: 26,
+    paddingHorizontal: spacing.sm,
     justifyContent: "center",
     alignItems: "center",
     backgroundColor: colors.downFill,
-    borderRadius: radius.md,
+    borderRadius: radius.sm,
+  },
+  cancelChipText: {
+    color: colors.downText,
+    fontSize: 10,
+    fontWeight: "700",
+    letterSpacing: 0.2,
   },
   cancelBtnDisabled: {
     opacity: 0.5,
-  },
-  cancelBtnText: {
-    color: colors.downText,
-    fontSize: 11,
-    fontWeight: "700",
   },
 }));
