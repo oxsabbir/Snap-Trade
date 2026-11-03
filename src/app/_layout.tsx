@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo } from 'react';
 import { View } from '@/components/AppLayout';
-import { ActivityIndicator, DeviceEventEmitter, Platform, StyleSheet } from 'react-native';
+import { ActivityIndicator, Platform, StyleSheet } from 'react-native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { NavigationBar } from 'expo-navigation-bar';
@@ -8,9 +8,6 @@ import * as SystemUI from 'expo-system-ui';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { initialWindowMetrics, SafeAreaProvider } from 'react-native-safe-area-context';
 import { usePrivateFeed } from '@/hooks/usePrivateFeed';
-import { useSignalDeepLink } from '@/hooks/useSignalDeepLink';
-import { disableSignalDetection, useSignalSource } from '@/hooks/useSignalSource';
-import { SIGNAL_DETECTION_ENABLED } from '@/lib/featureFlags';
 
 import { ActiveCoinProvider } from '@/state/activeCoin';
 import { ApiCredentialsProvider, useApiCredentials } from '@/state/apiCredentials';
@@ -40,35 +37,6 @@ function RootNavigator() {
   const { isLoading, isConnected } = useApiCredentials();
   const { colors, scheme } = useTheme();
   const styles = useStyles();
-
-  // Handles a signal deep link that arrives while the app is already running. A cold launch is
-  // resolved by the router before this mounts. No-ops (and is tree-shaken) when the feature is
-  // stripped from the build.
-  useSignalDeepLink();
-
-  // Prints the native notification payload in Metro while the JS runtime is alive, which makes
-  // it possible to compare the fields Android supplies for X posts and adb test notifications.
-  useEffect(() => {
-    if (Platform.OS !== 'android' || !SIGNAL_DETECTION_ENABLED) return;
-
-    const subscription = DeviceEventEmitter.addListener('NotificationPosted', (notification) => {
-      const packageName = notification?.packageName;
-      if (packageName !== 'com.twitter.android' && packageName !== 'com.android.shell') return;
-
-      console.log('[SignalNotification] received', {
-        packageName,
-        id: notification?.id,
-        postTime: notification?.postTime,
-        title: notification?.title,
-        text: notification?.text,
-        bigText: notification?.bigText,
-        textLines: notification?.textLines,
-        subText: notification?.subText,
-      });
-    });
-
-    return () => subscription.remove();
-  }, []);
 
   // Keeps the root view (behind the navigator, and visible during transitions) in step with the
   // active scheme so no wrong-coloured edge flashes when a screen animates.
@@ -104,17 +72,8 @@ function RootNavigator() {
         <Stack.Protected guard={isLoading || !isConnected}>
           <Stack.Screen name="onboarding" />
         </Stack.Protected>
-        {/* Not inside a Protected guard: these are reached by a notification deep link (which
-            must open even mid-onboarding) and from Account. The route files exist either way
-            (Expo Router is file-based); with signal detection stripped they immediately redirect
-            back to the tabs. Rendered as separate conditionals — not wrapped in a Fragment —
-            because Stack inspects its direct children and a Fragment's type is a Symbol it
-            cannot stringify. */}
-        {SIGNAL_DETECTION_ENABLED ? <Stack.Screen name="trade/[symbol]" /> : null}
-        {SIGNAL_DETECTION_ENABLED ? <Stack.Screen name="permissions" /> : null}
       </Stack>
       {isConnected ? <PrivateFeedRuntime /> : null}
-      <SignalSettingsRuntime />
       {isLoading ? (
         <View style={styles.bootOverlay}>
           <ActivityIndicator color={colors.accent} />
@@ -126,38 +85,6 @@ function RootNavigator() {
 
 function PrivateFeedRuntime() {
   usePrivateFeed();
-  return null;
-}
-
-/**
- * Mounted once so the signal settings hydrate and mirror into the native listener's
- * SharedPreferences on every launch, not only when the Account tab happens to be opened.
- * When SIGNAL_DETECTION_ENABLED is false, it explicitly ensures native detection is disabled.
- *
- * Deferred past the first interactions so its two AsyncStorage reads and the native
- * `syncSignalSettings` round-trip do not compete with the first paint. Nothing depends on the
- * hydrated values until the user opens the signal settings screen.
- */
-function SignalSettingsRuntime() {
-  const [shouldHydrate, setShouldHydrate] = useState(false);
-
-  useEffect(() => {
-    if (!SIGNAL_DETECTION_ENABLED) {
-      disableSignalDetection();
-      return;
-    }
-    // Idle callback rather than the deprecated InteractionManager: hydration is not tied to
-    // transition completion — it only needs a moment when the JS thread is not busy.
-    const task = requestIdleCallback(() => setShouldHydrate(true));
-    return () => cancelIdleCallback(task);
-  }, []);
-
-  if (!SIGNAL_DETECTION_ENABLED) return null;
-  return shouldHydrate ? <SignalSettingsHydrator /> : null;
-}
-
-function SignalSettingsHydrator() {
-  useSignalSource();
   return null;
 }
 

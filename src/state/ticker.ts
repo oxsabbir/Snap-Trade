@@ -135,9 +135,8 @@ export function useTicker(symbol: string): TickerSnapshot {
  * Opens a connection for a symbol and drops it again after [holdMs] unless a real subscriber
  * (the trade screen) has taken over the ref count by then.
  *
- * A signal launch lands on the trade screen only after the router has mounted it. Warming the
- * socket here means the first tick is usually already in the snapshot by the time the screen's
- * `useTicker` mounts, so the cold-start price does not have to wait for a fresh handshake.
+ * Warming the socket means the first tick is usually already in the snapshot by the time
+ * the screen's `useTicker` mounts, so the cold-start price does not have to wait for a fresh handshake.
  */
 export function prefetchTicker(symbol: string, holdMs = 15_000): void {
   const release = subscribeTicker(symbol, () => {});

@@ -8,7 +8,7 @@ import { ActivityIndicator, StyleSheet } from 'react-native';
 import { Text } from '@/components/AppText';
 
 import { CoinInfoSheet } from "@/components/CoinInfoSheet";
-import { BackIcon, InfoIcon } from "@/components/Icons";
+import { InfoIcon } from "@/components/Icons";
 import { LiveBadge } from "@/components/LiveBadge";
 import { LivePrice } from "@/components/LivePrice";
 import { PositionPnlChip } from "@/components/PositionPnlChip";
@@ -30,26 +30,6 @@ type Props = {
   symbol: string;
   name?: string;
   decimals?: number;
-  /**
-   * Sections rendered under the chart. The screen that renders this owns the scroll view and
-   * the order of the sections, so anything added later is a sibling here rather than another
-   * branch inside this component.
-   *
-   * Plain children, deliberately: this used to be a render prop handed the live quote, which
-   * is what put a price ticking several times a second into state above the order book and the
-   * order form. Neither reads the quote now — the price is subscribed to directly where it is
-   * displayed — so there is nothing left to pass down.
-   */
-  // children?: ReactNode;
-  /** Shown as a back affordance in the title row when this screen is a pushed route. */
-  onBack?: () => void;
-  /**
-   * Signal readout carried by a signal deep link, shown centred in the title row. TP posts (first
-   * influencer) carry `signalTp1`; gem posts (second influencer) carry `signalEntry`. The two are
-   * mutually exclusive, so only one is ever shown. Null on the tab.
-   */
-  signalTp1?: string | null;
-  signalEntry?: string | null;
 };
 
 /** Timeframe a freshly opened pair starts on. */
@@ -72,38 +52,7 @@ type ChromeProps = {
   timeframeKey: string;
   onSelectTimeframe: (next: TimeframeOrLine) => void;
   onOpenInfo: () => void;
-  /**
-   * Rendered as an icon just before the info button. Only supplied when this screen is a pushed
-   * route (a signal deep link); the tab has nothing to go back to.
-   */
-  onBack?: () => void;
-  /**
-   * Signal readout, centred in the title row. A TP post (first influencer) supplies `signalTp1`
-   * and nothing else; a gem post (second influencer) supplies `signalEntry` (its posted market
-   * price). Mutually exclusive, so the row shows "TP1: …" or "CMP: …", never both.
-   */
-  signalTp1?: string | null;
-  signalEntry?: string | null;
 };
-
-/**
- * The signal's target, centred in the title row: "TP1: 0.0034" for a TP post or "CMP: 0.0007320"
- * for a gem post. One line, one value — the two formats never arrive together.
- */
-function SignalReadout({ tp1, entry }: { tp1?: string | null; entry?: string | null }) {
-  const styles = useStyles();
-  const value = tp1 ?? entry;
-  if (!value) return null;
-
-  return (
-    <View style={styles.signalCenter} pointerEvents="none">
-      <Text style={styles.signalStat} numberOfLines={1}>
-        <Text style={styles.signalStatLabel}>{tp1 ? "TP1: " : "CMP: "}</Text>
-        {value}
-      </Text>
-    </View>
-  );
-}
 
 /**
  * Everything above the chart: the pair's name, its price, the timeframe tabs and the caption.
@@ -122,9 +71,6 @@ const ChartChrome = memo(function ChartChrome({
   timeframeKey,
   onSelectTimeframe,
   onOpenInfo,
-  onBack,
-  signalTp1,
-  signalEntry,
 }: ChromeProps) {
   const { colors } = useTheme();
   const styles = useStyles();
@@ -139,20 +85,7 @@ const ChartChrome = memo(function ChartChrome({
             <Text style={styles.name}>{name}</Text>
           ) : null}
         </View>
-        {/* Centred across the row, before the back affordance: the posted signal value. */}
-        <SignalReadout tp1={signalTp1} entry={signalEntry} />
         <View style={styles.headerActions}>
-          {onBack ? (
-            <Pressable
-              onPress={onBack}
-              hitSlop={12}
-              style={styles.iconButton}
-              accessibilityRole="button"
-              accessibilityLabel="Go back"
-            >
-              <BackIcon size={17} color={colors.textMuted} />
-            </Pressable>
-          ) : null}
           <Pressable
             onPress={onOpenInfo}
             hitSlop={12}
@@ -186,7 +119,7 @@ const ChartChrome = memo(function ChartChrome({
   );
 });
 
-export function CoinDetail({ symbol, name, decimals, signalTp1, signalEntry, onBack }: Props) {
+export function CoinDetail({ symbol, name, decimals }: Props) {
   const { colors } = useTheme();
   const styles = useStyles();
   const [timeframeKey, setTimeframeKey] = useState(DEFAULT_TIMEFRAME_KEY);
@@ -274,9 +207,6 @@ export function CoinDetail({ symbol, name, decimals, signalTp1, signalEntry, onB
         timeframeKey={timeframeKey}
         onSelectTimeframe={onSelectTimeframe}
         onOpenInfo={onOpenInfo}
-        onBack={onBack}
-        signalTp1={signalTp1}
-        signalEntry={signalEntry}
       />
 
       <View style={styles.chartWrap}>
@@ -364,28 +294,6 @@ const useStyles = createThemedStyles((colors) =>
       flexDirection: "row",
       alignItems: "center",
     },
-    // Overlays the title row so the readout is centred across the full width regardless of how
-    // wide the pair name is; it ignores touches, so the back and info buttons stay tappable.
-    signalCenter: {
-      position: "absolute",
-      top: 0,
-      bottom: 0,
-      left: 0,
-      right: 0,
-      alignItems: "center",
-      justifyContent: "center",
-    },
-    signalStat: {
-      color: colors.up,
-      fontSize: 13,
-      fontWeight: "800",
-      fontVariant: ["tabular-nums"],
-    },
-    signalStatLabel: {
-      color: colors.up,
-      fontWeight: "700",
-      opacity: 0.72,
-    },
     symbol: {
       color: colors.text,
       fontSize: 17,
@@ -453,10 +361,6 @@ const useStyles = createThemedStyles((colors) =>
     infoButton: {
       padding: spacing.xs,
       marginLeft: spacing.xs,
-      borderRadius: radius.pill,
-    },
-    iconButton: {
-      padding: spacing.xs,
       borderRadius: radius.pill,
     },
   }),
