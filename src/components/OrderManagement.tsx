@@ -248,7 +248,7 @@ export const OrderManagement = memo(function OrderManagement({
           // A plain column, not a scroll view: the route already owns one for the whole screen
           // and a list nested inside it fights the user for the same gesture.
           <View style={styles.list}>
-            {visibleOrders.length > 1 ? (
+            {visibleOrders.length > 0 ? (
               <View style={styles.listHeader}>
                 <Text style={styles.listCount}>
                   {visibleOrders.length === 1 ? "1 open order" : `${visibleOrders.length} open orders`}
@@ -451,7 +451,10 @@ const useStyles = createThemedStyles((colors) => StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     minHeight: 24,
+    // Breathing room between the header row and the first order card, so the count line and
+    // the cancel chip don't crowd the card's header when scrolling fast.
     paddingHorizontal: 2,
+    paddingBottom: spacing.xs,
   },
   listCount: {
     color: colors.textFaint,
@@ -459,16 +462,17 @@ const useStyles = createThemedStyles((colors) => StyleSheet.create({
     fontWeight: "600",
     fontVariant: ["tabular-nums"],
   },
+  // A plain text button: no fill, green like a confirmative action, so the always-visible
+  // control sits quiet next to the count unless its action is wanted.
   cancelAllChip: {
     minHeight: 24,
-    paddingHorizontal: spacing.sm,
+    paddingHorizontal: spacing.xs,
     justifyContent: "center",
     alignItems: "center",
-    backgroundColor: colors.downFill,
-    borderRadius: radius.pill,
+    borderRadius: radius.sm,
   },
   cancelAllChipText: {
-    color: colors.downText,
+    color: colors.upText,
     fontSize: 10,
     fontWeight: "700",
     letterSpacing: 0.2,
@@ -601,16 +605,20 @@ const useStyles = createThemedStyles((colors) => StyleSheet.create({
     gap: spacing.xs,
     flexShrink: 1,
   },
+  // The per-card cancel is the one destructive action in the row, so it carries a solid red
+  // background with white text — loud enough to find in a hurry, small enough to stay quiet.
   cancelChip: {
     minHeight: 26,
     paddingHorizontal: spacing.sm,
     justifyContent: "center",
     alignItems: "center",
-    backgroundColor: colors.downFill,
+    backgroundColor: colors.downText,
     borderRadius: radius.sm,
   },
   cancelChipText: {
-    color: colors.downText,
+    // White on solid red in both themes — the theme's surface token flips to near-black in dark
+    // mode, which would be unreadable on the red fill.
+    color: "#FFFFFF",
     fontSize: 10,
     fontWeight: "700",
     letterSpacing: 0.2,
