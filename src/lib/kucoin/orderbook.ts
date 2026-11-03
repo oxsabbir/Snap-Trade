@@ -38,6 +38,8 @@ export type Level2Snapshot = {
   symbol?: string;
   asks: PriceLevel[];
   bids: PriceLevel[];
+  /** KuCoin book sequence at fetch time, used to gate incremental frames on the socket. */
+  sequence?: number;
   time?: number;
 };
 

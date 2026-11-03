@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useSyncExternalStore } from 'react';
 
 import {
+  cancelAllOpenOrders,
   cancelOpenOrder,
   getOpenOrdersState,
   isTerminalStatus,
@@ -25,6 +26,7 @@ export type UseOpenOrders = {
   error: string | null;
   cancelling: ReadonlySet<string>;
   cancelOrder: (orderId: string) => Promise<boolean>;
+  cancelAll: () => Promise<boolean>;
   refresh: () => void;
 };
 
@@ -52,6 +54,7 @@ export function useOpenOrders(): UseOpenOrders {
   }, [refresh]);
 
   const cancelOrder = useCallback((orderId: string) => cancelOpenOrder(orderId), []);
+  const cancelAll = useCallback(() => cancelAllOpenOrders(), []);
 
   return {
     orders: state.orders,
@@ -65,6 +68,7 @@ export function useOpenOrders(): UseOpenOrders {
     error: state.error,
     cancelling: state.cancelling,
     cancelOrder,
+    cancelAll,
     refresh,
   };
 }

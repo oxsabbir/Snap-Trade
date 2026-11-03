@@ -83,15 +83,33 @@ function OrderRow({
             </Text>
           </View>
         </View>
-        <View
-          style={[
-            styles.statusBadge,
-            isPartiallyFilled && { backgroundColor: isBuy ? colors.upFill : colors.downFill },
-          ]}
-        >
-          <Text style={[styles.status, isPartiallyFilled && { color: sideTextColor }]}>
-            {statusLabel}
-          </Text>
+        <View style={styles.headerActions}>
+          <View
+            style={[
+              styles.statusBadge,
+              {
+                // "Open" is an active, live order, so it wears the green fill; a partially
+                // filled one keeps the side's color (green for buy, red for sell) instead.
+                backgroundColor: isPartiallyFilled ? (isBuy ? colors.upFill : colors.downFill) : colors.upFill,
+              },
+            ]}
+          >
+            <Text style={[styles.status, { color: isPartiallyFilled ? sideTextColor : colors.upText }]}>
+              {statusLabel}
+            </Text>
+          </View>
+          <Pressable
+            onPress={onCancel}
+            disabled={isCancelling}
+            style={[styles.cancelChip, isCancelling && styles.cancelBtnDisabled]}
+            accessibilityRole="button"
+            accessibilityLabel={`Cancel order ${order.orderId.slice(0, 8)}`}
+            hitSlop={8}
+          >
+            <Text style={styles.cancelChipText}>
+              {isCancelling ? "… cancelling" : "Cancel"}
+            </Text>
+          </Pressable>
         </View>
       </View>
 
@@ -121,20 +139,8 @@ function OrderRow({
       </View>
 
       <View style={styles.rowFooter}>
-        <View style={styles.fillDetails}>
-          <Text style={styles.filled}>{formatFilledDisplay(order)} {order.symbol.split("-")[0]}</Text>
-          <Text style={styles.remaining}>Remaining {formatAmount(remaining)}</Text>
-        </View>
-        <Pressable
-          onPress={onCancel}
-          disabled={isCancelling}
-          style={[styles.cancelBtn, isCancelling && styles.cancelBtnDisabled]}
-          accessibilityRole="button"
-          accessibilityLabel={`Cancel order ${order.orderId.slice(0, 8)}`}
-          hitSlop={8}
-        >
-          <Text style={styles.cancelBtnText}>{isCancelling ? "Cancelling…" : "Cancel order"}</Text>
-        </Pressable>
+        <Text style={styles.filled}>{formatFilledDisplay(order)} {order.symbol.split("-")[0]}</Text>
+        <Text style={styles.remaining}>Remaining {formatAmount(remaining)}</Text>
       </View>
     </View>
   );
@@ -184,10 +190,17 @@ export const OrderManagement = memo(function OrderManagement({
   const styles = useStyles();
   const [activeTab, setActiveTab] = useState(0);
 
-  const { orders, isLoading, error, cancelling, cancelOrder } = useOpenOrders();
+  const { orders, openCount, isLoading, error, cancelling, cancelOrder, cancelAll } = useOpenOrders();
+
+  // The tab itself carries the live count, so a user on the Assets tab can see orders waiting
+  // without switching. Terminal rows are already excluded by the store.
+  const tabs = useMemo(() => {
+    const labels = [...TABS] as string[];
+    if (openCount > 0) labels[0] = `Open Orders (${openCount})`;
+    return labels;
+  }, [openCount]);
 
   const usdtBalance = available["USDT"] ?? "0";
-
   const visibleOrders = useMemo(
     () =>
       orders.filter(
@@ -204,6 +217,14 @@ export const OrderManagement = memo(function OrderManagement({
     },
     [cancelOrder],
   );
+
+  const handleCancelAll = useCallback(() => {
+    void cancelAll();
+  }, [cancelAll]);
+
+  // The sweep dims every row at once, so "every visible row is mid-cancel" is the honest signal
+  // that the whole list is being cleared — used for the chip's label and its disabled state.
+  const cancellingAll = visibleOrders.length > 0 && cancelling.size >= visibleOrders.length;
 
   // Only a genuinely empty list is a loading state. A refresh runs in the background after every
   // cancel, and replacing live rows with a spinner then would throw away what the user just did.
@@ -238,6 +259,25 @@ export const OrderManagement = memo(function OrderManagement({
           // A plain column, not a scroll view: the route already owns one for the whole screen
           // and a list nested inside it fights the user for the same gesture.
           <View style={styles.list}>
+            {visibleOrders.length > 0 ? (
+              <View style={styles.listHeader}>
+                <Text style={styles.listCount}>
+                  {visibleOrders.length === 1 ? "1 open order" : `${visibleOrders.length} open orders`}
+                </Text>
+                <Pressable
+                  onPress={handleCancelAll}
+                  disabled={cancellingAll}
+                  style={[styles.cancelAllChip, cancellingAll && styles.cancelBtnDisabled]}
+                  accessibilityRole="button"
+                  accessibilityLabel="Cancel all open orders"
+                  hitSlop={8}
+                >
+                  <Text style={styles.cancelAllChipText}>
+                    {cancellingAll ? "Cancelling all…" : "Cancel all"}
+                  </Text>
+                </Pressable>
+              </View>
+            ) : null}
             {visibleOrders.map((order) => (
               <OrderRow
                 key={order.orderId}
@@ -254,7 +294,7 @@ export const OrderManagement = memo(function OrderManagement({
 
   return (
     <View style={styles.container}>
-      <TabBar tabs={TABS} activeIndex={activeTab} onPress={setActiveTab} />
+      <TabBar tabs={tabs} activeIndex={activeTab} onPress={setActiveTab} />
       {content}
     </View>
   );
@@ -417,6 +457,41 @@ const useStyles = createThemedStyles((colors) => StyleSheet.create({
   list: {
     gap: spacing.sm,
   },
+  listHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    // Matches the enlarged Cancel All chip (1.2x the original sizing) so the row's declared
+    // height covers the chip instead of letting its text padding drive the header's height.
+    minHeight: 29,
+    // Breathing room between the header row and the first order card, so the count line and
+    // the cancel chip don't crowd the card's header when scrolling fast.
+    paddingHorizontal: 2,
+    paddingBottom: spacing.xs,
+  },
+  listCount: {
+    color: colors.textFaint,
+    fontSize: 11,
+    fontWeight: "600",
+    fontVariant: ["tabular-nums"],
+  },
+  // A plain text button: no fill, green like a confirmative action, so the always-visible
+  // control sits quiet next to the count unless its action is wanted.
+  // Sized 1.2x the original chip (min 29 height, 5px sides, 12px type) — the tap target was
+  // too easy to miss at the baseline size for an action that wipes every order.
+  cancelAllChip: {
+    minHeight: 29,
+    paddingHorizontal: 5,
+    justifyContent: "center",
+    alignItems: "center",
+    borderRadius: radius.sm,
+  },
+  cancelAllChipText: {
+    color: colors.upText,
+    fontSize: 12,
+    fontWeight: "700",
+    letterSpacing: 0.2,
+  },
   row: {
     gap: spacing.sm,
     padding: spacing.md,
@@ -468,10 +543,8 @@ const useStyles = createThemedStyles((colors) => StyleSheet.create({
     paddingHorizontal: spacing.sm,
     paddingVertical: spacing.xs,
     borderRadius: radius.pill,
-    backgroundColor: colors.surfaceAlt,
   },
   status: {
-    color: colors.textMuted,
     fontSize: 10,
     fontWeight: "700",
   },
@@ -528,10 +601,6 @@ const useStyles = createThemedStyles((colors) => StyleSheet.create({
     justifyContent: "space-between",
     gap: spacing.sm,
   },
-  fillDetails: {
-    flex: 1,
-    gap: 2,
-  },
   filled: {
     color: colors.text,
     fontSize: 11,
@@ -543,20 +612,33 @@ const useStyles = createThemedStyles((colors) => StyleSheet.create({
     fontSize: 10,
     fontVariant: ["tabular-nums"],
   },
-  cancelBtn: {
-    minHeight: 40,
-    paddingHorizontal: spacing.md,
+  headerActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    // Widened from xs: the status chip and the Cancel chip sat too close together, and two
+    // independently tappable controls need a clear seam between them.
+    gap: spacing.sm,
+    flexShrink: 1,
+  },
+  // The per-card cancel is the one destructive action in the row, so it carries a solid red
+  // background with white text — loud enough to find in a hurry, small enough to stay quiet.
+  cancelChip: {
+    minHeight: 26,
+    paddingHorizontal: spacing.sm,
     justifyContent: "center",
     alignItems: "center",
-    backgroundColor: colors.downFill,
-    borderRadius: radius.md,
+    backgroundColor: colors.downText,
+    borderRadius: radius.sm,
+  },
+  cancelChipText: {
+    // White on solid red in both themes — the theme's surface token flips to near-black in dark
+    // mode, which would be unreadable on the red fill.
+    color: "#FFFFFF",
+    fontSize: 10,
+    fontWeight: "700",
+    letterSpacing: 0.2,
   },
   cancelBtnDisabled: {
     opacity: 0.5,
-  },
-  cancelBtnText: {
-    color: colors.downText,
-    fontSize: 11,
-    fontWeight: "700",
   },
 }));
