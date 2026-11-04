@@ -6,7 +6,10 @@
  * side. The native counterpart lives in `app.config.ts`, which reads the same variable to
  * decide whether the notification-listener config plugin is applied on `prebuild`.
  *
- * Semantics: the feature ships unless it is explicitly disabled, so a plain `expo start` or a
- * CI run with no configuration keeps signal detection.
+ * Semantics: strict opt-in. The private build sets the variable to 'true'; every other
+ * environment — a plain `expo start`, a CI run where the variable was never set, or a bundler
+ * that lost the variable between Gradle and Metro — compiles the feature OUT. Defaulting to
+ * enabled here is what once shipped the detection UI in the plain APK: an unset variable
+ * read as `undefined !== 'false'` and passed the gate.
  */
-export const SIGNAL_DETECTION_ENABLED = process.env.EXPO_PUBLIC_SIGNAL_DETECTION !== 'false';
+export const SIGNAL_DETECTION_ENABLED = process.env.EXPO_PUBLIC_SIGNAL_DETECTION === 'true';
