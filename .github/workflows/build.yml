@@ -10,8 +10,13 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.v.outputs.version }}
+      code: ${{ steps.v.outputs.code }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Full history with tags: the duplicate-release check below must see every tag that
+          # already exists on the remote, and the default shallow checkout fetches none.
+          fetch-depth: 0
 
       - name: Resolve version from app.json
         id: v
@@ -21,12 +26,18 @@ jobs:
             echo "app.json expo.version is not SemVer: '$V'" >&2
             exit 1
           fi
-          if git rev-parse "v$V" >/dev/null 2>&1; then
-            echo "Tag v$V already exists — bump the version first." >&2
+          # Android requires a strictly increasing versionCode per installable build, so it —
+          # not the SemVer alone — is the identity of a release: two builds of the same SemVer
+          # with different codes are different APKs and both deserve their own release entry.
+          C=$(node -p "require('./app.json').expo.android.versionCode")
+          TAG="v$V-b$C"
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists — bump app.json version/versionCode first." >&2
             exit 1
           fi
           echo "version=$V" >> "$GITHUB_OUTPUT"
-          echo "Releasing v$V"
+          echo "code=$C" >> "$GITHUB_OUTPUT"
+          echo "Releasing $TAG"
 
   build-plain:
     needs: check-version
@@ -162,14 +173,16 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: private-signal-apk-v${{ needs.check-version.outputs.version }}
+          name: private-signal-apk-v${{ needs.check-version.outputs.version }}-b${{ needs.check-version.outputs.code }}
           path: app-release-sd-incl.apk
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ needs.check-version.outputs.version }}
-          name: Release v${{ needs.check-version.outputs.version }}
+          # One release per installable build: the tag carries the versionCode, so older
+          # releases stay listed with their own APKs instead of being overwritten.
+          tag_name: v${{ needs.check-version.outputs.version }}-b${{ needs.check-version.outputs.code }}
+          name: Release v${{ needs.check-version.outputs.version }} (build ${{ needs.check-version.outputs.code }})
           make_latest: true
           generate_release_notes: true
           files: |
