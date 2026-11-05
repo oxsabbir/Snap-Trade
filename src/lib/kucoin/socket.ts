@@ -13,6 +13,21 @@ const THROTTLE_MS = 200;
 
 /** Deadlines for socket health, mirroring `level2.ts` (carrier-safe reconnects). */
 const CONNECT_TIMEOUT_MS = 25_000;
+/** Retry dials fail fast: a dial hanging into a dead route has already had its chance. */
+const RETRY_CONNECT_TIMEOUT_MS = 6_000;
+/**
+ * KuCoin's legacy spot WebSocket host — a different CloudFront distribution from the
+ * bullet-provided endpoint, so it resolves through a different DNS cache entry to a different
+ * edge pool. Used to escape a pinned unreachable edge on carrier networks.
+ */
+const FALLBACK_ENDPOINT = 'wss://ws-api.kucoin.com';
+/**
+ * Consecutive failed dials tolerated on the fallback host before it is benched for the rest
+ * of the connection's life. If KuCoin ever retires that endpoint, the app notices within a
+ * few attempts and stops spending retries on it — the fallback is additive, never a
+ * dependency, and the bullet-provided host keeps its full dial cadence.
+ */
+const FALLBACK_FAILURE_LIMIT = 4;
 const LIVENESS_MS = 25_000;
 const LIVENESS_CHECK_MS = 5_000;
 
@@ -124,6 +139,8 @@ export class TickerSocket {
   private lastMessageAt = 0;
   private attempt = 0;
   private stopped = true;
+  /** Consecutive failed dials on the fallback host; at the limit it is benched until an open. */
+  private fallbackFailures = 0;
   private appStateSubscription: { remove(): void } | null = null;
   private latest: TickerUpdate | null = null;
   private pendingSize = 0;
@@ -197,18 +214,35 @@ export class TickerSocket {
     const server = servers[this.attempt % servers.length]!;
     if (this.attempt > 0 && this.attempt % servers.length === 0) invalidateBullet();
 
-    const url = `${server.endpoint}?token=${encodeURIComponent(server.token)}&pingInterval=${server.pingInterval}`;
+    // Carrier paths (Grameenphone especially) sometimes pin an unreachable CloudFront edge in
+    // the OS DNS cache; every retry then dials the same dead IP no matter how many times we
+    // try, because the bullet host is a single name on spot. After the first full sweep,
+    // alternate dials to KuCoin's legacy spot host — a different DNS name gets its own cache
+    // entry and a different edge pool, which is what actually escapes a bad answer. (Toggling
+    // mobile data "fixes" it only because the reattach flushes the same cache.)
+    const useFallback =
+      this.attempt >= servers.length &&
+      this.attempt % 2 === 1 &&
+      this.fallbackFailures < FALLBACK_FAILURE_LIMIT;
+    const endpoint = useFallback ? FALLBACK_ENDPOINT : server.endpoint;
+
+    const url = `${endpoint}?token=${encodeURIComponent(server.token)}&pingInterval=${server.pingInterval}`;
     const socket = new WebSocket(url);
     this.socket = socket;
+    let opened = false;
 
     // A handshake can stall forever without ever firing onopen/onerror/onclose; without this
-    // deadline the chart's status dot sits on "connecting" indefinitely.
+    // deadline the chart's status dot sits on "connecting" indefinitely. The first attempt
+    // keeps the generous window a slow network legitimately needs; retries fail fast instead —
+    // a dial hanging into a dead route has already had its chance, and a shorter deadline
+    // cycles through the alternation above much sooner.
     this.connectTimer = setTimeout(() => {
       this.connectTimer = null;
       if (this.stopped || this.socket !== socket || socket.readyState === WebSocket.OPEN) {
         return;
       }
       socket.onopen = socket.onerror = socket.onmessage = socket.onclose = null;
+      if (useFallback) this.fallbackFailures += 1;
       try {
         socket.close();
       } catch {
@@ -216,7 +250,7 @@ export class TickerSocket {
       }
       this.socket = null;
       this.scheduleReconnect();
-    }, CONNECT_TIMEOUT_MS);
+    }, this.attempt === 0 ? CONNECT_TIMEOUT_MS : RETRY_CONNECT_TIMEOUT_MS);
 
     // Every handler below re-checks `stopped`. Closing a WebSocket is asynchronous and
     // does not discard work the JS event loop has already dispatched, so a message or
@@ -228,6 +262,8 @@ export class TickerSocket {
         clearTimeout(this.connectTimer);
         this.connectTimer = null;
       }
+      opened = true;
+      this.fallbackFailures = 0;
       this.attempt = 0;
       socket.send(
         JSON.stringify({
@@ -323,6 +359,9 @@ export class TickerSocket {
       if (this.pingTimer) clearInterval(this.pingTimer);
       this.pingTimer = null;
       if (this.socket === socket) this.socket = null;
+      // A close that never reached open is a failed dial; if it was a fallback dial, count it
+      // toward the bench. Closes after a working session are reconnects, not fallback verdicts.
+      if (!opened && useFallback) this.fallbackFailures += 1;
       if (event?.code === 4001 || event?.code === 4002) {
         invalidateBullet();
       }

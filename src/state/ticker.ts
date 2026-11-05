@@ -36,6 +36,13 @@ export type TickerSnapshot = {
 /** Shared so an unsubscribed reader gets one stable reference rather than a fresh object. */
 const INITIAL: TickerSnapshot = { update: null, direction: 'up' };
 
+/**
+ * Delay before the ticker socket's first dial, letting the order book's dial and REST seed
+ * claim the link first on trade-screen mounts. Recovery dials (foreground kick, reconnects)
+ * are never delayed — only the initial open.
+ */
+const TICKER_START_DELAY_MS = 500;
+
 type Entry = {
   /** Replaced only when a tick arrives, so `useSyncExternalStore` sees a stable identity. */
   snapshot: TickerSnapshot;
@@ -43,6 +50,8 @@ type Entry = {
   listeners: Set<() => void>;
   socket: TickerSocket | null;
   appState: { remove: () => void } | null;
+  /** Pending delayed start, cleared if the entry closes before it fires. */
+  startTimer: ReturnType<typeof setTimeout> | null;
 };
 
 const entries = new Map<string, Entry>();
@@ -74,15 +83,34 @@ function open(symbol: string, entry: Entry): void {
   });
 
   entry.socket = socket;
-  socket.start();
+  // The trade screen mounts the book and the price feeds in the same frame, and on a weak
+  // carrier link every simultaneous dial contends for the same thin pipe. The book is the
+  // business-critical feed — its dial and REST seed go first, and the ticker (whose ticks
+  // also drive the candles) follows half a second later. The guard keeps a close that lands
+  // inside the delay from starting a socket nobody subscribes to anymore.
+  entry.startTimer = setTimeout(() => {
+    entry.startTimer = null;
+    if (entry.socket === socket) socket.start();
+  }, TICKER_START_DELAY_MS);
 
   entry.appState = AppState.addEventListener('change', (state: AppStateStatus) => {
     if (state === 'active') socket.start();
-    else socket.stop();
+    else {
+      // Backgrounding before the delayed start fires must not start the socket into Doze.
+      if (entry.startTimer) {
+        clearTimeout(entry.startTimer);
+        entry.startTimer = null;
+      }
+      socket.stop();
+    }
   });
 }
 
 function close(entry: Entry): void {
+  if (entry.startTimer) {
+    clearTimeout(entry.startTimer);
+    entry.startTimer = null;
+  }
   entry.appState?.remove();
   entry.appState = null;
   entry.socket?.stop();
@@ -101,7 +129,7 @@ export function subscribeTicker(symbol: string, listener: () => void): () => voi
   let entry = entries.get(symbol);
   const created = entry === undefined;
   if (!entry) {
-    entry = { snapshot: INITIAL, status: 'connecting', listeners: new Set(), socket: null, appState: null };
+    entry = { snapshot: INITIAL, status: 'connecting', listeners: new Set(), socket: null, appState: null, startTimer: null };
     entries.set(symbol, entry);
   }
   const target = entry;
