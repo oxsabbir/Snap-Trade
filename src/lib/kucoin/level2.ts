@@ -72,12 +72,9 @@ const FALLBACK_ENDPOINT = 'wss://ws-api.kucoin.com';
 const FALLBACK_FAILURE_LIMIT = 4;
 /**
  * A socket whose route died silently (carrier NAT drop — normal on mobile data) still reads
- * OPEN on both ends; the only honest signal is server traffic within this window. The book
- * gets a tighter window than the ticker (15s vs 25s): a frozen depth column reads as live
- * prices, which is the most dangerous state in a trading UI, and server pongs arrive every
- * ~9s, so 15s still tolerates normal jitter before calling the route dead.
+ * OPEN on both ends; the only honest signal is server traffic within this window.
  */
-const LIVENESS_MS = 15_000;
+const LIVENESS_MS = 25_000;
 const LIVENESS_CHECK_MS = 5_000;
 
 /** Levels held per side, far beyond anything the UI can ever display. */
