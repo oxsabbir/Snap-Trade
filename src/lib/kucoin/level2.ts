@@ -12,6 +12,13 @@
  * The tradeoff is span: the top 50 levels per side is a few percent of price on liquid
  * pairs, but the UI draws 5 rows per side (split) or 10 (single-sided) — always well inside
  * the feed. Symbol switches are topic changes on the shared connection; nothing dials.
+ *
+ * One deliberate borrow from the pre-Depth50 design: the REST snapshot still seeds the book
+ * in parallel with the connection. The depth channel pushes only when the market moves, so
+ * without a seed a slow-moving pair shows an empty (not a stale) book at cold start — and
+ * an immediately-visible price is worth more than the half-second the seed can be slightly
+ * stale for on a fast market. Each Depth50 frame replaces the book, so the seed's authority
+ * ends at the first market change.
  */
 import { request } from './client';
 import { subscribeTopic, type PublicTopicMessage } from './publicSocket';
@@ -99,6 +106,28 @@ export class Level2Socket {
         this.listener.onStatus(status);
       },
     });
+
+    // REST seed in parallel with the connection, same as the pre-Depth50 design: the depth
+    // channel only pushes when the market moves, so on a slow-moving pair the first socket
+    // frame can be seconds away and the user would stare at an empty book while a perfectly
+    // actionable REST snapshot is one round trip off — the paint-first edge that made early
+    // orders possible. The seed applies only when the socket has not yet delivered anything,
+    // and every Depth50 frame replaces the whole book wholesale, so a seed that just survived
+    // being slightly stale is overwritten within one market change — no sequence gating, no
+    // buffer, no resync needed.
+    void fetchOrderBookSnapshot(this.symbol)
+      .then((snapshot) => {
+        // Discarded if this instance moved on, was stopped, or the stream is already live —
+        // in every such case a frame (never the seed) is the book's authority now.
+        if (this.session !== session || !this.release || this.deliveredFirstFrame) return;
+        socketLog('book:rest-seed', this.symbol);
+        this.replace(snapshot.asks, snapshot.bids);
+        this.bookTime = Date.now();
+        this.markDirty();
+      })
+      .catch(() => {
+        // No seed is survivable: the depth channel will paint on the next market change.
+      });
   }
 
   stop(): void {
