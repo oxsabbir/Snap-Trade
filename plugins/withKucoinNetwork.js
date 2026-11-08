@@ -1,0 +1,99 @@
+const fs = require('fs');
+const path = require('path');
+
+const { withMainApplication, withDangerousMod } = require('@expo/config-plugins');
+
+/**
+ * The package the native sources are written in. Every reference to it in the copied Kotlin
+ * and in the MainApplication import is rewritten to `android.package`, so renaming the app
+ * package does not require touching the sources.
+ */
+const SOURCE_PACKAGE = 'com.oxsabbir.snaptrade';
+
+const NETWORK_SOURCE_DIR = path.join(__dirname, 'native', 'snaptrade');
+/** Only network sources belong to this plugin; the signal plugin owns the rest. */
+const NETWORK_SOURCE_SUBDIR = 'network';
+
+/**
+ * Copies the DNS/connection-hardening Kotlin sources into the generated Android project,
+ * rewriting the package to match `android.package`. Same mechanism as the signal plugin:
+ * `expo prebuild` owns `android/`, and copied sources are the only way to inject native code
+ * without guaranteeing a template diff.
+ */
+function withNetworkSourceFiles(config) {
+  return withDangerousMod(config, [
+    'android',
+    async (config) => {
+      const packageName = config.android && config.android.package;
+      if (!packageName) {
+        throw new Error('[withKucoinNetwork] android.package is not set in app.json');
+      }
+
+      const javaRoot = path.join(
+        config.modRequest.platformProjectRoot,
+        'app',
+        'src',
+        'main',
+        'java'
+      );
+      const packageDir = path.join(javaRoot, ...packageName.split('.'));
+      const sourceDir = path.join(NETWORK_SOURCE_DIR, NETWORK_SOURCE_SUBDIR);
+
+      for (const entry of fs.readdirSync(sourceDir, { withFileTypes: true })) {
+        if (!entry.isFile() || !entry.name.endsWith('.kt')) continue;
+        const contents = fs
+          .readFileSync(path.join(sourceDir, entry.name), 'utf8')
+          .split(SOURCE_PACKAGE)
+          .join(packageName);
+        const destination = path.join(packageDir, NETWORK_SOURCE_SUBDIR, entry.name);
+        fs.mkdirSync(path.dirname(destination), { recursive: true });
+        fs.writeFileSync(destination, contents);
+      }
+
+      return config;
+    },
+  ]);
+}
+
+/**
+ * Registers the hardening in `MainApplication.onCreate`, before any React instance or socket
+ * exists. Anchored on the template's `super.onCreate()`; a missing anchor throws so a
+ * template change fails the prebuild loudly instead of silently shipping without hardening.
+ */
+function withNetworkMainApplication(config) {
+  return withMainApplication(config, (config) => {
+    const packageName = config.android && config.android.package;
+    if (!packageName) {
+      throw new Error('[withKucoinNetwork] android.package is not set in app.json');
+    }
+
+    const contents = config.modResults.contents;
+    const importLine = `import ${packageName}.network.NetworkHardening`;
+    const installLine = 'NetworkHardening.install()';
+
+    let next = contents;
+
+    if (!next.includes(importLine)) {
+      if (!/^package [^\n]+\n/m.test(next)) {
+        throw new Error('[withKucoinNetwork] could not find the package declaration in MainApplication');
+      }
+      next = next.replace(/^(package [^\n]+\n)/m, `$1\n${importLine}\n`);
+    }
+
+    if (!next.includes(installLine)) {
+      if (!next.includes('super.onCreate()')) {
+        throw new Error('[withKucoinNetwork] could not find super.onCreate() in MainApplication');
+      }
+      next = next.replace(/(super\.onCreate\(\)\n)/, `$1    ${installLine}\n`);
+    }
+
+    config.modResults.contents = next;
+    return config;
+  });
+}
+
+module.exports = function withKucoinNetwork(config) {
+  config = withNetworkSourceFiles(config);
+  config = withNetworkMainApplication(config);
+  return config;
+};

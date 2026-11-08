@@ -23,6 +23,9 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       // Writes the notification-listener Kotlin sources into the generated project and registers
       // the service, receiver, permissions and native package on every `expo prebuild`.
       ...(signalDetectionEnabled ? ['./plugins/withSignalNotifications'] : []),
+      // Writes the carrier-safe socket networking Kotlin sources (SmartDns + WS client
+      // timeouts) into the generated project and installs them in MainApplication.onCreate.
+      './plugins/withKucoinNetwork',
     ],
     experiments: {
       ...base.experiments,

@@ -1,109 +1,149 @@
 /**
- * The live price, held outside the React tree.
+ * Ticker prices per symbol, delivered through the app's ONE public WebSocket
+ * (`publicSocket.ts`).
  *
- * The price changes several times a second, and everything that used to read it did so from
- * `useState` high in the tree: `useLiveCandles` owned the socket and `CoinDetail` owned the
- * value, so a single tick invalidated the header, the timeframe tabs, the toolbar, the whole
- * order book and the whole order form. Memoisation could not help, because each of those
- * genuinely received a new value.
+ * The direction of the flow kept from the previous design: the connection lives here as a
+ * plain topic subscription, keyed by symbol, and the components subscribe. What changed is
+ * that a symbol switch no longer dials — the topic moves on the shared connection — and the
+ * 200ms delivery throttle (BTC ticks ~10x a second and re-rendering a chart that often is
+ * wasted work) with its volume accumulation moved into this store, because the throttle
+ * used to live inside the per-symbol socket class that no longer exists.
  *
- * So the direction of the flow is inverted. The socket lives here, keyed by symbol, and the
- * components that display a price subscribe to it as leaves. Everything between them stops
- * re-rendering, and a tick now costs three small components rather than a page.
- *
- * `useSyncExternalStore` rather than a context provider: no provider sits above the consumers,
- * so there is no value identity to memoise on and no re-render to cascade from a provider.
+ * The initial ticker subscription is delayed half a second so the order book's topic and
+ * REST seed claim the link first on trade-screen mounts; recovery paths are never delayed.
  */
 import { useCallback, useSyncExternalStore } from 'react';
-import { AppState, type AppStateStatus } from 'react-native';
 
-import { TickerSocket, type SocketStatus, type TickerUpdate } from '@/lib/kucoin/socket';
+import {
+  subscribeTopic,
+  type PublicTopicMessage,
+  type SocketStatus,
+  type TickerUpdate,
+} from '@/lib/kucoin/publicSocket';
+import { socketLog } from '@/lib/kucoin/socketLog';
 
-/**
- * Tick-to-tick direction, i.e. whether the last trade was up on the previous one. This is
- * deliberately not "change since the candle opened" — that needs the bucket, which only the
- * series knows, and the two mean different things in different places. The header keeps the
- * since-open reading by deriving it itself from the candle; this is the book's mid price,
- * which is conventionally tick-to-tick.
- */
-export type TickerDirection = 'up' | 'down';
+export type { TickerUpdate, SocketStatus };
 
 export type TickerSnapshot = {
   update: TickerUpdate | null;
-  direction: TickerDirection;
+  direction: 'up' | 'down';
 };
 
-/** Shared so an unsubscribed reader gets one stable reference rather than a fresh object. */
-const INITIAL: TickerSnapshot = { update: null, direction: 'up' };
+const THROTTLE_MS = 200;
 
 /**
- * Delay before the ticker socket's first dial, letting the order book's dial and REST seed
- * claim the link first on trade-screen mounts. Recovery dials (foreground kick, reconnects)
- * are never delayed — only the initial open.
+ * Delay before the ticker topic subscribes, letting the order book claim the link first on
+ * trade-screen mounts. On the shared connection this orders the topics; it never delays a
+ * recovery.
  */
-const TICKER_START_DELAY_MS = 500;
+const BOOK_FIRST_DELAY_MS = 500;
 
 type Entry = {
   /** Replaced only when a tick arrives, so `useSyncExternalStore` sees a stable identity. */
   snapshot: TickerSnapshot;
   status: SocketStatus;
   listeners: Set<() => void>;
-  socket: TickerSocket | null;
-  appState: { remove: () => void } | null;
-  /** Pending delayed start, cleared if the entry closes before it fires. */
+  release: (() => void) | null;
+  /** Pending delayed subscribe, cleared if the entry closes before it fires. */
   startTimer: ReturnType<typeof setTimeout> | null;
+  /** Throttle state. */
+  latest: TickerUpdate | null;
+  pendingSize: number;
+  flushTimer: ReturnType<typeof setTimeout> | null;
+  lastEmit: number;
+  session: symbol;
+  /** Guards the one-time first-tick log per subscription session. */
+  deliveredFirstTick: boolean;
 };
 
 const entries = new Map<string, Entry>();
+
+/** Shared so an unsubscribed reader gets one stable reference rather than a fresh object. */
+const INITIAL: TickerSnapshot = { update: null, direction: 'up' };
 
 function emit(entry: Entry): void {
   for (const listener of entry.listeners) listener();
 }
 
-function open(symbol: string, entry: Entry): void {
-  const socket = new TickerSocket(symbol, {
-    onTick: (update) => {
-      // Identity, not the payload, decides whether a tick still belongs to this view.
-      // Cleanup and setup run within one commit, so this passes through null and no window
-      // exists in which the outgoing socket's tick could reach the incoming pair.
-      if (entry.socket !== socket) return;
-      const previous = entry.snapshot.update;
-      entry.snapshot = {
-        update,
-        direction: previous !== null && previous.price > update.price ? 'down' : 'up',
-      };
-      emit(entry);
-    },
-    onStatus: (status) => {
-      if (entry.socket !== socket) return;
-      if (entry.status === status) return;
-      entry.status = status;
-      emit(entry);
-    },
-  });
+function toTick(symbol: string, message: PublicTopicMessage): TickerUpdate | null {
+  if (message.subject !== 'trade.ticker' || !message.data) return null;
+  const raw = message.data as Record<string, unknown>;
+  const price = Number(raw.price);
+  const update: TickerUpdate = {
+    symbol,
+    price,
+    size: Number(raw.size),
+    time: Number(raw.time),
+    bestAsk: Number(raw.bestAsk),
+    bestBid: Number(raw.bestBid),
+  };
+  return Number.isFinite(update.price) ? update : null;
+}
 
-  entry.socket = socket;
-  // The trade screen mounts the book and the price feeds in the same frame, and on a weak
-  // carrier link every simultaneous dial contends for the same thin pipe. The book is the
-  // business-critical feed — its dial and REST seed go first, and the ticker (whose ticks
-  // also drive the candles) follows half a second later. The guard keeps a close that lands
-  // inside the delay from starting a socket nobody subscribes to anymore.
+/** Leading-edge throttle: first tick outside the window is delivered, later ones batched. */
+function ingest(entry: Entry, update: TickerUpdate): void {
+  entry.latest = update;
+  if (Number.isFinite(update.size) && update.size > 0) entry.pendingSize += update.size;
+
+  const now = Date.now();
+  if (!entry.lastEmit || now - entry.lastEmit >= THROTTLE_MS) {
+    if (entry.flushTimer) {
+      clearTimeout(entry.flushTimer);
+      entry.flushTimer = null;
+    }
+    entry.lastEmit = now;
+    const size = entry.pendingSize;
+    entry.pendingSize = 0;
+    deliver(entry, update, size);
+    return;
+  }
+
+  if (entry.flushTimer) return;
+  const remaining = THROTTLE_MS - (now - entry.lastEmit);
+  entry.flushTimer = setTimeout(() => {
+    entry.flushTimer = null;
+    if (!entry.latest) return;
+    entry.lastEmit = Date.now();
+    const size = entry.pendingSize;
+    entry.pendingSize = 0;
+    deliver(entry, entry.latest, size);
+  }, Math.max(0, remaining));
+}
+
+function deliver(entry: Entry, update: TickerUpdate, size: number): void {
+  const delivered = { ...update, size };
+  const previous = entry.snapshot.update;
+  entry.snapshot = {
+    update: delivered,
+    direction: previous !== null && previous.price > delivered.price ? 'down' : 'up',
+  };
+  emit(entry);
+}
+
+function open(symbol: string, entry: Entry): void {
   entry.startTimer = setTimeout(() => {
     entry.startTimer = null;
-    if (entry.socket === socket) socket.start();
-  }, TICKER_START_DELAY_MS);
-
-  entry.appState = AppState.addEventListener('change', (state: AppStateStatus) => {
-    if (state === 'active') socket.start();
-    else {
-      // Backgrounding before the delayed start fires must not start the socket into Doze.
-      if (entry.startTimer) {
-        clearTimeout(entry.startTimer);
-        entry.startTimer = null;
-      }
-      socket.stop();
-    }
-  });
+    if (entry.release) return;
+    const session = entry.session;
+    entry.release = subscribeTopic(`/market/ticker:${symbol}`, {
+      onMessage: (message: PublicTopicMessage) => {
+        if (!entry.release || entry.session !== session) return;
+        const tick = toTick(symbol, message);
+        if (!tick) return;
+        if (!entry.deliveredFirstTick) {
+          entry.deliveredFirstTick = true;
+          socketLog('ticker:first-tick', symbol);
+        }
+        ingest(entry, tick);
+      },
+      onStatus: (status: SocketStatus) => {
+        if (!entry.release || entry.session !== session) return;
+        if (entry.status === status) return;
+        entry.status = status;
+        emit(entry);
+      },
+    });
+  }, BOOK_FIRST_DELAY_MS);
 }
 
 function close(entry: Entry): void {
@@ -111,19 +151,27 @@ function close(entry: Entry): void {
     clearTimeout(entry.startTimer);
     entry.startTimer = null;
   }
-  entry.appState?.remove();
-  entry.appState = null;
-  entry.socket?.stop();
-  entry.socket = null;
-  // Cleared so a later resubscribe never serves this pair's last price to a new view. The
-  // socket's own stop() drops unflushed ticks for the same reason.
+  if (entry.flushTimer) {
+    clearTimeout(entry.flushTimer);
+    entry.flushTimer = null;
+  }
+  entry.release?.();
+  entry.release = null;
+  // Drop anything already parsed but not yet flushed. Without this a tick that arrived just
+  // before close() is still delivered by its pending throttle timer, which would land in
+  // whatever series the view has moved on to.
+  entry.latest = null;
+  entry.pendingSize = 0;
+  entry.lastEmit = 0;
+  entry.deliveredFirstTick = false;
+  // Cleared so a later resubscribe never serves this pair's last price to a new view.
   entry.snapshot = INITIAL;
   entry.status = 'connecting';
 }
 
 /**
- * Ref-counted per symbol. The connection exists only while something is listening, which is
- * why an imperative read cannot itself keep a price flowing.
+ * Ref-counted per symbol. The topic subscription exists only while something is listening,
+ * which is why an imperative read cannot itself keep a price flowing.
  */
 export function subscribeTicker(symbol: string, listener: () => void): () => void {
   let entry = entries.get(symbol);
@@ -133,9 +181,14 @@ export function subscribeTicker(symbol: string, listener: () => void): () => voi
       snapshot: INITIAL,
       status: 'connecting',
       listeners: new Set(),
-      socket: null,
-      appState: null,
+      release: null,
       startTimer: null,
+      latest: null,
+      pendingSize: 0,
+      flushTimer: null,
+      lastEmit: 0,
+      session: Symbol('ticker-session'),
+      deliveredFirstTick: false,
     };
     entries.set(symbol, entry);
   }
@@ -167,12 +220,12 @@ export function useTicker(symbol: string): TickerSnapshot {
 }
 
 /**
- * Opens a connection for a symbol and drops it again after [holdMs] unless a real subscriber
- * (the trade screen) has taken over the ref count by then.
+ * Opens a topic subscription for a symbol and drops it again after [holdMs] unless a real
+ * subscriber (the trade screen) has taken over the ref count by then.
  *
- * A signal launch lands on the trade screen only after the router has mounted it. Warming the
- * socket here means the first tick is usually already in the snapshot by the time the screen's
- * `useTicker` mounts, so the cold-start price does not have to wait for a fresh handshake.
+ * A signal launch lands on the trade screen only after the router has mounted it. Warming
+ * the topic here means the first tick is usually already in the snapshot by the time the
+ * screen's `useTicker` mounts, so the cold-start price does not have to wait for the dial.
  */
 export function prefetchTicker(symbol: string, holdMs = 15_000): void {
   const release = subscribeTicker(symbol, () => {});
