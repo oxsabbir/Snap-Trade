@@ -52,7 +52,7 @@ let started = false;
  * `loadOpenOrders` and the merge rules already face this shape: a REST row is folded in without
  * ever moving a fill backward, so a reconcile can never undo a frame that arrived sooner.
  */
-const RECONCILE_LIVE_MS = 30_000;
+const RECONCILE_LIVE_MS = 15_000;
 const RECONCILE_DEGRADED_MS = 5_000;
 
 let reconcileTimer: ReturnType<typeof setTimeout> | null = null;
@@ -104,7 +104,7 @@ function onStatus(next: PrivateFeedStatus): void {
   }
   if (next !== 'live') {
     // A healthy connection re-reads on the slow cadence, so the next degraded step must not wait
-    // out a 30s timer that was armed while the socket was fine. Re-arming here brings the first
+    // out a 15s timer that was armed while the socket was fine. Re-arming here brings the first
     // safety-net read within a few seconds of the drop.
     armReconcile();
   }
