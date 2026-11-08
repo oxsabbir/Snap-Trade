@@ -43,6 +43,7 @@ export type { OpenOrder, OrderStatus } from './orderUpdates';
 export type OpenOrdersState = {
   orders: OpenOrder[];
   isLoading: boolean;
+  hasLoaded: boolean;
   error: string | null;
   /** Order ids with a cancel in flight, so each row can show its own spinner. */
   cancelling: ReadonlySet<string>;
@@ -51,6 +52,7 @@ export type OpenOrdersState = {
 const INITIAL_STATE: OpenOrdersState = {
   orders: [],
   isLoading: false,
+  hasLoaded: false,
   error: null,
   cancelling: new Set(),
 };
@@ -149,6 +151,28 @@ async function loadHighFrequencyOrders(): Promise<OpenOrder[]> {
   }
 }
 
+function areOrdersEqual(a: OpenOrder[], b: OpenOrder[]): boolean {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const o1 = a[i]!;
+    const o2 = b[i]!;
+    if (
+      o1.orderId !== o2.orderId ||
+      o1.status !== o2.status ||
+      o1.filledSize !== o2.filledSize ||
+      o1.size !== o2.size ||
+      o1.price !== o2.price ||
+      o1.side !== o2.side ||
+      o1.symbol !== o2.symbol ||
+      o1.wallet !== o2.wallet
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
 /**
  * Replaces the list from the exchange's active orders, keeping any locally inserted order the
  * response has not caught up with yet. Concurrent calls share one request.
@@ -161,9 +185,12 @@ export function loadOpenOrders(force = false): Promise<void> {
   if (inFlight && !force) return inFlight;
 
   const run = (async () => {
-    // A refresh that runs over rows the user can already see must not raise the loading flag,
-    // or the list is replaced by a spinner every time a cancel reconciles.
-    emit({ isLoading: state.orders.length === 0, error: null });
+    // Only show loading indicator on the very first initial load when there is no data yet.
+    // Background reconciles and refreshes must NEVER flip isLoading back to true, or the
+    // empty state and orders list will flicker every time a background reconcile runs.
+    if (!state.hasLoaded) {
+      emit({ isLoading: true, error: null });
+    }
     try {
       // The classic book is the one this app places into, so its failure is the one worth showing.
       const [classic, hf] = await Promise.all([fetchClassicOpenOrders(), loadHighFrequencyOrders()]);
@@ -194,17 +221,36 @@ export function loadOpenOrders(force = false): Promise<void> {
         return previous ? mergeRestSnapshot(previous, order) : order;
       });
 
-      emit({ orders: [...merged, ...reconcileUnconfirmed(merged)], error: null });
+      const nextOrders = [...merged, ...reconcileUnconfirmed(merged)];
+      const ordersChanged = !areOrdersEqual(state.orders, nextOrders);
+
+      emit({
+        ...(ordersChanged ? { orders: nextOrders } : {}),
+        hasLoaded: true,
+        isLoading: false,
+        error: null,
+      });
     } catch (caught) {
-      emit({ error: describeError(caught, 'Failed to load open orders.') });
+      emit({
+        hasLoaded: true,
+        isLoading: false,
+        error: describeError(caught, 'Failed to load open orders.'),
+      });
     } finally {
       inFlight = null;
-      emit({ isLoading: false });
     }
   })();
 
   inFlight = run;
   return run;
+}
+
+/**
+ * Ensures open orders are loaded on initial mount, but skips re-fetching if already loaded or in flight.
+ */
+export function ensureOpenOrdersLoaded(): void {
+  if (state.hasLoaded || inFlight) return;
+  void loadOpenOrders();
 }
 
 /**

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useSyncExternalStore } from 'react';
 import {
   cancelAllOpenOrders,
   cancelOpenOrder,
+  ensureOpenOrdersLoaded,
   getOpenOrdersState,
   isTerminalStatus,
   loadOpenOrders,
@@ -16,7 +17,7 @@ export type { OpenOrder, OrderStatus, OpenOrdersState } from '@/state/openOrders
  * The one writer the private WebSocket feed needs. Re-exported here so callers have a single
  * import for the list, alongside `useOpenOrders`.
  */
-export { applyOrderUpdate } from '@/state/openOrders';
+export { applyOrderUpdate, ensureOpenOrdersLoaded } from '@/state/openOrders';
 
 export type UseOpenOrders = {
   orders: OpenOrder[];
@@ -46,12 +47,12 @@ export function useOpenOrders(): UseOpenOrders {
   );
 
   const refresh = useCallback(() => {
-    void loadOpenOrders();
+    void loadOpenOrders(true);
   }, []);
 
   useEffect(() => {
-    refresh();
-  }, [refresh]);
+    ensureOpenOrdersLoaded();
+  }, []);
 
   const cancelOrder = useCallback((orderId: string) => cancelOpenOrder(orderId), []);
   const cancelAll = useCallback(() => cancelAllOpenOrders(), []);

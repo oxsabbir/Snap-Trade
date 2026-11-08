@@ -31,6 +31,9 @@ type Props = {
  */
 const HISTORY_LOAD_MORE_THRESHOLD = 320;
 
+/** Stable empty callback for passive props. */
+const NOOP = () => {};
+
 /**
  * The trade screen's content: the chart, the order form, and the order management section, with the
  * symbol supplied by the tab route that owns the screen's only scroll view.
@@ -108,8 +111,8 @@ export function TradeRouteView({ symbol, name, decimals, signalEntry, signalTp1,
         />
         <OrderManagement
           symbol={symbol}
-          onDeposit={() => {}}
-          onTutorial={() => {}}
+          onDeposit={NOOP}
+          onTutorial={NOOP}
           available={available}
         />
       </ScrollView>

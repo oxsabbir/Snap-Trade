@@ -52,8 +52,8 @@ let started = false;
  * `loadOpenOrders` and the merge rules already face this shape: a REST row is folded in without
  * ever moving a fill backward, so a reconcile can never undo a frame that arrived sooner.
  */
-const RECONCILE_LIVE_MS = 15_000;
-const RECONCILE_DEGRADED_MS = 5_000;
+const RECONCILE_LIVE_MS = 60_000;
+const RECONCILE_DEGRADED_MS = 10_000;
 
 let reconcileTimer: ReturnType<typeof setTimeout> | null = null;
 

@@ -49,13 +49,13 @@ function formatFilledDisplay(order: OpenOrder): string {
   return `${formatAmount(Number(order.filledSize) || 0)} / ${formatAmount(total)}`;
 }
 
-function OrderRow({
+const OrderRow = memo(function OrderRow({
   order,
   onCancel,
   isCancelling,
 }: {
   order: OpenOrder;
-  onCancel: () => void;
+  onCancel: (orderId: string) => void;
   isCancelling: boolean;
 }) {
   const { colors } = useTheme();
@@ -99,7 +99,7 @@ function OrderRow({
             </Text>
           </View>
           <Pressable
-            onPress={onCancel}
+            onPress={() => onCancel(order.orderId)}
             disabled={isCancelling}
             style={[styles.cancelChip, isCancelling && styles.cancelBtnDisabled]}
             accessibilityRole="button"
@@ -144,7 +144,7 @@ function OrderRow({
       </View>
     </View>
   );
-}
+});
 
 function EmptyState({
   balance,
@@ -282,7 +282,7 @@ export const OrderManagement = memo(function OrderManagement({
               <OrderRow
                 key={order.orderId}
                 order={order}
-                onCancel={() => handleCancel(order.orderId)}
+                onCancel={handleCancel}
                 isCancelling={cancelling.has(order.orderId)}
               />
             ))}
