@@ -213,6 +213,30 @@ export function getTicker(symbol: string): TickerSnapshot {
   return entries.get(symbol)?.snapshot ?? INITIAL;
 }
 
+/**
+ * Seeds a symbol's price from a REST answer (the currency's last candle close) so the trade
+ * screen's price band shows a number immediately — before the first socket tick, which needs
+ * both a connection and a trade to arrive. The first real tick overwrites it wholesale; the
+ * direction flag resets to `up` so the color is neutral until live data says otherwise.
+ */
+export function seedTickerFromRest(symbol: string, price: number): void {
+  const entry = entries.get(symbol);
+  if (!entry || entry.snapshot.update !== null) return;
+  if (!Number.isFinite(price) || price <= 0) return;
+  entry.snapshot = {
+    update: {
+      symbol,
+      price,
+      size: 0,
+      time: Date.now(),
+      bestAsk: price,
+      bestBid: price,
+    },
+    direction: 'up',
+  };
+  emit(entry);
+}
+
 /** Re-renders the caller when this symbol's price moves. For display leaves only. */
 export function useTicker(symbol: string): TickerSnapshot {
   const subscribe = useCallback((notify: () => void) => subscribeTicker(symbol, notify), [symbol]);

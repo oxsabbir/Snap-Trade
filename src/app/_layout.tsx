@@ -11,6 +11,7 @@ import { usePrivateFeed } from '@/hooks/usePrivateFeed';
 import { useSignalDeepLink } from '@/hooks/useSignalDeepLink';
 import { disableSignalDetection, useSignalSource } from '@/hooks/useSignalSource';
 import { SIGNAL_DETECTION_ENABLED } from '@/lib/featureFlags';
+import { warmConnection } from '@/lib/kucoin/publicSocket';
 
 import { ActiveCoinProvider } from '@/state/activeCoin';
 import { ApiCredentialsProvider, useApiCredentials } from '@/state/apiCredentials';
@@ -20,6 +21,13 @@ import { ThemeProvider, useTheme } from '@/theme/ThemeProvider';
 import { createThemedStyles } from '@/theme/themedStyles';
 
 export default function RootLayout() {
+  // Dial the shared market WebSocket at app start — before any screen subscribes — so a
+  // trade screen opens onto a connection whose handshake is usually already finished.
+  // No-op when a connection already exists (warm or subscribed).
+  useEffect(() => {
+    warmConnection();
+  }, []);
+
   return (
     <GestureHandlerRootView style={styles.gestureRoot}>
       <SafeAreaProvider initialMetrics={initialWindowMetrics}>

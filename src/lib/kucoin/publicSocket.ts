@@ -172,9 +172,11 @@ function forceClose(reason: string): void {
   scheduleReconnect();
 }
 
-async function connectNow(): Promise<void> {
-  if (topics.size === 0 || socket || welcomeTimer) return;
-  if (reconnectTimer) {
+async function connectNow(fromWarm = false): Promise<void> {
+  if (socket) return;
+  if (!fromWarm && topics.size === 0) return;
+  if (welcomeTimer) return;
+  if (topics.size === 0 && reconnectTimer) {
     // Reconnects triggered by AppState/network events skip the ladder wait entirely.
     clearReconnectTimer();
   }
@@ -191,7 +193,7 @@ async function connectNow(): Promise<void> {
     scheduleReconnect();
     return;
   }
-  if (topics.size === 0 || socket) return;
+  if (socket || (!fromWarm && topics.size === 0)) return;
 
   // One instance server per attempt; after a full sweep the bullet is soft-invalidated, so
   // the next cycle refetches the token and resolves the host through DNS again. Server
@@ -248,6 +250,13 @@ async function connectNow(): Promise<void> {
     // A rejected token is a provably wrong cached answer — refetch on the next dial.
     if (event?.code === 4001 || event?.code === 4002) {
       invalidatePublicBullet({ hard: true });
+    }
+    // A warm dial that failed with nothing subscribed stops here: nobody is waiting on the
+    // wire, so a silent retry loop would only burn battery. The next subscriber's
+    // registration dials again from the retained attempt count.
+    if (topics.size === 0) {
+      setStatus('offline');
+      return;
     }
     scheduleReconnect();
   };
@@ -357,6 +366,18 @@ function ensureConnection(): void {
   if (socket || reconnectTimer) return;
   if (welcomeTimer) return;
   void connectNow();
+}
+
+/**
+ * Dials the shared connection at app start, before any screen has subscribed. By the time
+ * the trade screen mounts, the handshake and welcome have usually already happened — or the
+ * retry ladder is already cycling — so the screen's first frames arrive on a connection that
+ * is practically warm instead of paying dial + welcome on open. A warm session parks with a
+ * heartbeat; a subscribed screen arriving later just sends its subscribe frames.
+ */
+export function warmConnection(): void {
+  if (socket || reconnectTimer || welcomeTimer) return;
+  void connectNow(true);
 }
 
 // Registered at module load: the manager is a singleton by construction and its event

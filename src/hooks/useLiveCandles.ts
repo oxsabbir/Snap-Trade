@@ -15,7 +15,7 @@ import {
 } from '@/lib/kucoin/candleSeries';
 import type { TickerUpdate } from '@/lib/kucoin/socket';
 import type { Candle } from '@/lib/kucoin/types';
-import { getTicker, subscribeTicker } from '@/state/ticker';
+import { getTicker, subscribeTicker, seedTickerFromRest } from '@/state/ticker';
 
 export type LiveCandlesState = {
   candles: Candle[];
@@ -125,7 +125,13 @@ export function useLiveCandles(
         bucketRef.current = last ? Math.floor(last.time / periodMs) : 0;
         // Seeded once per series. A bucket rollover refetches through here too, and the
         // guard leaves the existing seed alone so the header does not churn once a minute.
-        if (last) setSeedPrice((current) => current ?? last.close);
+        if (last) {
+          setSeedPrice((current) => current ?? last.close);
+          // The trade screen's price band should not wait for the socket's first trade to
+          // show a number; the candle close is the last traded price — the same value a
+          // ticker tick would carry — so seed it until the live tick overwrites it.
+          seedTickerFromRest(symbol, last.close);
+        }
       },
       (caught: unknown) => {
         if (!mountedRef.current || !guard.isCurrent(token)) return;
