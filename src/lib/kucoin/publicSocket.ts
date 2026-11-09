@@ -72,6 +72,15 @@ const PONG_TIMEOUT_MS = 5_000;
 const RETRY_DELAYS_MS = [0, 300, 1_000, 2_000] as const;
 /** Network-state listeners fire in bursts (data ↔ VPN ↔ Wi-Fi); one reconnect per burst. */
 const KICK_DEBOUNCE_MS = 250;
+/**
+ * A resume where the session has *proven* itself within this window skips the destructive
+ * foreground redial: a quick app switch (swipe away and back) finds the TCP session almost
+ * certainly alive, and replacing it costs seconds of dark time on carrier paths. A session
+ * older than this window gets the full kick, because the OS may have silently killed the
+ * route while backgrounded — and the immediate ping fired alongside the skip means an
+ * accidentally-kept dead one is announced by the pong watchdog in ~5s, not a heartbeat slot.
+ */
+const RESUME_FRESH_WINDOW_MS = 20_000;
 
 type TopicEntry = {
   handlers: Set<TopicAttachments['onMessage']>;
@@ -382,8 +391,25 @@ export function warmConnection(): void {
 
 // Registered at module load: the manager is a singleton by construction and its event
 // sources must exist from app start, not from the first screen mount.
+/**
+ * On returning to the foreground: a session the server answered within {@link RESUME_FRESH_WINDOW_MS}
+ * is kept and immediately pinged — proving it live right now, or handing the verdict to the pong
+ * watchdog within ~5s — instead of unconditionally paying a redial for a connection that was never
+ * broken. Anything older, half-open, or mid-retry gets the full kick.
+ */
+function onForeground(): void {
+  if (topics.size === 0) return;
+  if (socket && socket.readyState === WebSocket.OPEN && Date.now() - lastServerAt < RESUME_FRESH_WINDOW_MS) {
+    socketLog('resume', 'session fresh — kept, probing');
+    socket.send(JSON.stringify({ id: Date.now(), type: 'ping' }));
+    lastPingAt = Date.now();
+    return;
+  }
+  kick();
+}
+
 AppState.addEventListener('change', (state) => {
-  if (state === 'active' && topics.size > 0) kick();
+  if (state === 'active' && topics.size > 0) onForeground();
 });
 
 Network.addNetworkStateListener(() => {
