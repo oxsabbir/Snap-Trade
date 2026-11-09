@@ -29,6 +29,17 @@ type Props = {
 const DOUBLE_TAP_DELAY_MS = 350;
 
 /**
+ * The chip's own reading, capped at three decimals — digits past that are noise a trader cannot
+ * act on. Kept separate from the order form's significant-digit formatter, which deliberately
+ * keeps every place a small altcoin's sizing depends on.
+ */
+function formatChipSigned(value: number): string {
+  if (!Number.isFinite(value) || value === 0) return '$0';
+  const sign = value > 0 ? '+' : '-';
+  return `${sign}$${Math.abs(value).toFixed(3).replace(/\.?0+$/, '')}`;
+}
+
+/**
  * Unrealised profit or loss on the position in the pair being viewed, as a chip beside the price.
  *
  * Distinct from the market-change pill in `LivePrice`: that one is the coin's move, this one is
@@ -203,7 +214,7 @@ export function PositionPnlChip({ symbol, fallbackPrice }: Props) {
           style={[styles.text, { color: pnl.isUp ? colors.upText : colors.downText }]}
           numberOfLines={1}
         >
-          {pnl.isUp ? '▲' : '▼'} {formatSignedUsd(pnl.amount)}
+          {pnl.isUp ? '▲' : '▼'} {formatChipSigned(pnl.amount)}
         </Text>
       )}
     </Animated.View>
