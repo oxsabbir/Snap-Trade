@@ -21,9 +21,10 @@ type Props = {
  * on any of the five price ticks a second. Sharing one subscription with the price would have
  * put it back in that path.
  *
- * While the feed is anything but live, an icon-only button sits alongside it: tapping it drops
- * the shared market connection *and* its cached token/endpoint, then redials at once — the
- * manual escape hatch for a session that looks stuck, without waiting for the ladder.
+ * While the feed is anything but live, a standalone icon-only reconnect button renders just
+ * before the badge: tapping it drops the shared market connection *and* its cached
+ * token/endpoint, then redials at once — the manual escape hatch for a session that looks
+ * stuck, without waiting for the ladder.
  */
 export function LiveBadge({ symbol }: Props) {
   const { colors } = useTheme();
@@ -32,17 +33,7 @@ export function LiveBadge({ symbol }: Props) {
   const isLive = status === 'live';
 
   return (
-    <View style={styles.badge}>
-      <View
-        style={[styles.dot, { backgroundColor: isLive ? colors.up : colors.textFaint }]}
-      />
-      <Text style={styles.text}>
-        {isLive
-          ? 'Live'
-          : status === 'connecting'
-            ? 'Connecting'
-            : 'Reconnecting'}
-      </Text>
+    <>
       {!isLive ? (
         <Pressable
           onPress={reconnectPublicSocket}
@@ -54,17 +45,38 @@ export function LiveBadge({ symbol }: Props) {
           <ReconnectIcon size={12} color={colors.textMuted} />
         </Pressable>
       ) : null}
-    </View>
+      <View style={styles.badge}>
+        <View
+          style={[styles.dot, { backgroundColor: isLive ? colors.up : colors.textFaint }]}
+        />
+        <Text style={styles.text}>
+          {isLive
+            ? 'Live'
+            : status === 'connecting'
+              ? 'Connecting'
+              : 'Reconnecting'}
+        </Text>
+      </View>
+    </>
   );
 }
 
 const useStyles = createThemedStyles((colors) =>
   StyleSheet.create({
+    /** Standalone icon-only pill; the auto margin pairs it with the badge at the right edge. */
+    reconnect: {
+      marginLeft: 'auto',
+      paddingHorizontal: spacing.xs,
+      paddingVertical: 4,
+      borderRadius: radius.pill,
+      backgroundColor: colors.surfaceAlt,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
     badge: {
       flexDirection: 'row',
       alignItems: 'center',
       gap: 5,
-      marginLeft: 'auto',
       paddingHorizontal: spacing.sm,
       paddingVertical: 3,
       borderRadius: radius.pill,
@@ -79,11 +91,6 @@ const useStyles = createThemedStyles((colors) =>
       color: colors.textMuted,
       fontSize: 11,
       fontWeight: '600',
-    },
-    reconnect: {
-      marginLeft: 2,
-      justifyContent: 'center',
-      alignItems: 'center',
     },
   }),
 );
