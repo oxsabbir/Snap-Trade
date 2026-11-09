@@ -348,3 +348,21 @@ export function TrayIcon({ size = 24, color }: IconProps) {
     </ScaledSvg>
   );
 }
+
+/** Circular arrows — the reconnect affordance on the live badge. */
+export function ReconnectIcon({ size = 14, color }: IconProps) {
+  const { colors } = useTheme();
+  const stroke = color ?? colors.textMuted;
+  return (
+    <ScaledSvg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M23 5.5v6h-6M1 18.5v-6h6"
+        stroke={stroke}
+        strokeWidth={2}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <Path d="M20.49 8a9 9 0 0 0-16.98 2M3.51 16a9 9 0 0 0 16.98-2" stroke={stroke} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+    </ScaledSvg>
+  );
+}

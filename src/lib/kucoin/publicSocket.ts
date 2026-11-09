@@ -389,6 +389,18 @@ export function warmConnection(): void {
   void connectNow(true);
 }
 
+/**
+ * Drops the shared connection *and* the cached dial answer, then redials immediately: the
+ * reconnect button's contract is that the user believes the wire is dead for good — so the
+ * endpoint resolution and the token are replaced along with it, not just re-dialled.
+ */
+export function reconnectPublicSocket(): void {
+  if (topics.size === 0) return;
+  socketLog('reconnect:manual');
+  invalidatePublicBullet({ hard: true });
+  kick();
+}
+
 // Registered at module load: the manager is a singleton by construction and its event
 // sources must exist from app start, not from the first screen mount.
 /**
