@@ -21,10 +21,10 @@ type Props = {
  * on any of the five price ticks a second. Sharing one subscription with the price would have
  * put it back in that path.
  *
- * While the feed is anything but live, a standalone icon-only reconnect button renders just
- * before the badge: tapping it drops the shared market connection *and* its cached
- * token/endpoint, then redials at once — the manual escape hatch for a session that looks
- * stuck, without waiting for the ladder.
+ * The pair is right-aligned: the reconnect button (icon only, while the feed is anything but
+ * live) sits immediately before the badge inside one trailing group, so the badge's position
+ * never shifts when the button appears or disappears — tapping it drops the shared market
+ * connection *and* its cached token/endpoint, then redials at once.
  */
 export function LiveBadge({ symbol }: Props) {
   const { colors } = useTheme();
@@ -33,7 +33,7 @@ export function LiveBadge({ symbol }: Props) {
   const isLive = status === 'live';
 
   return (
-    <>
+    <View style={styles.trailing}>
       {!isLive ? (
         <Pressable
           onPress={reconnectPublicSocket}
@@ -57,15 +57,21 @@ export function LiveBadge({ symbol }: Props) {
               : 'Reconnecting'}
         </Text>
       </View>
-    </>
+    </View>
   );
 }
 
 const useStyles = createThemedStyles((colors) =>
   StyleSheet.create({
+    /** The button + badge travel as one right-aligned unit so neither moves the other's spot. */
+    trailing: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.xs,
+      marginLeft: 'auto',
+    },
     /** Standalone icon-only pill; the auto margin pairs it with the badge at the right edge. */
     reconnect: {
-      marginLeft: 'auto',
       paddingHorizontal: spacing.xs,
       paddingVertical: 4,
       borderRadius: radius.pill,
