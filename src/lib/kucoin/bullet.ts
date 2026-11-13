@@ -1,25 +1,20 @@
 /**
  * The public WebSocket token — its fetch, its cache, and the tiny REST wake call.
  *
- * The token comes from `POST /bullet-public` and is valid for 24h; the cache front-runs that
- * by expiring after ~6h so a long-lived app session never dials with a token that is about to
- * be rejected mid-flight. `invalidatePublicBullet()` forces the next dial to refetch: an
- * invalid token (close 4001/4002) or a failed connect sweep means the cached answer itself is
- * worthless, and the refetch also resolves the host through DNS again — which is how a carrier
+ * The token comes from `POST /bullet-public` and is valid for 24h; the cache expires after 20h
+ * so a long-lived app session never dials with a token near its expiry. `invalidatePublicBullet()`
+ * drops the cache outright: the token is almost never the reason a dial fails — the carrier path
+ * is — so the cache is NOT discarded per failed retry round. It is only dropped on hard evidence
+ * (close 4001/4002, the manual reconnect button) or after three consecutive failed dials, and a
+ * dropped cache refetches a token and resolves the host through DNS again — which is how a carrier
  * pinning one unreachable edge gets a fresh answer.
  */
 import { request } from './client';
 import { socketLog, socketLogFailure } from './socketLog';
 
 const REQUEST_TIMEOUT_MS = 10_000;
-/** Cache lifetime; comfortably inside KuCoin's 24h token validity. */
-const TTL_MS = 6 * 60 * 60 * 1000;
-/**
- * After a *soft* invalidation (retry-sweep rotation), the refetch is held off this long so a
- * fast-failing retry ladder cannot hammer `bullet-public` — the rate-limited endpoint — while
- * the path itself is down. Hard invalidations (rejected token) always refetch immediately.
- */
-const REFETCH_COOLDOWN_MS = 5_000;
+/** Cache lifetime: inside KuCoin's 24h validity with a comfortable margin. */
+const TTL_MS = 20 * 60 * 60 * 1000;
 
 type BulletResponse = {
   token: string;
@@ -39,6 +34,8 @@ export type BulletServer = {
 
 export type CachedBullet = {
   servers: BulletServer[];
+  /** When the cache was filled — the "token older than 20h" age check reads this. */
+  cachedAt: number;
   expiresAt: number;
 };
 
@@ -51,7 +48,10 @@ let inFlight: Promise<CachedBullet> | null = null;
  */
 export async function fetchPublicBullet(): Promise<CachedBullet> {
   const now = Date.now();
-  if (cached && cached.expiresAt > now) return cached;
+  if (cached && cached.expiresAt > now) {
+    socketLog('token:cache-hit', `age=${Math.round((now - cached.cachedAt) / 1000)}s`);
+    return cached;
+  }
   if (inFlight) return inFlight;
 
   socketLog('token:fetch:begin');
@@ -67,12 +67,13 @@ export async function fetchPublicBullet(): Promise<CachedBullet> {
       }
       const fresh: CachedBullet = {
         servers: data.instanceServers.map((entry) => ({ ...entry, token: data.token })),
+        cachedAt: Date.now(),
         expiresAt: Date.now() + TTL_MS,
       };
       cached = fresh;
       socketLog(
         'token:fetch:done',
-        `${fresh.servers.length} server(s), ${Date.now() - startedAt}ms, ttl 6h`
+        `${fresh.servers.length} server(s), ${Date.now() - startedAt}ms, ttl 20h`
       );
       return fresh;
     } finally {
@@ -102,20 +103,14 @@ export async function wakeRadio(): Promise<boolean> {
 }
 
 /**
- * Drops the cached token. `hard` marks it provably wrong (KuCoin rejected the token, close
- * 4001/4002) and discards immediately; a soft invalidation marks it stale for the next connect
- * cycle without triggering a refetch inside the cooldown.
+ * Drops the cached token outright. Called on hard evidence only: close 4001/4002 (KuCoin
+ * rejected the token), the manual reconnect button, or three consecutive failed dials. There
+ * is no soft mode — a failed retry round reuses the cached token, because the path, not the
+ * token, is what usually fails, and refetching per round would hammer the rate-limited
+ * endpoint without improving the odds.
  */
-export function invalidatePublicBullet(options: { hard?: boolean } = {}): void {
-  if (options.hard) {
-    cached = null;
-    socketLog('token:invalidate:hard');
-    return;
-  }
+export function invalidatePublicBullet(): void {
   if (!cached) return;
-  // Keep the entry servable during the cooldown, but cap its remaining life, so the next dial
-  // after the cooldown expires refetches — that is what makes a soft invalidation eventually
-  // resolve the host through DNS again.
-  cached = { ...cached, expiresAt: Math.min(cached.expiresAt, Date.now() + REFETCH_COOLDOWN_MS) };
-  socketLog('token:invalidate:soft');
+  cached = null;
+  socketLog('token:invalidate');
 }

@@ -94,8 +94,9 @@ export class Level2Socket {
         if (asks.length === 0 && bids.length === 0) return;
 
         if (!this.deliveredFirstFrame) {
+          // Provenance of the first frame (warm vs fresh dial) is logged by the shared socket
+          // manager now — this instance only tracks it for the REST-seed handoff below.
           this.deliveredFirstFrame = true;
-          socketLog('book:first-frame', `${this.symbol} ${asks.length}x${bids.length}`);
         }
         this.replace(asks, bids);
         if (typeof depth.timestamp === 'number') this.bookTime = depth.timestamp;

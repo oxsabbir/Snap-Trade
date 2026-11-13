@@ -16,6 +16,7 @@ import com.facebook.react.bridge.ReactMethod
 import com.facebook.react.bridge.WritableMap
 import com.facebook.react.modules.core.DeviceEventManagerModule
 import com.oxsabbir.snaptrade.NotificationListener
+import com.oxsabbir.snaptrade.network.NetworkHardening
 
 class NotificationListenerModule(reactContext: ReactApplicationContext) :
     ReactContextBaseJavaModule(reactContext) {
@@ -126,6 +127,18 @@ class NotificationListenerModule(reactContext: ReactApplicationContext) :
     @ReactMethod
     fun setIsEnabled(value: Boolean, promise: Promise) {
         prefs().edit().putBoolean(PREFS_KEY_ENABLED, value).apply()
+        promise.resolve(Unit)
+    }
+
+    /**
+     * Mirror the trading-mode toggle into `NetworkHardening`: the gate that decides, at socket
+     * dial time, whether the native WebSocket keepalive runs. Foreground pings are unconditional;
+     * this setting only governs the background. Same mirror pattern as the signal settings —
+     * the native layer must not depend on the JS runtime being alive.
+     */
+    @ReactMethod
+    fun syncKeepaliveMode(enabled: Boolean, promise: Promise) {
+        NetworkHardening.setTradingMode(reactApplicationContext.applicationContext, enabled)
         promise.resolve(Unit)
     }
 

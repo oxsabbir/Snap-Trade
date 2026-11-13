@@ -11,6 +11,7 @@ import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.util.Log
 import com.oxsabbir.snaptrade.notification.NotificationListenerModule
+import com.oxsabbir.snaptrade.network.SocketWarmup
 import java.util.concurrent.ConcurrentHashMap
 import java.util.regex.Pattern
 
@@ -239,6 +240,10 @@ class NotificationListener : NotificationListenerService() {
         val pricePart = entryPrice?.let { ", price=$it" } ?: ""
         val tpPart = tp1?.let { ", tp1=$it" } ?: ""
         log("Decision", "signal $ticker (format=$format, tps=${tps.size}$pricePart$tpPart)")
+        // Native warmup, phase 1: DNS + REST TLS + the WebSocket edge host, in parallel with
+        // the activity launch and the JS boot. With the process freshly restarted by this
+        // service, this is the only network work that can happen before the bundle is up.
+        SocketWarmup.warm("signal:$ticker")
         launchTradeScreen(ticker, entryPrice, tp1)
     }
 

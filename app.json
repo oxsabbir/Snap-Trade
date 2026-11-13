@@ -14,7 +14,7 @@
     },
     "android": {
       "package": "com.oxsabbir.snaptrade",
-      "versionCode": 6,
+      "versionCode": 7,
       "userInterfaceStyle": "automatic",
       "adaptiveIcon": {
         "backgroundColor": "#4782FF",

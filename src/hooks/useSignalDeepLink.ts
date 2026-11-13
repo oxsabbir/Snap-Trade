@@ -4,6 +4,7 @@ import { router } from 'expo-router';
 
 import { SIGNAL_DETECTION_ENABLED } from '@/lib/featureFlags';
 import { parseTradeSignalUrl } from '@/lib/signalUrl';
+import { socketLog } from '@/lib/kucoin/socketLog';
 import { snapLog } from '@/lib/snapLog';
 
 /**
@@ -30,6 +31,9 @@ export function useSignalDeepLink(): void {
 
       lastHandledRef.current = url;
       snapLog('DeepLink', `runtime intent ${signal.symbol}`);
+      // Same anchor as the cold-start path: the copy-log block gets one `signal:received`
+      // line per delivered signal, whatever route it arrived through.
+      socketLog('signal:received', `${signal.symbol} via deeplink`);
 
       try {
         router.navigate({

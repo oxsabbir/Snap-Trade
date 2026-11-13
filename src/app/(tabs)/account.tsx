@@ -10,6 +10,11 @@ import { ProfileCard } from '@/components/ProfileCard';
 import { useAccount } from '@/hooks/useAccount';
 import { useProfile } from '@/hooks/useProfile';
 import { useApiCredentials, type OnboardingEntry } from '@/state/apiCredentials';
+import {
+  isTradingModeEnabled,
+  setTradingModeEnabled,
+} from '@/state/tradingMode';
+import { reapplyTradingMode } from '@/lib/kucoin/publicSocket';
 import { getKcsDiscountEnabled, setKcsDiscountEnabled } from '@/state/kcsDiscount';
 import { radius, spacing } from '@/theme';
 import { useTheme } from '@/theme/ThemeProvider';
@@ -30,6 +35,8 @@ export default function AccountScreen() {
   const [accountAction, setAccountAction] = useState<OnboardingEntry | null>(null);
   const [accountActionError, setAccountActionError] = useState<string | null>(null);
   const [kcsEnabled, setKcsEnabled] = useState(false);
+  // Lazy read of the module cache: tradingMode hydrates at boot, long before this screen mounts.
+  const [tradingEnabled, setTradingEnabled] = useState(() => isTradingModeEnabled());
   const displayName = profile.displayName;
   const setDisplayName = profile.setDisplayName;
 
@@ -176,6 +183,33 @@ export default function AccountScreen() {
                 <View style={[
                   styles.kcsToggleThumb,
                   kcsEnabled && styles.kcsToggleThumbOn,
+                ]} />
+              </Pressable>
+            </View>
+            <View style={styles.kcsRow}>
+              <View style={styles.kcsInfo}>
+                <Text style={styles.kcsTitle}>Trading mode</Text>
+                <Text style={styles.kcsDesc}>
+                  Keeps the market feed warm in the background for faster signals
+                </Text>
+              </View>
+              <Pressable
+                onPress={async () => {
+                  const next = !tradingEnabled;
+                  setTradingEnabled(next);
+                  await setTradingModeEnabled(next);
+                  reapplyTradingMode();
+                }}
+                style={[
+                  styles.kcsToggle,
+                  tradingEnabled && styles.kcsToggleOn,
+                ]}
+                accessibilityRole="switch"
+                accessibilityState={{ checked: tradingEnabled }}
+              >
+                <View style={[
+                  styles.kcsToggleThumb,
+                  tradingEnabled && styles.kcsToggleThumbOn,
                 ]} />
               </Pressable>
             </View>

@@ -1,13 +1,27 @@
+import { Modal, Share, StyleSheet, Text as RNText } from 'react-native';
 import { Pressable, View } from '@/components/AppLayout';
-import { StyleSheet } from 'react-native';
+import { useState } from 'react';
 import { Text } from '@/components/AppText';
 
 import { ReconnectIcon } from '@/components/Icons';
-import { reconnectPublicSocket } from '@/lib/kucoin/publicSocket';
+import {
+  isDebugFreezeActive,
+  reconnectPublicSocket,
+  setDebugFreeze,
+} from '@/lib/kucoin/publicSocket';
+import { clearSocketLogText, getSocketLogText } from '@/lib/kucoin/socketLog';
 import { useTickerStatus } from '@/state/ticker';
 import { radius, spacing } from '@/theme';
 import { useTheme } from '@/theme/ThemeProvider';
 import { createThemedStyles } from '@/theme/themedStyles';
+
+/**
+ * The socket debug tools — freeze (zombie simulation), copy logs, clear logs — live behind
+ * this one bundle-time flag. Set `EXPO_PUBLIC_SOCKET_TOOLS=true` in the build (CI exports it
+ * for the signal-inclusive APK); the lite build simply does not set it, and every reference
+ * below compiles away behind the constant.
+ */
+const TOOLS_ENABLED = process.env.EXPO_PUBLIC_SOCKET_TOOLS === 'true';
 
 type Props = {
   symbol: string;
@@ -25,12 +39,27 @@ type Props = {
  * live) sits immediately before the badge inside one trailing group, so the badge's position
  * never shifts when the button appears or disappears — tapping it drops the shared market
  * connection *and* its cached token/endpoint, then redials at once.
+ *
+ * When the tools flag is set, a long-press on the dot opens the debug tools: freeze the feed
+ * to simulate a dead route, copy the phase-timestamp log block, or clear it.
  */
 export function LiveBadge({ symbol }: Props) {
   const { colors } = useTheme();
   const styles = useStyles();
   const status = useTickerStatus(symbol);
   const isLive = status === 'live';
+  const [toolsOpen, setToolsOpen] = useState(false);
+  const [frozen, setFrozen] = useState(isDebugFreezeActive());
+
+  const toggleFreeze = () => {
+    const next = !frozen;
+    setDebugFreeze(next);
+    setFrozen(next);
+  };
+
+  const copyLogs = () => {
+    void Share.share({ message: getSocketLogText() }).catch(() => undefined);
+  };
 
   return (
     <View style={styles.trailing}>
@@ -46,9 +75,23 @@ export function LiveBadge({ symbol }: Props) {
         </Pressable>
       ) : null}
       <View style={styles.badge}>
-        <View
-          style={[styles.dot, { backgroundColor: isLive ? colors.up : colors.textFaint }]}
-        />
+        {TOOLS_ENABLED ? (
+          <Pressable
+            onLongPress={() => setToolsOpen(true)}
+            delayLongPress={400}
+            hitSlop={10}
+            accessibilityRole="button"
+            accessibilityLabel="Open socket debug tools"
+          >
+            <View
+              style={[styles.dot, { backgroundColor: isLive ? colors.up : colors.textFaint }]}
+            />
+          </Pressable>
+        ) : (
+          <View
+            style={[styles.dot, { backgroundColor: isLive ? colors.up : colors.textFaint }]}
+          />
+        )}
         <Text style={styles.text}>
           {isLive
             ? 'Live'
@@ -57,6 +100,54 @@ export function LiveBadge({ symbol }: Props) {
               : 'Reconnecting'}
         </Text>
       </View>
+
+      {TOOLS_ENABLED ? (
+        <Modal visible={toolsOpen} transparent animationType="fade" onRequestClose={() => setToolsOpen(false)}>
+          <Pressable style={styles.scrim} onPress={() => setToolsOpen(false)}>
+            <View style={[styles.sheet, { backgroundColor: colors.surface }]}>
+              <Text style={styles.sheetTitle}>Socket tools — {symbol}</Text>
+              <Text style={styles.sheetHint}>
+                Freeze simulates a dead route: frames are ignored for ~5s, then the watchdog
+                force-closes and the reconnect ladder proves itself.
+              </Text>
+              <Pressable
+                onPress={toggleFreeze}
+                style={[styles.toolButton, frozen && styles.toolButtonActive]}
+                accessibilityRole="button"
+              >
+                <RNText style={[styles.toolText, frozen && styles.toolTextActive]}>
+                  {frozen ? 'Unfreeze feed' : 'Freeze feed (watchdog test)'}
+                </RNText>
+              </Pressable>
+              <Pressable
+                onPress={copyLogs}
+                style={styles.toolButton}
+                accessibilityRole="button"
+              >
+                <RNText style={styles.toolText}>Copy logs</RNText>
+              </Pressable>
+              <Pressable
+                onPress={() => {
+                  clearSocketLogText();
+                  setToolsOpen(false);
+                }}
+                style={styles.toolButton}
+                accessibilityRole="button"
+              >
+                <RNText style={styles.toolText}>Clear logs</RNText>
+              </Pressable>
+              <Pressable
+                onPress={() => setToolsOpen(false)}
+                style={styles.toolClose}
+                accessibilityRole="button"
+                accessibilityLabel="Close socket tools"
+              >
+                <RNText style={styles.toolText}>Close</RNText>
+              </Pressable>
+            </View>
+          </Pressable>
+        </Modal>
+      ) : null}
     </View>
   );
 }
@@ -97,6 +188,50 @@ const useStyles = createThemedStyles((colors) =>
       color: colors.textMuted,
       fontSize: 11,
       fontWeight: '600',
+    },
+    scrim: {
+      flex: 1,
+      backgroundColor: 'rgba(0,0,0,0.5)',
+      justifyContent: 'center',
+      paddingHorizontal: spacing.xl,
+    },
+    sheet: {
+      borderRadius: radius.lg,
+      padding: spacing.lg,
+      gap: spacing.sm,
+    },
+    sheetTitle: {
+      color: colors.text,
+      fontSize: 15,
+      fontWeight: '700',
+    },
+    sheetHint: {
+      color: colors.textMuted,
+      fontSize: 12,
+      lineHeight: 17,
+    },
+    toolButton: {
+      minHeight: 40,
+      justifyContent: 'center',
+      alignItems: 'center',
+      borderRadius: radius.md,
+      backgroundColor: colors.surfaceAlt,
+    },
+    toolButtonActive: {
+      backgroundColor: colors.down,
+    },
+    toolText: {
+      color: colors.text,
+      fontSize: 13,
+      fontWeight: '600',
+    },
+    toolTextActive: {
+      color: colors.onAccent,
+    },
+    toolClose: {
+      minHeight: 32,
+      justifyContent: 'center',
+      alignItems: 'center',
     },
   }),
 );

@@ -1,6 +1,7 @@
 import { useCallback } from 'react';
 
 import { snapLog } from '@/lib/snapLog';
+import { socketLog } from '@/lib/kucoin/socketLog';
 import { useSetActiveCoin } from '@/state/activeCoin';
 import { prefetchTicker } from '@/state/ticker';
 
@@ -29,6 +30,9 @@ export function useSignalLaunch(): (symbol: string, source: string) => void {
       lastLaunchBySymbol.set(symbol, now);
 
       snapLog('RouteResolved', `${symbol} via ${source}`);
+      // The connect-timeline anchor: everything after this in the socket log — token, dial,
+      // open, welcome, first frame — is measurable against the moment the signal landed.
+      socketLog('signal:received', `${symbol} via ${source}`);
 
       const base = symbol.split('-')[0] ?? symbol;
       setActiveCoin({ symbol, name: base, decimals: 8 });

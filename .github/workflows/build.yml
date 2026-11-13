@@ -92,6 +92,9 @@ jobs:
     runs-on: ubuntu-latest
     env:
       EXPO_PUBLIC_SIGNAL_DETECTION: 'true'
+      # Socket debug tools (freeze/copy logs) ship in the signal-inclusive APK only; the lite
+      # build simply does not set the flag, and the whole UI compiles away.
+      EXPO_PUBLIC_SOCKET_TOOLS: 'true'
     steps:
       - uses: actions/checkout@v4
 

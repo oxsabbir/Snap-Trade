@@ -27,21 +27,14 @@
  *    the server within 5s of a ping. A carrier NAT drop leaves TCP OPEN on both ends while the
  *    route is dead — only echo traffic proves the route, so a zombie session is closed and
  *    redialled instead of silently starving the order list for one reconcile interval.
- *  - the token is refetched when the exchange rejects it (close 4001/4002) or after a full
- *    dial sweep, subject to the same short cooldown the public token uses so a fast-failing
- *    ladder cannot hammer the signed endpoint.
+ *  - the token is refetched only on hard evidence: the exchange rejects it (close 4001/4002),
+ *    three consecutive failed dials, or a credentials restart — never per retry round.
  */
 import { request } from '@/lib/kucoin/client';
 import { getCachedCredentials } from '@/lib/kucoin/credentials';
 import { socketLog, socketLogFailure } from '@/lib/kucoin/socketLog';
 
-const BULLET_TTL_MS = 60 * 60 * 1000; // tokens last 24h; re-fetch hourly to stay well inside it
-/**
- * After a *soft* invalidation (failed dial sweep) the refetch is held off this long so the
- * retry ladder cannot hammer the signed `bullet-private` endpoint while the path itself is down.
- * Hard invalidations (rejected token, close 4001/4002) always refetch immediately.
- */
-const BULLET_REFETCH_COOLDOWN_MS = 5_000;
+const BULLET_TTL_MS = 20 * 60 * 60 * 1000; // tokens last 24h; refetch past 20h to stay inside it
 
 const ORDER_TOPIC = '/spotMarket/tradeOrdersV2';
 const BALANCE_TOPIC = '/account/balance';
@@ -159,19 +152,14 @@ export async function fetchPrivateBullet(): Promise<BulletServer> {
 }
 
 /**
- * Drops the cached token. `hard` marks it provably wrong (KuCoin rejected it, close 4001/4002) and
- * refetches on the very next dial; a soft invalidation caps the cache's remaining life so the next
- * dial past the cooldown refetches without the ladder hammering the endpoint.
+ * Drops the cached token outright — same policy as the public token: no per-round invalidation.
+ * Called on close 4001/4002 (KuCoin rejected the token), three consecutive failed dials, or the
+ * private feed's credential restart; a dropped cache signs a fresh token on the next dial.
  */
-export function invalidatePrivateBullet(options: { hard?: boolean } = {}): void {
-  if (options.hard) {
-    cachedBullet = null;
-    socketLog('token:private:invalidate:hard');
-    return;
-  }
+export function invalidatePrivateBullet(): void {
   if (!cachedBullet) return;
-  cachedBullet = { ...cachedBullet, expiresAt: Math.min(cachedBullet.expiresAt, Date.now() + BULLET_REFETCH_COOLDOWN_MS) };
-  socketLog('token:private:invalidate:soft');
+  cachedBullet = null;
+  socketLog('token:private:invalidate');
 }
 
 /** True when an API key is available, so callers can avoid opening a socket that cannot auth. */
@@ -194,6 +182,8 @@ export class PrivateSocket {
   private pingIntervalMs = 18_000;
   private lastServerAt = 0;
   private lastPingAt = 0;
+  /** Consecutive failed dials; three in a row discard the cached token. */
+  private failedDials = 0;
   private stopped = true;
 
   constructor(private readonly listener: Listener) {}
@@ -266,6 +256,7 @@ export class PrivateSocket {
     const dead = this.socket;
     if (!dead) return;
     socketLog('close:private:force', reason);
+    this.noteDialFailure();
     this.clearSessionTimers();
     this.socket = null;
     dead.onopen = dead.onerror = dead.onmessage = dead.onclose = null;
@@ -275,6 +266,19 @@ export class PrivateSocket {
       // A socket that never finished connecting is parked by dropping the reference.
     }
     this.scheduleReconnect();
+  }
+
+  /**
+   * Three consecutive failed dials are the signal that the cached token or endpoint may be
+   * the problem, not just the carrier path — drop it so the next dial signs a fresh one and
+   * resolves DNS again. Reset on every welcome.
+   */
+  private noteDialFailure(): void {
+    this.failedDials += 1;
+    if (this.failedDials < 3) return;
+    socketLog('token:private:invalidate', '3 consecutive failed dials');
+    invalidatePrivateBullet();
+    this.failedDials = 0;
   }
 
   private async connect(): Promise<void> {
@@ -308,10 +312,8 @@ export class PrivateSocket {
     this.socket = socket;
     this.pingIntervalMs = server.pingInterval;
     this.lastServerAt = Date.now();
-    // One instance server per attempt; after a sweep the token is soft-invalidated so the next
-    // cycle signs a fresh one (spot returns a single server, so the sweep is quickly reached —
-    // the cooldown holds the endpoint harmless).
-    if (this.attempt > 0) invalidatePrivateBullet();
+    // No per-attempt token invalidation: the path, not the token, is what usually fails, and
+    // refetching the signed endpoint per retry round gains nothing.
 
     // Every handler re-checks `stopped`. Closing a WebSocket is asynchronous and does not discard
     // work the event loop already dispatched, so a message from the previous session can still run
@@ -354,9 +356,10 @@ export class PrivateSocket {
       this.clearSessionTimers();
       this.socket = null;
       socketLog('closed:private', `code=${event?.code ?? '-'} attempt=${this.attempt}`);
+      this.noteDialFailure();
       // 4001/4002 mean the token itself is bad, so the cached one has to go or every reconnect
       // would fail the same way.
-      if (event?.code === 4001 || event?.code === 4002) invalidatePrivateBullet({ hard: true });
+      if (event?.code === 4001 || event?.code === 4002) invalidatePrivateBullet();
       if (!this.stopped) this.scheduleReconnect();
     };
   }
@@ -388,6 +391,7 @@ export class PrivateSocket {
         }
         socketLog('welcome:private', `session=${String(message.id ?? '-')}`);
         this.attempt = 0;
+        this.failedDials = 0;
         this.lastPingAt = this.lastServerAt;
         this.subscribe(socket);
         this.startHeartbeat(socket);

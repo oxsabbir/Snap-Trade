@@ -11,10 +11,14 @@
  *  - dial deadline 3s: if `onopen` has not fired, the socket is closed and retried. On
  *    carrier paths a dial into a blackholed address spends its life in the SYN queue; waiting
  *    it out (10s native default) is how 25-30s connects happened.
- *  - retry delays 0, 300ms, 1s, then capped at 2s, rotating through `instanceServers` — on
- *    spot KuCoin returns a single server, so rotation is moot there, but the ladder keeps the
- *    loop fast and each sweep completion soft-invalidates the bullet so the next cycle
- *    refetches the token and resolves DNS fresh.
+ *  - race dial: if the first dial is still connecting after 800ms, a second dial to the same
+ *    host starts in parallel — a different TCP lane, a different carrier path. Whichever opens
+ *    first wins; the loser is detached and closed immediately and can never deliver a frame.
+ *    Spot returns a single instanceServer, so the race is same-host on purpose: one dial
+ *    landing on a blackholed path is exactly the failure it guards against.
+ *  - retry delays 0, 300ms, 1s, then capped at 2s. Three consecutive failed dials discard the
+ *    cached token so the next round refetches and resolves DNS fresh — the token is almost
+ *    never the problem, so it is not dropped per round.
  *  - subscribe only after the server's `welcome` frame: KuCoin documents that the session is
  *    only available once welcome arrives, so topic frames are buffered until then.
  *  - heartbeat: a client ping every `pingInterval` (from the bullet, 18s on spot) and a
@@ -29,6 +33,7 @@ import { AppState } from 'react-native';
 import * as Network from 'expo-network';
 
 import { fetchPublicBullet, invalidatePublicBullet, wakeRadio, type BulletServer } from './bullet';
+import { isTradingModeEnabled } from '@/state/tradingMode';
 import { socketLog, socketLogFailure } from './socketLog';
 
 export type SocketStatus = 'connecting' | 'live' | 'offline';
@@ -81,9 +86,26 @@ const KICK_DEBOUNCE_MS = 250;
  * accidentally-kept dead one is announced by the pong watchdog in ~5s, not a heartbeat slot.
  */
 const RESUME_FRESH_WINDOW_MS = 20_000;
+/**
+ * When the first dial is still CONNECTING after this, a second dial to the same host starts
+ * in parallel. Short enough to beat the 3s deadline meaningfully, long enough that the common
+ * case (first dial opens fine) never pays a second connection.
+ */
+const RACE_DELAY_MS = 800;
+/** How long a debug freeze runs before the watchdog declares the (simulated) zombie dead. */
+const DEBUG_FREEZE_VERDICT_MS = 5_000;
+/** Consecutive failed dials before the cached token is discarded and refetched. */
+const FAILED_DIALS_BEFORE_REFETCH = 3;
 
 type TopicEntry = {
   handlers: Set<TopicAttachments['onMessage']>;
+  /**
+   * Set at registration from the connection's state — `warm` when the session was already live
+   * (the frame rides a reused connection), `fresh` when the registration triggered or joined a
+   * dial. Consumed by the first delivered frame's log so the field can answer "did the book
+   * arrive instantly because the connection was warm, or after a fresh dial?".
+   */
+  firstFrameOrigin?: 'warm' | 'fresh';
 };
 
 const topics = new Map<string, TopicEntry>();
@@ -91,7 +113,15 @@ const statusListeners = new Set<(status: SocketStatus) => void>();
 
 let status: SocketStatus = 'offline';
 let socket: WebSocket | null = null;
+/**
+ * The racing second dial. Alive only between {@link RACE_DELAY_MS} and the first open; the
+ * winner is adopted into `socket` (racer) or stays `socket` (primary) and the loser is
+ * detached + closed so it can never deliver a frame.
+ */
+let racer: WebSocket | null = null;
 let attempt = 0;
+/** Consecutive failed dials since the last welcome; drives the token discard rule. */
+let failedDials = 0;
 let pingIntervalMs = 18_000;
 let lastServerAt = 0;
 let lastPingAt = 0;
@@ -103,12 +133,24 @@ let lastPingAt = 0;
  */
 let offline = false;
 
+/**
+ * Debug freeze (the tools' "simulate a dead connection"): while active, incoming frames are
+ * ignored and heartbeats stop — exactly the zombie a carrier NAT expiry produces, without
+ * waiting 30 minutes for one. The watchdog declares the frozen socket dead after
+ * {@link DEBUG_FREEZE_VERDICT_MS} and force-closes, which also clears the flag so the reconnect
+ * ladder runs normally afterwards.
+ */
+let debugFreezeActive = false;
+let frozenAt = 0;
+
 let connectTimer: ReturnType<typeof setTimeout> | null = null;
 let welcomeTimer: ReturnType<typeof setTimeout> | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let pingTimer: ReturnType<typeof setInterval> | null = null;
 let watchdogTimer: ReturnType<typeof setInterval> | null = null;
 let kickTimer: ReturnType<typeof setTimeout> | null = null;
+let raceTimer: ReturnType<typeof setTimeout> | null = null;
+let racerDeadline: ReturnType<typeof setTimeout> | null = null;
 
 function setStatus(next: SocketStatus): void {
   if (status === next) return;
@@ -139,6 +181,54 @@ function clearConnectTimers(): void {
 function clearReconnectTimer(): void {
   if (reconnectTimer) clearTimeout(reconnectTimer);
   reconnectTimer = null;
+}
+
+/**
+ * Detaches and closes the racing dial, if one is pending. Called on every teardown path — the
+ * loser of the race, or a racer whose primary already died, must never fire a callback into
+ * the manager's state machine.
+ */
+function discardRacer(reason: string): void {
+  if (raceTimer) {
+    clearTimeout(raceTimer);
+    raceTimer = null;
+  }
+  if (racerDeadline) {
+    clearTimeout(racerDeadline);
+    racerDeadline = null;
+  }
+  const losing = racer;
+  racer = null;
+  if (!losing) return;
+  losing.onopen = losing.onerror = losing.onmessage = losing.onclose = null;
+  try {
+    losing.close();
+  } catch {
+    // A CONNECTING racer is discarded by dropping the reference.
+  }
+  socketLog('race:discard', reason);
+}
+
+/** Counts one failed dial toward the token-discard rule. Reset on every welcome. */
+function noteDialFailure(): void {
+  failedDials += 1;
+  if (failedDials < FAILED_DIALS_BEFORE_REFETCH) return;
+  socketLog('token:invalidate', `${FAILED_DIALS_BEFORE_REFETCH} consecutive failed dials`);
+  invalidatePublicBullet();
+  failedDials = 0;
+}
+
+/** The device's network kind for the dial log — mobile vs wifi, the field's first question. */
+async function networkKind(): Promise<string> {
+  try {
+    const state = await Network.getNetworkStateAsync();
+    const type = String(state.type ?? 'unknown').toLowerCase();
+    if (type === 'cellular') return 'mobile';
+    if (type === 'wifi') return 'wifi';
+    return type;
+  } catch {
+    return 'unknown';
+  }
 }
 
 /** Topic frames the app wants, replayed after every welcome and on every reconnect. */
@@ -175,7 +265,9 @@ function forceClose(reason: string): void {
   const dead = socket;
   if (!dead) return;
   socketLog('close:force', reason);
+  noteDialFailure();
   clearConnectTimers();
+  discardRacer('force close');
   socket = null;
   // Handlers are detached first so the SDK's own close callbacks cannot double-schedule
   // a reconnect after this force path already did (via the onclose below on some runtimes).
@@ -189,7 +281,7 @@ function forceClose(reason: string): void {
 }
 
 async function connectNow(fromWarm = false): Promise<void> {
-  if (socket) return;
+  if (socket || racer) return;
   if (!fromWarm && topics.size === 0) return;
   if (welcomeTimer) return;
   if (offline) return;
@@ -210,20 +302,16 @@ async function connectNow(fromWarm = false): Promise<void> {
     scheduleReconnect();
     return;
   }
-  if (socket || (!fromWarm && topics.size === 0)) return;
+  if (socket || racer || (!fromWarm && topics.size === 0)) return;
 
-  // One instance server per attempt; after a full sweep the bullet is soft-invalidated, so
-  // the next cycle refetches the token and resolves the host through DNS again. Server
-  // order effectively never varies on spot (single entry), so the sweep invalidation is the
-  // carrier-path lever: it is what turns "same dead edge" into "fresh answer".
   const servers: BulletServer[] = bullet.servers;
   const server = servers[attempt % servers.length]!;
-  if (attempt > 0 && attempt % servers.length === 0) {
-    invalidatePublicBullet();
-  }
+  const net = await networkKind();
+  // Parked while the token fetch and the network-state read were in flight: dial nothing.
+  if (offline || socket || racer || (!fromWarm && topics.size === 0)) return;
 
   const dialAt = Date.now();
-  socketLog('dial', `${hostOf(server.endpoint)} attempt=${attempt}`);
+  socketLog('dial', `${hostOf(server.endpoint)} attempt=${attempt} net=${net}`);
   const url = `${server.endpoint}?token=${encodeURIComponent(server.token)}&connectId=snaptrade&pingInterval=${server.pingInterval}`;
   const ws = new WebSocket(url);
   socket = ws;
@@ -237,9 +325,20 @@ async function connectNow(fromWarm = false): Promise<void> {
     forceClose('open-timeout');
   }, CONNECT_TIMEOUT_MS);
 
+  // Race dial: if the primary is still handshaking, a second dial to the same host runs in
+  // parallel. The winner is whoever opens first; `promoteRacer` / the primary's `onopen`
+  // resolve the race and the loser is detached before anything can deliver through it.
+  raceTimer = setTimeout(() => {
+    raceTimer = null;
+    if (socket !== ws || ws.readyState !== WebSocket.CONNECTING) return;
+    socketLog('race:start', `${hostOf(server.endpoint)} second dial after ${Date.now() - dialAt}ms`);
+    startRacer(url, server.endpoint, net, dialAt);
+  }, RACE_DELAY_MS);
+
   ws.onopen = () => {
     if (socket !== ws) return;
-    socketLog('open', `${hostOf(server.endpoint)} ${Date.now() - dialAt}ms`);
+    discardRacer('primary opened first');
+    socketLog('open', `${hostOf(server.endpoint)} ${Date.now() - dialAt}ms net=${net}`);
     if (connectTimer) {
       clearTimeout(connectTimer);
       connectTimer = null;
@@ -261,25 +360,107 @@ async function connectNow(fromWarm = false): Promise<void> {
 
   ws.onclose = (event: WebSocketCloseEvent) => {
     if (socket !== ws) return;
-    clearConnectTimers();
-    socket = null;
-    socketLog('closed', `code=${event?.code ?? '-'} attempt=${attempt}`);
-    // A rejected token is a provably wrong cached answer — refetch on the next dial.
-    if (event?.code === 4001 || event?.code === 4002) {
-      invalidatePublicBullet({ hard: true });
-    }
-    // A warm dial that failed with nothing subscribed stops here: nobody is waiting on the
-    // wire, so a silent retry loop would only burn battery. The next subscriber's
-    // registration dials again from the retained attempt count.
-    if (topics.size === 0) {
-      setStatus('offline');
-      return;
-    }
-    scheduleReconnect();
+    finishDial(ws, event);
   };
 }
 
+/**
+ * The second dial of the race. It either wins — replacing the still-connecting primary as the
+ * manager's socket — or loses to the primary's open / its own deadline / its own close, in
+ * which case it is discarded and the primary continues untouched. Handlers accept ownership by
+ * either reference (`socket` after promotion, `racer` before), because promotion swaps the
+ * variable the rest of the manager reads.
+ */
+function startRacer(url: string, endpoint: string, net: string, primaryDialAt: number): void {
+  const dialAt = Date.now();
+  const ws = new WebSocket(url);
+  racer = ws;
+  socketLog('dial', `${hostOf(endpoint)} racer net=${net}`);
+
+  racerDeadline = setTimeout(() => {
+    if (racer !== ws) return;
+    socketLog('dial:racer:timeout', `${hostOf(endpoint)} after ${Date.now() - dialAt}ms`);
+    discardRacer('racer open-timeout');
+  }, CONNECT_TIMEOUT_MS);
+
+  ws.onopen = () => {
+    if (socket === ws || racer !== ws) return;
+    // Racer won: the primary is still CONNECTING. Detach it before it can fire anything.
+    const losingPrimary = socket;
+    socket = null;
+    if (losingPrimary) {
+      losingPrimary.onopen = losingPrimary.onerror = losingPrimary.onmessage = losingPrimary.onclose = null;
+      try {
+        losingPrimary.close();
+      } catch {
+        // Dropping the reference is enough for a socket that never finished connecting.
+      }
+    }
+    if (connectTimer) {
+      clearTimeout(connectTimer);
+      connectTimer = null;
+    }
+    if (racerDeadline) {
+      clearTimeout(racerDeadline);
+      racerDeadline = null;
+    }
+    racer = null;
+    socket = ws;
+    socketLog('open', `${hostOf(endpoint)} racer won ${Date.now() - primaryDialAt}ms net=${net}`);
+    welcomeTimer = setTimeout(() => forceClose('welcome-timeout'), WELCOME_TIMEOUT_MS);
+  };
+
+  ws.onmessage = (event: WebSocketMessageEvent) => {
+    if (socket !== ws && racer !== ws) return;
+    handleFrame(String(event.data), ws);
+  };
+
+  ws.onerror = () => {
+    if (socket !== ws && racer !== ws) return;
+    socketLog('dial:racer:error');
+  };
+
+  ws.onclose = (event: WebSocketCloseEvent) => {
+    // Pre-promotion close = lost the race; the primary owns the wire and continues. Log it,
+    // then let finishDial's guard no-op it. Post-promotion, `socket === ws` and this is the
+    // normal close path.
+    if (socket !== ws && racer === ws) {
+      socketLog('race:lost', `racer closed code=${event?.code ?? '-'}`);
+    }
+    finishDial(ws, event);
+  };
+}
+
+/**
+ * The normal close path, shared by the primary dial and a racer that won promotion: teardown,
+ * failure counting, token rules, and reconnect scheduling. The `socket !== ws` guard makes it
+ * safe to call for a socket that already lost ownership.
+ */
+function finishDial(ws: WebSocket, event: WebSocketCloseEvent): void {
+  if (socket !== ws) return;
+  clearConnectTimers();
+  discardRacer('primary closed mid-race');
+  socket = null;
+  socketLog('closed', `code=${event?.code ?? '-'} attempt=${attempt}`);
+  noteDialFailure();
+  // A rejected token is a provably wrong cached answer — refetch on the next dial.
+  if (event?.code === 4001 || event?.code === 4002) {
+    invalidatePublicBullet();
+  }
+  // A warm dial that failed with nothing subscribed stops here: nobody is waiting on the
+  // wire, so a silent retry loop would only burn battery. The next subscriber's
+  // registration dials again from the retained attempt count.
+  if (topics.size === 0) {
+    setStatus('offline');
+    return;
+  }
+  scheduleReconnect();
+}
+
 function handleFrame(raw: string, ws: WebSocket): void {
+  // Debug freeze: the simulated zombie ignores everything — including updating lastServerAt,
+  // so the watchdog's silence verdict runs exactly as it would on a real dead route.
+  if (debugFreezeActive) return;
   lastServerAt = Date.now();
   if (raw === 'ping') {
     // The server also pings with a bare string frame; answering keeps its keepalive — and
@@ -311,6 +492,7 @@ function handleFrame(raw: string, ws: WebSocket): void {
       socketLog('welcome', `session=${String(message.id ?? '-')}`);
       setStatus('live');
       attempt = 0;
+      failedDials = 0;
       startHeartbeat(ws);
       sendSubscribes();
       return;
@@ -326,6 +508,13 @@ function handleFrame(raw: string, ws: WebSocket): void {
       if (typeof message.topic !== 'string' || message.data === undefined) return;
       const entry = topics.get(message.topic);
       if (!entry) return;
+      // First frame a topic receives: where did it come from — a connection that was already
+      // live when the screen subscribed (warm), or the dial the subscription kicked off
+      // (fresh)? This is the field metric for "did warmup pay?".
+      if (entry.firstFrameOrigin) {
+        socketLog('frame:first', `${entry.firstFrameOrigin} topic=${message.topic}`);
+        delete entry.firstFrameOrigin;
+      }
       const routed = { topic: message.topic, subject: message.subject ?? '', data: message.data };
       for (const handler of entry.handlers) handler(routed);
       return;
@@ -339,6 +528,8 @@ function startHeartbeat(ws: WebSocket): void {
   lastPingAt = lastServerAt;
   pingTimer = setInterval(() => {
     if (ws.readyState !== WebSocket.OPEN) return;
+    // Frozen: the simulated zombie sends nothing, so the silence is one we created.
+    if (debugFreezeActive) return;
     ws.send(JSON.stringify({ id: Date.now(), type: 'ping' }));
     lastPingAt = Date.now();
   }, Math.max(pingIntervalMs / 2, 5_000));
@@ -347,6 +538,15 @@ function startHeartbeat(ws: WebSocket): void {
   // the route; silence after a ping does not.
   watchdogTimer = setInterval(() => {
     if (ws.readyState !== WebSocket.OPEN) return;
+    // The debug freeze's verdict: ~5s of enforced silence, then the socket is declared dead
+    // like a real zombie would be. The flag clears first so the reconnect ladder runs free.
+    if (debugFreezeActive) {
+      if (Date.now() - frozenAt > DEBUG_FREEZE_VERDICT_MS) {
+        setDebugFreeze(false);
+        forceClose('debug-freeze');
+      }
+      return;
+    }
     if (lastPingAt && Date.now() - lastPingAt > PONG_TIMEOUT_MS && lastServerAt < lastPingAt) {
       forceClose('pong-timeout');
     }
@@ -363,6 +563,7 @@ function kick(): void {
   offline = false;
   clearReconnectTimer();
   clearConnectTimers();
+  discardRacer('kick');
   const dying = socket;
   socket = null;
   if (dying) {
@@ -380,6 +581,30 @@ function kick(): void {
 }
 
 /**
+ * Drops the wire and every pending timer: the reconnect ladder, an in-flight dial, the live
+ * socket, and any racer all go. Always ends in the 'offline' status — every caller parks for
+ * a reason that a later event (network return, foreground, new subscriber) revives from.
+ */
+function parkAll(reason: string): void {
+  clearReconnectTimer();
+  clearConnectTimers();
+  discardRacer(reason);
+  const dying = socket;
+  socket = null;
+  if (dying) {
+    dying.onopen = dying.onerror = dying.onmessage = dying.onclose = null;
+    try {
+      dying.close();
+    } catch {
+      // A CONNECTING socket is parked by dropping the reference.
+    }
+  }
+  attempt = 0;
+  setStatus('offline');
+  socketLog(reason);
+}
+
+/**
  * Fully parks the manager while the device has no reachable internet: every dial and heartbeat
  * would fail, so none are attempted. The network listener is the only thing that revives the
  * connection from here — the instant data returns, the debounced kick redials. This is what
@@ -388,26 +613,48 @@ function kick(): void {
 function parkOffline(): void {
   if (offline) return;
   offline = true;
-  clearReconnectTimer();
-  clearConnectTimers();
-  const dying = socket;
-  socket = null;
-  if (dying) {
-    dying.onopen = dying.onerror = dying.onmessage = dying.onclose = null;
-    try {
-      dying.close();
-    } catch {
-      // A socket that never finished connecting is parked by dropping the reference.
-    }
-  }
-  attempt = 0;
-  setStatus('offline');
-  socketLog('parked:no-network');
+  parkAll('parked:no-network');
+}
+
+/**
+ * Parks the connection when the app goes to the background with trading mode OFF: the feed
+ * has no watcher, the native keepalive is gated off (dial-time decision), so holding the
+ * socket would be pure battery burn — the foreground kick redials in ~1-2s when the user
+ * comes back. With trading mode ON the socket stays: that is exactly what the mode is for.
+ */
+function parkForBackground(): void {
+  parkAll('parked:background');
+}
+
+/**
+ * Re-evaluates the trading-mode gate right after the toggle changes: in the foreground the
+ * keepalive is unconditional and nothing changes; in the background with the mode now off,
+ * the socket parks instead of continuing to stream to nobody.
+ */
+export function reapplyTradingMode(): void {
+  if (AppState.currentState === 'active') return;
+  if (!isTradingModeEnabled() && topics.size > 0) parkForBackground();
+}
+
+/**
+ * Debug tools (behind EXPO_PUBLIC_SOCKET_TOOLS): freeze the feed to simulate a zombie route
+ * without waiting for a carrier NAT expiry. While frozen, frames are ignored and heartbeats
+ * stop; the watchdog closes the socket after ~5s of that silence and the flag clears, so the
+ * reconnect ladder proves itself right after.
+ */
+export function setDebugFreeze(active: boolean): void {
+  debugFreezeActive = active;
+  if (active) frozenAt = Date.now();
+  socketLog('debug:freeze', active ? 'on — frames ignored, heartbeats stopped' : 'off');
+}
+
+export function isDebugFreezeActive(): boolean {
+  return debugFreezeActive;
 }
 
 function ensureConnection(): void {
   if (topics.size === 0) return;
-  if (socket || reconnectTimer) return;
+  if (socket || racer || reconnectTimer) return;
   if (welcomeTimer) return;
   void connectNow();
 }
@@ -420,7 +667,7 @@ function ensureConnection(): void {
  * heartbeat; a subscribed screen arriving later just sends its subscribe frames.
  */
 export function warmConnection(): void {
-  if (socket || reconnectTimer || welcomeTimer) return;
+  if (socket || racer || reconnectTimer || welcomeTimer) return;
   void connectNow(true);
 }
 
@@ -432,7 +679,7 @@ export function warmConnection(): void {
 export function reconnectPublicSocket(): void {
   if (topics.size === 0) return;
   socketLog('reconnect:manual');
-  invalidatePublicBullet({ hard: true });
+  invalidatePublicBullet();
   kick();
 }
 
@@ -456,7 +703,14 @@ function onForeground(): void {
 }
 
 AppState.addEventListener('change', (state) => {
-  if (state === 'active' && topics.size > 0) onForeground();
+  if (state === 'active') {
+    if (topics.size > 0) onForeground();
+    return;
+  }
+  // Backgrounded with trading mode off: nothing is watching the feed and the native keepalive
+  // gate is closed, so the socket parks. With the mode on, the socket — and the native pings
+  // that keep the carrier path alive through the background — stay exactly as they are.
+  if (!isTradingModeEnabled() && topics.size > 0) parkForBackground();
 });
 
 Network.addNetworkStateListener((event) => {
@@ -486,7 +740,12 @@ export function subscribeTopic(
 ): () => void {
   let entry = topics.get(topic);
   if (!entry) {
-    entry = { handlers: new Set() };
+    entry = {
+      handlers: new Set(),
+      // Provenance for the first frame this topic delivers: a session that was already live
+      // serves the frame warm; a registration that starts the dial serves it fresh.
+      firstFrameOrigin: status === 'live' ? 'warm' : 'fresh',
+    };
     topics.set(topic, entry);
   }
   const target = entry;
@@ -521,21 +780,7 @@ export function subscribeTopic(
     }
     if (topics.size === 0) {
       // Last listener gone — park the connection instead of streaming a market nobody watches.
-      clearReconnectTimer();
-      clearConnectTimers();
-      if (socket) {
-        const dying = socket;
-        socket = null;
-        dying.onopen = dying.onerror = dying.onmessage = dying.onclose = null;
-        try {
-          dying.close();
-        } catch {
-          // Parking a CONNECTING socket by dropping the reference is safe.
-        }
-      }
-      attempt = 0;
-      setStatus('offline');
-      socketLog('parked');
+      parkAll('parked');
     }
   };
 }
