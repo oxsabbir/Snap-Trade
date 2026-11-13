@@ -95,6 +95,13 @@ let attempt = 0;
 let pingIntervalMs = 18_000;
 let lastServerAt = 0;
 let lastPingAt = 0;
+/**
+ * True while the OS reports no reachable internet. The manager parks completely in this state —
+ * no dials, no retry ladder, no heartbeats — because every attempt is guaranteed to fail, and
+ * hammering a dead radio path for hours would be pure battery burn. The network listener wakes
+ * the connection the moment reachability returns.
+ */
+let offline = false;
 
 let connectTimer: ReturnType<typeof setTimeout> | null = null;
 let welcomeTimer: ReturnType<typeof setTimeout> | null = null;
@@ -155,7 +162,7 @@ function retryDelayMs(): number {
 }
 
 function scheduleReconnect(): void {
-  if (topics.size === 0 || reconnectTimer) return;
+  if (topics.size === 0 || reconnectTimer || offline) return;
   attempt += 1;
   setStatus('offline');
   reconnectTimer = setTimeout(() => {
@@ -185,6 +192,7 @@ async function connectNow(fromWarm = false): Promise<void> {
   if (socket) return;
   if (!fromWarm && topics.size === 0) return;
   if (welcomeTimer) return;
+  if (offline) return;
   if (topics.size === 0 && reconnectTimer) {
     // Reconnects triggered by AppState/network events skip the ladder wait entirely.
     clearReconnectTimer();
@@ -352,6 +360,7 @@ function startHeartbeat(ws: WebSocket): void {
  */
 function kick(): void {
   if (topics.size === 0) return;
+  offline = false;
   clearReconnectTimer();
   clearConnectTimers();
   const dying = socket;
@@ -368,6 +377,32 @@ function kick(): void {
   setStatus('connecting');
   void wakeRadio();
   void connectNow();
+}
+
+/**
+ * Fully parks the manager while the device has no reachable internet: every dial and heartbeat
+ * would fail, so none are attempted. The network listener is the only thing that revives the
+ * connection from here — the instant data returns, the debounced kick redials. This is what
+ * makes "data off after trading for the day" cost nothing instead of an endless retry loop.
+ */
+function parkOffline(): void {
+  if (offline) return;
+  offline = true;
+  clearReconnectTimer();
+  clearConnectTimers();
+  const dying = socket;
+  socket = null;
+  if (dying) {
+    dying.onopen = dying.onerror = dying.onmessage = dying.onclose = null;
+    try {
+      dying.close();
+    } catch {
+      // A socket that never finished connecting is parked by dropping the reference.
+    }
+  }
+  attempt = 0;
+  setStatus('offline');
+  socketLog('parked:no-network');
 }
 
 function ensureConnection(): void {
@@ -424,8 +459,15 @@ AppState.addEventListener('change', (state) => {
   if (state === 'active' && topics.size > 0) onForeground();
 });
 
-Network.addNetworkStateListener(() => {
-  // Debounced: toggling data on Android emits a burst of events as radios settle.
+Network.addNetworkStateListener((event) => {
+  // No reachable internet — data toggled off, out of coverage — parks everything: the retry
+  // ladder against a dead radio is pure battery burn and every attempt is guaranteed to fail.
+  // isInternetReachable is `undefined` while evaluating, which parks nothing.
+  if (event.isInternetReachable === false) {
+    parkOffline();
+    return;
+  }
+  // Reachable (or re-evaluating): a burst of events as radios settle collapses to one kick.
   if (kickTimer) return;
   kickTimer = setTimeout(() => {
     kickTimer = null;
