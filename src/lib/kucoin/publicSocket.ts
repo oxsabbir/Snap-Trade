@@ -333,7 +333,7 @@ function startHeartbeat(ws: WebSocket): void {
     if (ws.readyState !== WebSocket.OPEN) return;
     ws.send(JSON.stringify({ id: Date.now(), type: 'ping' }));
     lastPingAt = Date.now();
-  }, pingIntervalMs);
+  }, Math.max(pingIntervalMs / 2, 5_000));
   // A carrier NAT drop leaves the TCP state OPEN while the route is dead: sends vanish and
   // no close event ever arrives. Anything from the server — a pong, a data frame — proves
   // the route; silence after a ping does not.

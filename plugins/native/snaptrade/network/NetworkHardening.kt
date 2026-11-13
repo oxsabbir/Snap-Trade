@@ -37,6 +37,13 @@ object WebSocketClientCustomizer : com.facebook.react.modules.network.CustomClie
       .connectTimeout(3, TimeUnit.SECONDS)
       .writeTimeout(5, TimeUnit.SECONDS)
       .readTimeout(0, TimeUnit.MINUTES)
+      // Native protocol-level keepalive, independent of the JS thread: when the app is
+      // backgrounded (or the screen is off and JS timers are throttled or the process
+      // frozen), these pings keep the carrier NAT mapping for the socket alive. Without
+      // them a 20-30 minute idle lets the mapping expire, and the "open" socket becomes a
+      // zombie: sends vanish, and coming back needs a data toggle before anything lands.
+      // A missed pong closes the socket natively, which the JS layer sees as a normal close.
+      .pingInterval(20, TimeUnit.SECONDS)
       .eventListenerFactory(SuccessListenerFactory)
   }
 }
