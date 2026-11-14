@@ -237,6 +237,87 @@ Tp3 0.003`;
   eq(result.ticker, 'P2P');
 });
 
+test('ignores Binance CMP post with typo ($union on Binace)', () => {
+  const text = `$union on Binace 
+
+Buying CMP 0.000603
+
+Restesting for big buying opportunity 
+
+Keeping high targets 
+
+SL manage`;
+
+  const result = checkForSignal(makeNotification(text));
+  eq(result.isSignal, false);
+  eq(result.format, null);
+});
+
+test('ignores other exchange post with @binance mention', () => {
+  const text = `Buying $PHA
+
+Current price - 0.0333
+
+@binance
+ Targets ~ 6% to 20%++
+
+SL 5%`;
+
+  const result = checkForSignal(makeNotification(text));
+  eq(result.isSignal, false);
+  eq(result.format, null);
+});
+
+test('detects KuCoin gem post with @kucoincom ($PRAI)', () => {
+  const text = `$PRAI
+
+Buying this GEM 💎 on 
+@kucoincom
+
+
+Current market price - 0.000690 $. `;
+
+  const result = checkForSignal(makeNotification(text));
+  eq(result.isSignal, true);
+  eq(result.format, 'gem');
+  eq(result.ticker, 'PRAI');
+  eq(result.entry, '0.000690');
+});
+
+test('ignores CMP post that does not mention KuCoin', () => {
+  const text = `$CHO Buying CMP 0.000552 Keeping high targets SL manage`;
+
+  const result = checkForSignal(makeNotification(text));
+  eq(result.isSignal, false);
+  eq(result.format, null);
+});
+
+test('detects KuCoin CMP post with @kucoincom', () => {
+  const text = `$CHO on @kucoincom
+
+Buying CMP 0.000552
+
+Keeping high targets
+SL manage`;
+
+  const result = checkForSignal(makeNotification(text));
+  eq(result.isSignal, true);
+  eq(result.format, 'cmp');
+  eq(result.ticker, 'CHO');
+  eq(result.entry, '0.000552');
+});
+
+test('ignores TP signal when another exchange is mentioned without KuCoin', () => {
+  const text = `$SOL on Binance
+Tp1 150
+Tp2 160
+Tp3 170`;
+
+  const result = checkForSignal(makeNotification(text));
+  eq(result.isSignal, false);
+  eq(result.format, null);
+});
+
 // --- runner -----------------------------------------------------------------------------------
 
 let failures = 0;

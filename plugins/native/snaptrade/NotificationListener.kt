@@ -75,8 +75,10 @@ class NotificationListener : NotificationListenerService() {
 
     private val ignoredHashtags = setOf(
         "KUCOIN",
+        "KUCOINCOM",
         "MEXC",
         "BINANCE",
+        "BINACE",
         "BYBIT",
         "GATEIO",
         "OKX",
@@ -96,6 +98,9 @@ class NotificationListener : NotificationListenerService() {
 
     private val mcPattern = Pattern.compile("(?i)\\b(?:MC|MCAP|MARKET\\s*CAP)\\b")
     private val wordPattern = Pattern.compile("\\b[A-Za-z][A-Za-z0-9]*\\b")
+    private val kucoinPattern = Pattern.compile("(?i)ku\\s*[-_]?\\s*coin")
+    private val otherExchangePattern =
+        Pattern.compile("(?i)(?:@|#|\\b)(?:binance|binace|bybit|mexc|gateio|gate\\.io|gate_io|okx|okex|bitget|coinbase|kraken|htx|huobi|bingx|bitfinex|upbit|coinex|phemex|bitmart|lbank)\\b")
 
     private val ignoredWords = ignoredHashtags + setOf(
         "DEX", "CEX", "UNISWAP", "PANCAKESWAP",
@@ -125,7 +130,7 @@ class NotificationListener : NotificationListenerService() {
     // `Current market price - 0.0007306 $` — value kept as a plain string, not a Double,
     // so the deep link carries the exact posted decimal (no scientific notation).
     private val gemPricePattern =
-        Pattern.compile("(?i)current\\s+market\\s+price\\s*[-–:]?\\s*([\\d.,]+)")
+        Pattern.compile("(?i)current\\s+(?:market\\s+)?price\\s*[-–:]?\\s*([\\d.,]+)")
 
     // Cmp-post marker: `Buying CMP 0.000552 Keeping high targets SL manage`. Only the letters
     // and digits are compared, so emoji and X formatting cannot hide a `buy`/`Buying` context;
@@ -175,6 +180,11 @@ class NotificationListener : NotificationListenerService() {
             .filter { it.isNotBlank() }
             .distinct()
             .joinToString("\n")
+
+        if (hasOtherExchangeMention(primaryText) && !includesKucoin(primaryText)) {
+            log("Decision", "not signal (ignored: other exchange mentioned without KuCoin)")
+            return
+        }
 
         val tpsResult = extractTps(primaryText)
         val tps = tpsResult.tps
@@ -451,14 +461,20 @@ class NotificationListener : NotificationListenerService() {
         return gemMarker in normalized
     }
 
+    private fun includesKucoin(text: String): Boolean =
+        kucoinPattern.matcher(text).find()
+
+    private fun hasOtherExchangeMention(text: String): Boolean =
+        otherExchangePattern.matcher(text).find()
+
     /**
      * Cmp-format anchor: returns the posted `CMP` price as a plain decimal string, or null
-     * unless the post carries both a buy context marker (`Buy`, `Buying`, …) and a parseable
-     * `CMP <price>` — e.g. `Buying CMP 0.000552`. Also captures the start position of the
-     * price line so trailing cashtags after it are excluded from ticker extraction.
+     * unless the post carries KuCoin mention, both a buy context marker (`Buy`, `Buying`, …)
+     * and a parseable `CMP <price>` — e.g. `Buying CMP 0.000552`. Also captures the start position
+     * of the price line so trailing cashtags after it are excluded from ticker extraction.
      */
     private fun extractCmpPrice(text: String): CmpResult {
-        if (text.isBlank() || !hasBuyMarker(text)) return CmpResult(null, null)
+        if (text.isBlank() || !includesKucoin(text) || !hasBuyMarker(text)) return CmpResult(null, null)
 
         val matcher = cmpPricePattern.matcher(text)
         if (!matcher.find()) return CmpResult(null, null)

@@ -22,8 +22,10 @@ export type SignalCheckResult = {
 
 export const IGNORED_TAGS = new Set([
   'KUCOIN',
+  'KUCOINCOM',
   'MEXC',
   'BINANCE',
+  'BINACE',
   'BYBIT',
   'GATEIO',
   'OKX',
@@ -293,16 +295,33 @@ function extractTPs(text: string): TPsResult {
   return { tps, firstTpIndex };
 }
 
+/**
+ * Checks if the notification text mentions KuCoin (by name, handle, hashtag, or URL).
+ */
+export function includesKucoin(text: string): boolean {
+  return /ku\s*[-_]?\s*coin/i.test(text);
+}
+
+/**
+ * Checks if the notification text mentions another exchange (e.g. Binance, Bybit, MEXC, etc.).
+ * Includes common misspellings like 'binace'.
+ */
+export function hasOtherExchangeMention(text: string): boolean {
+  return /(?:@|#|\b)(?:binance|binace|bybit|mexc|gateio|gate\.io|gate_io|okx|okex|bitget|coinbase|kraken|htx|huobi|bingx|bitfinex|upbit|coinex|phemex|bitmart|lbank)\b/i.test(
+    text
+  );
+}
+
 function hasGemMarker(text: string): boolean {
   const normalized = text.toLowerCase().replace(/[^a-z0-9]/g, '');
   return normalized.includes('buyingthisgemonkucoin');
 }
 
 /**
- * Cmp-format anchor, mirroring the native listener: a "buy" context marker (covers `Buying`,
- * `Buy`, … after letters/digits-only normalization) plus a literal `CMP <price>` — e.g.
- * `$CHO on Kucoin Buying CMP 0.000552 Keeping high targets SL manage`. The word `CMP` is the
- * anchor because it carries an exact closing price, unlike prose ("high targets", "SL manage").
+ * Cmp-format anchor, mirroring the native listener: KuCoin must be explicitly mentioned,
+ * plus a "buy" context marker (covers `Buying`, `Buy`, … after letters/digits-only normalization)
+ * and a literal `CMP <price>` — e.g. `$CHO on Kucoin Buying CMP 0.000552 Keeping high targets SL manage`.
+ * Posts for other exchanges or posts not mentioning KuCoin are ignored.
  */
 function hasBuyMarker(text: string): boolean {
   const normalized = text.toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -310,7 +329,7 @@ function hasBuyMarker(text: string): boolean {
 }
 
 function extractCmpEntry(text: string): { entry: string | null; priceIndex: number | null } {
-  if (!hasBuyMarker(text)) return { entry: null, priceIndex: null };
+  if (!includesKucoin(text) || !hasBuyMarker(text)) return { entry: null, priceIndex: null };
   const match = text.match(/\bCMP\b\s*[-–:=]?\s*([\d.,]+)/i);
   if (!match || match.index === undefined) return { entry: null, priceIndex: null };
   const normalized = match[1].replace(',', '.');
@@ -325,7 +344,7 @@ function extractCmpEntry(text: string): { entry: string | null; priceIndex: numb
  */
 function extractGemEntry(text: string): { entry: string | null; priceIndex: number | null } {
   if (!hasGemMarker(text)) return { entry: null, priceIndex: null };
-  const match = text.match(/current\s+market\s+price\s*[-–:]?\s*([\d.,]+)/i);
+  const match = text.match(/current\s+(?:market\s+)?price\s*[-–:]?\s*([\d.,]+)/i);
   if (!match || match.index === undefined) return { entry: null, priceIndex: null };
   const normalized = match[1].replace(',', '.');
   const valid = /^\d+(\.\d+)?$/.test(normalized) ? normalized : null;
@@ -336,6 +355,11 @@ export function checkForSignal(notification: XNotification): SignalCheckResult {
   const primaryText = notification.bigText?.trim() || notification.text?.trim() || '';
 
   if (!primaryText) {
+    return { isSignal: false, format: null, ticker: null, tp1: null, tpCount: 0, entry: null };
+  }
+
+  // Reject signals that mention another exchange unless KuCoin is also included.
+  if (hasOtherExchangeMention(primaryText) && !includesKucoin(primaryText)) {
     return { isSignal: false, format: null, ticker: null, tp1: null, tpCount: 0, entry: null };
   }
 
