@@ -49,4 +49,13 @@ object SmartDns : Dns {
   fun recordSuccess(hostname: String, address: InetAddress) {
     lastGood[hostname] = address
   }
+
+  /**
+   * Discards every pinned last-good address — the manual-reconnect contract: the user has
+   * declared the current route dead for good, so the next dial must resolve DNS fresh instead
+   * of trying the remembered address first and burning the timeout on a blackholed path.
+   */
+  fun clearLastGood() {
+    lastGood.clear()
+  }
 }

@@ -17,6 +17,7 @@ import com.facebook.react.bridge.WritableMap
 import com.facebook.react.modules.core.DeviceEventManagerModule
 import com.oxsabbir.snaptrade.NotificationListener
 import com.oxsabbir.snaptrade.network.NetworkHardening
+import com.oxsabbir.snaptrade.network.SmartDns
 
 class NotificationListenerModule(reactContext: ReactApplicationContext) :
     ReactContextBaseJavaModule(reactContext) {
@@ -139,6 +140,17 @@ class NotificationListenerModule(reactContext: ReactApplicationContext) :
     @ReactMethod
     fun syncKeepaliveMode(enabled: Boolean, promise: Promise) {
         NetworkHardening.setTradingMode(reactApplicationContext.applicationContext, enabled)
+        promise.resolve(Unit)
+    }
+
+    /**
+     * Manual-reconnect support: drop [SmartDns]'s pinned last-good IP so the next dial resolves
+     * DNS fresh instead of retrying the address the user just proved dead. Same low-friction
+     * bridge pattern as the permission/battery methods above.
+     */
+    @ReactMethod
+    fun clearDnsCache(promise: Promise) {
+        SmartDns.clearLastGood()
         promise.resolve(Unit)
     }
 

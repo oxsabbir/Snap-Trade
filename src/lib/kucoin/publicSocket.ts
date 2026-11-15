@@ -29,7 +29,7 @@
  * Status is shared: every subscriber sees the connection's state, which is what keeps the
  * dots on different screens describing the same wire.
  */
-import { AppState } from 'react-native';
+import { AppState, NativeModules, Platform } from 'react-native';
 import * as Network from 'expo-network';
 
 import { fetchPublicBullet, invalidatePublicBullet, wakeRadio, type BulletServer } from './bullet';
@@ -63,6 +63,28 @@ export type TopicAttachments = {
   onMessage: (message: PublicTopicMessage) => void;
   onStatus?: (status: SocketStatus) => void;
 };
+
+/**
+ * The Android bridge module that mirrors the signal settings also hosts the DNS controls:
+ * `clearDnsCache` discards SmartDns's pinned last-good address so a manual reconnect resolves
+ * fresh instead of re-dialling the IP the user just proved dead.
+ */
+const NativeBridge = NativeModules as {
+  NotificationListenerModule?: {
+    clearDnsCache?: () => void;
+  };
+};
+
+/** Drops SmartDns's pinned last-good IP (Android only; a no-op elsewhere). */
+function clearNativeDnsCache(): void {
+  if (Platform.OS !== 'android') return;
+  try {
+    NativeBridge.NotificationListenerModule?.clearDnsCache?.();
+    socketLog('dns:clear', 'native last-good IP discarded');
+  } catch (error) {
+    socketLogFailure('dns:clear', error instanceof Error ? error.message : String(error));
+  }
+}
 
 /**
  * Milliseconds a dial may take before it is declared hung. The native layer sets OkHttp
@@ -132,6 +154,13 @@ let lastPingAt = 0;
  * the connection the moment reachability returns.
  */
 let offline = false;
+/**
+ * Set by the manual reconnect: the next dial's race lane starts at 0ms instead of
+ * {@link RACE_DELAY_MS} behind the primary. The user has declared the wire dead for good, so
+ * waiting out the head start before testing a second carrier path is time burned on a route
+ * they already gave up on. Consumed (and reset) by the next {@link connectNow}.
+ */
+let raceImmediately = false;
 
 /**
  * Debug freeze (the tools' "simulate a dead connection"): while active, incoming frames are
@@ -231,6 +260,20 @@ async function networkKind(): Promise<string> {
   }
 }
 
+/**
+ * The OS's reachability answer right now, as a definitive boolean. `undefined` (still
+ * evaluating) and a failed query both count as reachable: the dial itself is the proof, and
+ * treating an unknown as unreachable is how the offline latch used to freeze.
+ */
+async function isReachableNow(): Promise<boolean> {
+  try {
+    const state = await Network.getNetworkStateAsync();
+    return state.isInternetReachable !== false;
+  } catch {
+    return true;
+  }
+}
+
 /** Topic frames the app wants, replayed after every welcome and on every reconnect. */
 function sendSubscribes(): void {
   if (!socket || socket.readyState !== WebSocket.OPEN) return;
@@ -280,11 +323,35 @@ function forceClose(reason: string): void {
   scheduleReconnect();
 }
 
+/**
+ * Exits a dial attempt that armed nothing. `connectNow` sets the status to 'connecting' before
+ * its awaits; any early return after that point must hand the status back to reality instead
+ * of leaving a 'connecting' dot over a manager with no socket, racer, or timer in flight —
+ * that frozen dot is exactly the bug the latch fix targets. When something IS armed (a socket
+ * exists, a reconnect is scheduled), the owner of that state manages the status and this
+ * no-ops.
+ */
+function settleUnarmedDial(): void {
+  if (socket || racer || reconnectTimer || welcomeTimer) return;
+  setStatus('offline');
+}
+
 async function connectNow(fromWarm = false): Promise<void> {
   if (socket || racer) return;
   if (!fromWarm && topics.size === 0) return;
   if (welcomeTimer) return;
-  if (offline) return;
+  if (offline) {
+    // The latch is a cached answer, not a verdict: re-ask the OS at dial time. A transient
+    // `isInternetReachable === false` event used to latch this flag while nothing was
+    // subscribed — no listener event ever cleared it, and every later dial silently returned
+    // at this line, freezing the dot red until a data toggle happened to fix it.
+    if (!(await isReachableNow())) {
+      socketLog('dial:blocked', 'no reachable internet at dial time');
+      return;
+    }
+    offline = false;
+    socketLog('offline:cleared', 'reachable again at dial time');
+  }
   if (topics.size === 0 && reconnectTimer) {
     // Reconnects triggered by AppState/network events skip the ladder wait entirely.
     clearReconnectTimer();
@@ -300,15 +367,22 @@ async function connectNow(fromWarm = false): Promise<void> {
       error instanceof Error ? error.message : String(error)
     );
     scheduleReconnect();
+    settleUnarmedDial();
     return;
   }
-  if (socket || racer || (!fromWarm && topics.size === 0)) return;
+  if (socket || racer || (!fromWarm && topics.size === 0)) {
+    settleUnarmedDial();
+    return;
+  }
 
   const servers: BulletServer[] = bullet.servers;
   const server = servers[attempt % servers.length]!;
   const net = await networkKind();
   // Parked while the token fetch and the network-state read were in flight: dial nothing.
-  if (offline || socket || racer || (!fromWarm && topics.size === 0)) return;
+  if (offline || socket || racer || (!fromWarm && topics.size === 0)) {
+    settleUnarmedDial();
+    return;
+  }
 
   const dialAt = Date.now();
   socketLog('dial', `${hostOf(server.endpoint)} attempt=${attempt} net=${net}`);
@@ -328,12 +402,16 @@ async function connectNow(fromWarm = false): Promise<void> {
   // Race dial: if the primary is still handshaking, a second dial to the same host runs in
   // parallel. The winner is whoever opens first; `promoteRacer` / the primary's `onopen`
   // resolve the race and the loser is detached before anything can deliver through it.
+  // A manual reconnect starts the second lane immediately — the user already declared the
+  // first one's route dead, so it gets no head start to burn.
+  const raceDelay = raceImmediately ? 0 : RACE_DELAY_MS;
+  raceImmediately = false;
   raceTimer = setTimeout(() => {
     raceTimer = null;
     if (socket !== ws || ws.readyState !== WebSocket.CONNECTING) return;
     socketLog('race:start', `${hostOf(server.endpoint)} second dial after ${Date.now() - dialAt}ms`);
     startRacer(url, server.endpoint, net, dialAt);
-  }, RACE_DELAY_MS);
+  }, raceDelay);
 
   ws.onopen = () => {
     if (socket !== ws) return;
@@ -680,6 +758,11 @@ export function reconnectPublicSocket(): void {
   if (topics.size === 0) return;
   socketLog('reconnect:manual');
   invalidatePublicBullet();
+  clearNativeDnsCache();
+  // The button's contract is "the wire is dead for good": the second race lane starts at
+  // 0ms instead of 800ms behind the first, so a dead-path first dial can't eat the head
+  // start the way it did when the button behaved worse than a data toggle.
+  raceImmediately = true;
   kick();
 }
 
@@ -692,14 +775,23 @@ export function reconnectPublicSocket(): void {
  * broken. Anything older, half-open, or mid-retry gets the full kick.
  */
 function onForeground(): void {
-  if (topics.size === 0) return;
-  if (socket && socket.readyState === WebSocket.OPEN && Date.now() - lastServerAt < RESUME_FRESH_WINDOW_MS) {
-    socketLog('resume', 'session fresh — kept, probing');
-    socket.send(JSON.stringify({ id: Date.now(), type: 'ping' }));
-    lastPingAt = Date.now();
-    return;
-  }
-  kick();
+  void (async () => {
+    if (topics.size === 0) return;
+    if (socket && socket.readyState === WebSocket.OPEN && Date.now() - lastServerAt < RESUME_FRESH_WINDOW_MS) {
+      socketLog('resume', 'session fresh — kept, probing');
+      socket.send(JSON.stringify({ id: Date.now(), type: 'ping' }));
+      lastPingAt = Date.now();
+      return;
+    }
+    // A resume into a radio the OS still reports as dead (airplane mode, dead cell hand-off)
+    // is parked, not hammered: every dial would fail, and `parkOffline` arms the network
+    // listener to revive on the first reachable event instead.
+    if (!(await isReachableNow())) {
+      parkOffline();
+      return;
+    }
+    kick();
+  })();
 }
 
 AppState.addEventListener('change', (state) => {
@@ -720,6 +812,13 @@ Network.addNetworkStateListener((event) => {
   if (event.isInternetReachable === false) {
     parkOffline();
     return;
+  }
+  // Definitively reachable: clear the offline latch no matter how many topics exist. With
+  // zero subscribers there is no kick to piggyback the clear on — leaving it latched used to
+  // block every future dial (warm boot, pair switch) until the next false event's fix.
+  if (event.isInternetReachable === true && offline) {
+    offline = false;
+    socketLog('offline:cleared', 'network reachable again');
   }
   // Reachable (or re-evaluating): a burst of events as radios settle collapses to one kick.
   if (kickTimer) return;
