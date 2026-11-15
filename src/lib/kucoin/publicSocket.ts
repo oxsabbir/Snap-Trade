@@ -87,15 +87,15 @@ function clearNativeDnsCache(): void {
 }
 
 /**
- * Milliseconds a dial may take before it is declared hung. The native layer sets OkHttp
- * connectTimeout to the same value on Android; this is the JS-side authority (iOS and other
- * runtimes have no such native hook).
+ * Milliseconds a dial may take before it is declared hung. Set to 10s so mobile carrier
+ * networks (e.g. high-latency cellular in South Asia / GP) have sufficient time to complete
+ * DNS + TCP + TLS handshakes without premature aborts.
  */
-const CONNECT_TIMEOUT_MS = 3_000;
+const CONNECT_TIMEOUT_MS = 10_000;
 /** Welcome must arrive this fast after an open, or the session is treated as unusable. */
-const WELCOME_TIMEOUT_MS = 5_000;
-/** Nothing from the server within 5s of a client ping → the route is dead. Force-close. */
-const PONG_TIMEOUT_MS = 5_000;
+const WELCOME_TIMEOUT_MS = 10_000;
+/** Nothing from the server within 8s of a client ping → the route is dead. Force-close. */
+const PONG_TIMEOUT_MS = 8_000;
 const RETRY_DELAYS_MS = [0, 300, 1_000, 2_000] as const;
 /** Network-state listeners fire in bursts (data ↔ VPN ↔ Wi-Fi); one reconnect per burst. */
 const KICK_DEBOUNCE_MS = 250;
@@ -110,10 +110,12 @@ const KICK_DEBOUNCE_MS = 250;
 const RESUME_FRESH_WINDOW_MS = 20_000;
 /**
  * When the first dial is still CONNECTING after this, a second dial to the same host starts
- * in parallel. Short enough to beat the 3s deadline meaningfully, long enough that the common
- * case (first dial opens fine) never pays a second connection.
+ * in parallel. On mobile data where international RTT is high, racing too quickly (e.g. 800ms)
+ * splits cellular uplink bandwidth while the primary is still in TLS; we give mobile 5s before
+ * racing, while Wi-Fi can race after 1.5s.
  */
-const RACE_DELAY_MS = 800;
+const RACE_DELAY_WIFI_MS = 1_500;
+const RACE_DELAY_MOBILE_MS = 5_000;
 /** How long a debug freeze runs before the watchdog declares the (simulated) zombie dead. */
 const DEBUG_FREEZE_VERDICT_MS = 5_000;
 /** Consecutive failed dials before the cached token is discarded and refetched. */
@@ -244,6 +246,7 @@ function noteDialFailure(): void {
   if (failedDials < FAILED_DIALS_BEFORE_REFETCH) return;
   socketLog('token:invalidate', `${FAILED_DIALS_BEFORE_REFETCH} consecutive failed dials`);
   invalidatePublicBullet();
+  clearNativeDnsCache();
   failedDials = 0;
 }
 
@@ -404,7 +407,11 @@ async function connectNow(fromWarm = false): Promise<void> {
   // resolve the race and the loser is detached before anything can deliver through it.
   // A manual reconnect starts the second lane immediately — the user already declared the
   // first one's route dead, so it gets no head start to burn.
-  const raceDelay = raceImmediately ? 0 : RACE_DELAY_MS;
+  const raceDelay = raceImmediately
+    ? 0
+    : net === 'mobile'
+      ? RACE_DELAY_MOBILE_MS
+      : RACE_DELAY_WIFI_MS;
   raceImmediately = false;
   raceTimer = setTimeout(() => {
     raceTimer = null;
@@ -820,6 +827,8 @@ Network.addNetworkStateListener((event) => {
     offline = false;
     socketLog('offline:cleared', 'network reachable again');
   }
+  // Discard pinned DNS IPs on network transition so carrier routing resolves fresh.
+  clearNativeDnsCache();
   // Reachable (or re-evaluating): a burst of events as radios settle collapses to one kick.
   if (kickTimer) return;
   kickTimer = setTimeout(() => {

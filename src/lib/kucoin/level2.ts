@@ -121,10 +121,11 @@ export class Level2Socket {
         // Discarded if this instance moved on, was stopped, or the stream is already live —
         // in every such case a frame (never the seed) is the book's authority now.
         if (this.session !== session || !this.release || this.deliveredFirstFrame) return;
+        if (snapshot.asks.length === 0 && snapshot.bids.length === 0) return;
         socketLog('book:rest-seed', this.symbol);
         this.replace(snapshot.asks, snapshot.bids);
         this.bookTime = Date.now();
-        this.markDirty();
+        this.listener.onSnapshot(this.snapshot());
       })
       .catch(() => {
         // No seed is survivable: the depth channel will paint on the next market change.

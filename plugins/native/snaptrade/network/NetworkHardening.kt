@@ -96,8 +96,8 @@ object NetworkHardening {
 object WebSocketClientCustomizer : com.facebook.react.modules.network.CustomClientBuilder {
   override fun apply(builder: OkHttpClient.Builder) {
     builder
-      .connectTimeout(3, TimeUnit.SECONDS)
-      .writeTimeout(5, TimeUnit.SECONDS)
+      .connectTimeout(10, TimeUnit.SECONDS)
+      .writeTimeout(10, TimeUnit.SECONDS)
       .readTimeout(0, TimeUnit.MINUTES)
       .eventListenerFactory(SuccessListenerFactory)
     // Native protocol-level keepalive, independent of the JS thread: when the app is
