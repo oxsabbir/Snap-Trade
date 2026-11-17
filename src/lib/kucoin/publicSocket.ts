@@ -938,15 +938,12 @@ export function subscribeTopic(
 ): () => void {
   let entry = topics.get(topic);
   const isNewTopic = !entry;
-  const isStale =
-    status === 'live' && (!lastServerAt || Date.now() - lastServerAt > RESUME_FRESH_WINDOW_MS);
 
   if (!entry) {
     entry = {
       handlers: new Set(),
-      // Provenance for the first frame this topic delivers: a session that was already live
-      // serves the frame warm; a registration that starts the dial serves it fresh.
-      firstFrameOrigin: status === 'live' && !isStale ? 'warm' : 'fresh',
+      // In reconnect-everytime mode, every new topic subscription connects fresh
+      firstFrameOrigin: 'fresh',
     };
     topics.set(topic, entry);
   }
@@ -961,10 +958,10 @@ export function subscribeTopic(
   }
 
   if (status === 'live') {
-    if (isNewTopic && isStale) {
+    if (isNewTopic) {
       socketLog(
-        'subscribe:stale-wire',
-        `wire silent for ${Math.round((Date.now() - lastServerAt) / 1000)}s — kicking fresh wire for ${topic}`
+        'subscribe:fresh-wire',
+        `new topic ${topic} — kicking fresh wire for guaranteed clean carrier route`
       );
       entry.firstFrameOrigin = 'fresh';
       kick();
