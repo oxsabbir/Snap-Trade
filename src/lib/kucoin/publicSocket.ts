@@ -120,6 +120,12 @@ const RACE_DELAY_MOBILE_MS = 5_000;
 const DEBUG_FREEZE_VERDICT_MS = 5_000;
 /** Consecutive failed dials before the cached token is discarded and refetched. */
 const FAILED_DIALS_BEFORE_REFETCH = 3;
+/**
+ * Maximum time to wait for a subscribe ACK or first data frame before declaring the socket a zombie.
+ * On GP / carrier CGNAT, a dead socket drops frames silently without sending TCP RST; this catches
+ * a void subscribe in 4s instead of waiting 25s for the pong watchdog.
+ */
+const SUBSCRIBE_ACK_TIMEOUT_MS = 4_000;
 
 type TopicEntry = {
   handlers: Set<TopicAttachments['onMessage']>;
@@ -198,7 +204,64 @@ function hostOf(endpoint: string): string {
   }
 }
 
+type PendingAck = {
+  id: string;
+  topic: string;
+  timer: ReturnType<typeof setTimeout>;
+};
+
+const pendingAcksById = new Map<string, PendingAck>();
+const pendingAcksByTopic = new Map<string, PendingAck>();
+
+function clearPendingAcks(): void {
+  for (const pending of pendingAcksById.values()) {
+    clearTimeout(pending.timer);
+  }
+  pendingAcksById.clear();
+  pendingAcksByTopic.clear();
+}
+
+function resolvePendingAck(id?: unknown, topic?: unknown): void {
+  const byId =
+    typeof id === 'string' || typeof id === 'number'
+      ? pendingAcksById.get(String(id))
+      : undefined;
+  const byTopic = typeof topic === 'string' ? pendingAcksByTopic.get(topic) : undefined;
+  const match = byId ?? byTopic;
+  if (!match) return;
+
+  clearTimeout(match.timer);
+  pendingAcksById.delete(match.id);
+  pendingAcksByTopic.delete(match.topic);
+}
+
+function armSubscribeAck(topic: string, id: string): void {
+  const existing = pendingAcksByTopic.get(topic);
+  if (existing) {
+    clearTimeout(existing.timer);
+    pendingAcksById.delete(existing.id);
+    pendingAcksByTopic.delete(existing.topic);
+  }
+
+  const timer = setTimeout(() => {
+    pendingAcksById.delete(id);
+    pendingAcksByTopic.delete(topic);
+    if (!topics.has(topic)) return;
+    socketLogFailure(
+      'subscribe:timeout',
+      `no ack or frame for ${topic} within ${SUBSCRIBE_ACK_TIMEOUT_MS}ms — void subscribe on dead wire, kicking`
+    );
+    noteDialFailure();
+    kick();
+  }, SUBSCRIBE_ACK_TIMEOUT_MS);
+
+  const entry: PendingAck = { id, topic, timer };
+  pendingAcksById.set(id, entry);
+  pendingAcksByTopic.set(topic, entry);
+}
+
 function clearConnectTimers(): void {
+  clearPendingAcks();
   if (connectTimer) clearTimeout(connectTimer);
   if (welcomeTimer) clearTimeout(welcomeTimer);
   if (pingTimer) clearInterval(pingTimer);
@@ -281,9 +344,11 @@ async function isReachableNow(): Promise<boolean> {
 function sendSubscribes(): void {
   if (!socket || socket.readyState !== WebSocket.OPEN) return;
   for (const topic of topics.keys()) {
+    const id = `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    armSubscribeAck(topic, id);
     socket.send(
       JSON.stringify({
-        id: Date.now(),
+        id,
         type: 'subscribe',
         topic,
         response: true,
@@ -584,13 +649,15 @@ function handleFrame(raw: string, ws: WebSocket): void {
     case 'pong':
       return;
     case 'ack':
-      socketLog('subscribed', `topic=${message.topic ?? '-'}`);
+      resolvePendingAck(message.id, message.topic);
+      socketLog('subscribed', `topic=${message.topic ?? String(message.id ?? '-')}`);
       return;
     case 'error':
       socketLogFailure('server:error', JSON.stringify(message).slice(0, 200));
       return;
     case 'message': {
       if (typeof message.topic !== 'string' || message.data === undefined) return;
+      resolvePendingAck(undefined, message.topic);
       const entry = topics.get(message.topic);
       if (!entry) return;
       // First frame a topic receives: where did it come from — a connection that was already
@@ -757,6 +824,29 @@ export function warmConnection(): void {
 }
 
 /**
+ * Proactively verifies wire freshness (e.g. when switching tabs or focusing the trade screen).
+ * If the socket is marked 'live' but no traffic has arrived within {@link RESUME_FRESH_WINDOW_MS},
+ * Grameenphone or mobile carrier CGNAT has almost certainly dropped the silent TCP mapping.
+ * Kicks a fresh wire immediately with the cached token rather than waiting 25s for the watchdog.
+ */
+export function ensureFreshConnection(): boolean {
+  if (topics.size === 0) return false;
+  if (status === 'live' && socket && socket.readyState === WebSocket.OPEN) {
+    if (!lastServerAt || Date.now() - lastServerAt > RESUME_FRESH_WINDOW_MS) {
+      socketLog(
+        'wire:stale',
+        `last frame ${Date.now() - lastServerAt}ms ago (limit ${RESUME_FRESH_WINDOW_MS}ms) — kicking fresh wire`
+      );
+      kick();
+      return true;
+    }
+  } else if (status !== 'live') {
+    ensureConnection();
+  }
+  return false;
+}
+
+/**
  * Drops the shared connection *and* the cached dial answer, then redials immediately: the
  * reconnect button's contract is that the user believes the wire is dead for good — so the
  * endpoint resolution and the token are replaced along with it, not just re-dialled.
@@ -847,12 +937,16 @@ export function subscribeTopic(
   attachments: TopicAttachments
 ): () => void {
   let entry = topics.get(topic);
+  const isNewTopic = !entry;
+  const isStale =
+    status === 'live' && (!lastServerAt || Date.now() - lastServerAt > RESUME_FRESH_WINDOW_MS);
+
   if (!entry) {
     entry = {
       handlers: new Set(),
       // Provenance for the first frame this topic delivers: a session that was already live
       // serves the frame warm; a registration that starts the dial serves it fresh.
-      firstFrameOrigin: status === 'live' ? 'warm' : 'fresh',
+      firstFrameOrigin: status === 'live' && !isStale ? 'warm' : 'fresh',
     };
     topics.set(topic, entry);
   }
@@ -867,7 +961,16 @@ export function subscribeTopic(
   }
 
   if (status === 'live') {
-    sendSubscribes();
+    if (isNewTopic && isStale) {
+      socketLog(
+        'subscribe:stale-wire',
+        `wire silent for ${Math.round((Date.now() - lastServerAt) / 1000)}s — kicking fresh wire for ${topic}`
+      );
+      entry.firstFrameOrigin = 'fresh';
+      kick();
+    } else {
+      sendSubscribes();
+    }
   } else {
     ensureConnection();
   }
@@ -880,6 +983,12 @@ export function subscribeTopic(
     if (attachments.onStatus) statusListeners.delete(attachments.onStatus);
     if (target.handlers.size > 0) return;
     topics.delete(topic);
+    const pending = pendingAcksByTopic.get(topic);
+    if (pending) {
+      clearTimeout(pending.timer);
+      pendingAcksById.delete(pending.id);
+      pendingAcksByTopic.delete(topic);
+    }
     if (status === 'live' && socket && socket.readyState === WebSocket.OPEN) {
       socket.send(
         JSON.stringify({ id: Date.now(), type: 'unsubscribe', topic, response: true })
