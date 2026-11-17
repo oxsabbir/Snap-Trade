@@ -100,16 +100,9 @@ object WebSocketClientCustomizer : com.facebook.react.modules.network.CustomClie
       .writeTimeout(10, TimeUnit.SECONDS)
       .readTimeout(0, TimeUnit.MINUTES)
       .eventListenerFactory(SuccessListenerFactory)
-    // Native protocol-level keepalive, independent of the JS thread: when the app is
-    // backgrounded (or the screen is off and JS timers are throttled or the process
-    // frozen), these pings keep the carrier NAT mapping for the socket alive. Without
-    // them a 20-30 minute idle lets the mapping expire, and the "open" socket becomes a
-    // zombie: sends vanish, and coming back needs a data toggle before anything lands.
-    // A missed pong closes the socket natively, which the JS layer sees as a normal close.
-    // Gated at dial time: foreground always; background only with trading mode on.
-    if (NetworkHardening.keepaliveEnabled) {
-      builder.pingInterval(20, TimeUnit.SECONDS)
-    }
+    // Native protocol-level keepalive, independent of the JS thread: sends lightweight (2-byte)
+    // pings every 20s while the WebSocket is open, keeping the carrier NAT mapping alive on GP.
+    builder.pingInterval(20, TimeUnit.SECONDS)
   }
 }
 
@@ -165,6 +158,9 @@ class SuccessListener : EventListener() {
     protocol: Protocol?,
     failure: IOException
   ) {
+    call.request().url.host.let { host ->
+      SmartDns.recordFailure(host, inetSocketAddress.address)
+    }
     Log.d(
       NetworkHardening.TAG,
       "${System.currentTimeMillis()} ConnectFailed ${call.request().url.host} ${failure.message}"

@@ -107,7 +107,7 @@ const KICK_DEBOUNCE_MS = 250;
  * route while backgrounded — and the immediate ping fired alongside the skip means an
  * accidentally-kept dead one is announced by the pong watchdog in ~5s, not a heartbeat slot.
  */
-const RESUME_FRESH_WINDOW_MS = 20_000;
+const RESUME_FRESH_WINDOW_MS = 10_000;
 /**
  * When the first dial is still CONNECTING after this, a second dial to the same host starts
  * in parallel. On mobile data where international RTT is high, racing too quickly (e.g. 800ms)

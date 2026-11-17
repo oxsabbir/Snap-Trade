@@ -51,6 +51,16 @@ object SmartDns : Dns {
   }
 
   /**
+   * Called when a connection attempt to an address fails, evicting it immediately so subsequent
+   * dials do not repeat attempts to a dead or blackholed carrier route.
+   */
+  fun recordFailure(hostname: String, address: InetAddress?) {
+    if (address != null && lastGood[hostname] == address) {
+      lastGood.remove(hostname)
+    }
+  }
+
+  /**
    * Discards every pinned last-good address — the manual-reconnect contract: the user has
    * declared the current route dead for good, so the next dial must resolve DNS fresh instead
    * of trying the remembered address first and burning the timeout on a blackholed path.
