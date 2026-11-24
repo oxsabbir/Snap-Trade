@@ -143,10 +143,14 @@ export default function MarketsScreen() {
     [markets],
   );
 
-  const quoteFilter: QuoteFilter =
-    tab === FAVORITES_TAB ? "All" : (tab as QuoteFilter);
   // Debounce the search query to avoid re-filtering on every keystroke
   const activeQuery = useDebouncedValue(search.trim(), 300);
+  const quoteFilter: QuoteFilter =
+    tab === FAVORITES_TAB
+      ? "All"
+      : tab === "All" && activeQuery.length === 0
+        ? "USDT"
+        : (tab as QuoteFilter);
 
   const visibleMarkets = useMemo(() => {
     const source =
