@@ -65,7 +65,6 @@ export const TradeScreen = memo(function TradeScreen({
       <View style={styles.row}>
         <View style={styles.book}>
           <OrderBook
-            key={symbol}
             symbol={symbol}
             takerFeeRate={takerFeeRate}
             onPriceSelect={handlePriceSelect}

@@ -45,6 +45,9 @@ type DepthPayload = {
   timestamp?: unknown;
 };
 
+const PREFETCH_TTL_MS = 2_000;
+const snapshotPrefetch = new Map<string, { at: number; promise: Promise<Level2Snapshot> }>();
+
 /** The REST seed remains available for callers that want an explicit book snapshot. */
 export async function fetchOrderBookSnapshot(symbol: string): Promise<Level2Snapshot> {
   const data = await request<{ sequence?: unknown; asks?: unknown; bids?: unknown }>(
@@ -64,6 +67,25 @@ export async function fetchOrderBookSnapshot(symbol: string): Promise<Level2Snap
   };
 }
 
+/**
+ * Starts the REST seed early (e.g. on finger press-in) and reuses the in-flight promise
+ * when `Level2Socket.start()` runs milliseconds later.
+ */
+export function prefetchOrderBookSnapshot(symbol: string): Promise<Level2Snapshot> {
+  const now = Date.now();
+  const cached = snapshotPrefetch.get(symbol);
+  if (cached && now - cached.at < PREFETCH_TTL_MS) {
+    return cached.promise;
+  }
+  const promise = fetchOrderBookSnapshot(symbol);
+  snapshotPrefetch.set(symbol, { at: now, promise });
+  promise.catch(() => {
+    const current = snapshotPrefetch.get(symbol);
+    if (current?.promise === promise) snapshotPrefetch.delete(symbol);
+  });
+  return promise;
+}
+
 export class Level2Socket {
   /** Defines the scope of delivery: frames from one session never outlive their instance. */
   private readonly session = Symbol('level2-session');
@@ -72,8 +94,8 @@ export class Level2Socket {
   private dirty = false;
   private deliveredFirstFrame = false;
   private bookTime = 0;
-  private readonly asks = new Map<string, string>();
-  private readonly bids = new Map<string, string>();
+  private asks: PriceLevel[] = [];
+  private bids: PriceLevel[] = [];
 
   constructor(
     private readonly symbol: string,
@@ -93,13 +115,20 @@ export class Level2Socket {
         const bids = parseLevels(depth.bids);
         if (asks.length === 0 && bids.length === 0) return;
 
+        this.replace(asks, bids);
+        if (typeof depth.timestamp === 'number') this.bookTime = depth.timestamp;
         if (!this.deliveredFirstFrame) {
           // Provenance of the first frame (warm vs fresh dial) is logged by the shared socket
           // manager now — this instance only tracks it for the REST-seed handoff below.
           this.deliveredFirstFrame = true;
+          if (this.flushTimer) {
+            clearTimeout(this.flushTimer);
+            this.flushTimer = null;
+          }
+          this.dirty = false;
+          this.listener.onSnapshot(this.snapshot());
+          return;
         }
-        this.replace(asks, bids);
-        if (typeof depth.timestamp === 'number') this.bookTime = depth.timestamp;
         this.markDirty();
       },
       onStatus: (status: Level2Status) => {
@@ -116,7 +145,7 @@ export class Level2Socket {
     // and every Depth50 frame replaces the whole book wholesale, so a seed that just survived
     // being slightly stale is overwritten within one market change — no sequence gating, no
     // buffer, no resync needed.
-    void fetchOrderBookSnapshot(this.symbol)
+    void prefetchOrderBookSnapshot(this.symbol)
       .then((snapshot) => {
         // Discarded if this instance moved on, was stopped, or the stream is already live —
         // in every such case a frame (never the seed) is the book's authority now.
@@ -142,17 +171,15 @@ export class Level2Socket {
     this.dirty = false;
     // Drop a book that was merged but not yet emitted, so a stopped view cannot deliver the
     // previous pair's depth into whatever view has moved on.
-    this.asks.clear();
-    this.bids.clear();
+    this.asks = [];
+    this.bids = [];
     this.bookTime = 0;
     this.deliveredFirstFrame = false;
   }
 
   private replace(asks: PriceLevel[], bids: PriceLevel[]): void {
-    this.asks.clear();
-    this.bids.clear();
-    for (const level of asks) this.asks.set(level.price, level.size);
-    for (const level of bids) this.bids.set(level.price, level.size);
+    this.asks = asks;
+    this.bids = bids;
   }
 
   private markDirty(): void {
@@ -169,8 +196,8 @@ export class Level2Socket {
   private snapshot(): Level2Snapshot {
     return {
       symbol: this.symbol,
-      asks: [...this.asks].map(([price, size]) => ({ price, size })),
-      bids: [...this.bids].map(([price, size]) => ({ price, size })),
+      asks: this.asks,
+      bids: this.bids,
       time: this.bookTime || Date.now(),
     };
   }

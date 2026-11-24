@@ -156,13 +156,19 @@ function sidePercent(part: string, whole: string): number {
  * Everything downstream of the trim is computed over the trimmed levels, so the numbers on screen
  * agree with each other.
  */
+function isSnapshot(raw: unknown): raw is Level2Snapshot {
+  if (!raw || typeof raw !== 'object') return false;
+  const candidate = raw as Partial<Level2Snapshot>;
+  return Array.isArray(candidate.asks) && Array.isArray(candidate.bids);
+}
+
 export function buildDepth(
   raw: unknown,
   aggregation?: string | null,
   maxLevels: number = VISIBLE_LEVELS
 ): OrderBookDepth {
-  const snapshot = parseLevel2(raw);
-  if (!snapshot) return EMPTY_DEPTH;
+  const snapshot = isSnapshot(raw) ? raw : parseLevel2(raw);
+  if (!snapshot || (snapshot.asks.length === 0 && snapshot.bids.length === 0)) return EMPTY_DEPTH;
 
   const limit = Math.max(0, Math.floor(maxLevels));
   // Aggregate first, then trim: a coarse step can fold several raw levels into one bucket, and

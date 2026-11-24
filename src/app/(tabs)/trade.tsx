@@ -1,7 +1,5 @@
-import { useEffect } from "react";
 import {
   router,
-  useIsFocused,
 } from "expo-router";
 import { Pressable, View } from '@/components/AppLayout';
 import { StyleSheet } from 'react-native';
@@ -9,20 +7,12 @@ import { Text } from '@/components/AppText';
 
 import { TradeRouteView } from "@/components/TradeRouteView";
 import { useActiveCoin } from "@/state/activeCoin";
-import { ensureFreshConnection } from "@/lib/kucoin/publicSocket";
 import { radius, spacing } from "@/theme";
 import { createThemedStyles } from "@/theme/themedStyles";
 
 export default function TradeScreenRoute() {
   const coin = useActiveCoin();
   const styles = useStyles();
-  const isFocused = useIsFocused();
-
-  useEffect(() => {
-    if (isFocused && coin) {
-      ensureFreshConnection();
-    }
-  }, [isFocused, coin]);
 
   if (!coin) {
     return (

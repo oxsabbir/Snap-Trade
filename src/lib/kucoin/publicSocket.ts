@@ -107,7 +107,7 @@ const KICK_DEBOUNCE_MS = 250;
  * route while backgrounded — and the immediate ping fired alongside the skip means an
  * accidentally-kept dead one is announced by the pong watchdog in ~5s, not a heartbeat slot.
  */
-const RESUME_FRESH_WINDOW_MS = 10_000;
+const RESUME_FRESH_WINDOW_MS = 20_000;
 /**
  * When the first dial is still CONNECTING after this, a second dial to the same host starts
  * in parallel. On mobile data where international RTT is high, racing too quickly (e.g. 800ms)
@@ -126,6 +126,12 @@ const FAILED_DIALS_BEFORE_REFETCH = 3;
  * a void subscribe in 4s instead of waiting 25s for the pong watchdog.
  */
 const SUBSCRIBE_ACK_TIMEOUT_MS = 4_000;
+/**
+ * Grace period before parking the socket after the last topic unsubscribes. Prevents a 1ms
+ * React effect-cleanup gap during pair switches (or brief browsing on the Home tab) from
+ * tearing down and cold-redialing a healthy WebSocket.
+ */
+const IDLE_PARK_DELAY_MS = 10_000;
 
 type TopicEntry = {
   handlers: Set<TopicAttachments['onMessage']>;
@@ -188,6 +194,13 @@ let watchdogTimer: ReturnType<typeof setInterval> | null = null;
 let kickTimer: ReturnType<typeof setTimeout> | null = null;
 let raceTimer: ReturnType<typeof setTimeout> | null = null;
 let racerDeadline: ReturnType<typeof setTimeout> | null = null;
+let idleParkTimer: ReturnType<typeof setTimeout> | null = null;
+
+function clearIdleParkTimer(): void {
+  if (!idleParkTimer) return;
+  clearTimeout(idleParkTimer);
+  idleParkTimer = null;
+}
 
 function setStatus(next: SocketStatus): void {
   if (status === next) return;
@@ -340,20 +353,26 @@ async function isReachableNow(): Promise<boolean> {
   }
 }
 
+/** Sends a single topic subscribe frame and arms its ACK watchdog. */
+function sendSubscribe(topic: string): void {
+  if (!socket || socket.readyState !== WebSocket.OPEN) return;
+  const id = `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+  armSubscribeAck(topic, id);
+  socket.send(
+    JSON.stringify({
+      id,
+      type: 'subscribe',
+      topic,
+      response: true,
+    })
+  );
+}
+
 /** Topic frames the app wants, replayed after every welcome and on every reconnect. */
 function sendSubscribes(): void {
   if (!socket || socket.readyState !== WebSocket.OPEN) return;
   for (const topic of topics.keys()) {
-    const id = `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-    armSubscribeAck(topic, id);
-    socket.send(
-      JSON.stringify({
-        id,
-        type: 'subscribe',
-        topic,
-        response: true,
-      })
-    );
+    sendSubscribe(topic);
   }
 }
 
@@ -713,6 +732,7 @@ function startHeartbeat(ws: WebSocket): void {
 function kick(): void {
   if (topics.size === 0) return;
   offline = false;
+  clearIdleParkTimer();
   clearReconnectTimer();
   clearConnectTimers();
   discardRacer('kick');
@@ -738,6 +758,7 @@ function kick(): void {
  * a reason that a later event (network return, foreground, new subscriber) revives from.
  */
 function parkAll(reason: string): void {
+  clearIdleParkTimer();
   clearReconnectTimer();
   clearConnectTimers();
   discardRacer(reason);
@@ -823,27 +844,9 @@ export function warmConnection(): void {
   void connectNow(true);
 }
 
-/**
- * Proactively verifies wire freshness (e.g. when switching tabs or focusing the trade screen).
- * If the socket is marked 'live' but no traffic has arrived within {@link RESUME_FRESH_WINDOW_MS},
- * Grameenphone or mobile carrier CGNAT has almost certainly dropped the silent TCP mapping.
- * Kicks a fresh wire immediately with the cached token rather than waiting 25s for the watchdog.
- */
-export function ensureFreshConnection(): boolean {
-  if (topics.size === 0) return false;
-  if (status === 'live' && socket && socket.readyState === WebSocket.OPEN) {
-    if (!lastServerAt || Date.now() - lastServerAt > RESUME_FRESH_WINDOW_MS) {
-      socketLog(
-        'wire:stale',
-        `last frame ${Date.now() - lastServerAt}ms ago (limit ${RESUME_FRESH_WINDOW_MS}ms) — kicking fresh wire`
-      );
-      kick();
-      return true;
-    }
-  } else if (status !== 'live') {
-    ensureConnection();
-  }
-  return false;
+/** Synchronous status of the shared socket so newly mounted screens never flash 'connecting' when already live. */
+export function getPublicSocketStatus(): SocketStatus {
+  return status;
 }
 
 /**
@@ -936,17 +939,16 @@ export function subscribeTopic(
   topic: string,
   attachments: TopicAttachments
 ): () => void {
+  clearIdleParkTimer();
   let entry = topics.get(topic);
   const isNewTopic = !entry;
-  const isStale =
-    status === 'live' && (!lastServerAt || Date.now() - lastServerAt > RESUME_FRESH_WINDOW_MS);
 
   if (!entry) {
     entry = {
       handlers: new Set(),
       // Provenance for the first frame this topic delivers: a session that was already live
       // serves the frame warm; a registration that starts the dial serves it fresh.
-      firstFrameOrigin: status === 'live' && !isStale ? 'warm' : 'fresh',
+      firstFrameOrigin: status === 'live' ? 'warm' : 'fresh',
     };
     topics.set(topic, entry);
   }
@@ -961,16 +963,7 @@ export function subscribeTopic(
   }
 
   if (status === 'live') {
-    if (isNewTopic && isStale) {
-      socketLog(
-        'subscribe:stale-wire',
-        `wire silent for ${Math.round((Date.now() - lastServerAt) / 1000)}s — kicking fresh wire for ${topic}`
-      );
-      entry.firstFrameOrigin = 'fresh';
-      kick();
-    } else {
-      sendSubscribes();
-    }
+    if (isNewTopic) sendSubscribe(topic);
   } else {
     ensureConnection();
   }
@@ -995,9 +988,13 @@ export function subscribeTopic(
       );
       socketLog('unsubscribed', topic);
     }
-    if (topics.size === 0) {
-      // Last listener gone — park the connection instead of streaming a market nobody watches.
-      parkAll('parked');
+    if (topics.size === 0 && !idleParkTimer) {
+      // Last listener gone — hold the warm wire through pair switches and brief browsing
+      // instead of tearing down and cold-redialing on a 1ms React effect gap.
+      idleParkTimer = setTimeout(() => {
+        idleParkTimer = null;
+        if (topics.size === 0) parkAll('parked');
+      }, IDLE_PARK_DELAY_MS);
     }
   };
 }

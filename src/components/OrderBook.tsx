@@ -126,10 +126,10 @@ function OrderBookBase({ symbol, takerFeeRate, onPriceSelect, onInitialSnapshot,
   const { colors } = useTheme();
   const styles = useStyles();
   const { snapshot, status } = useLevel2Book(symbol);
-  const initialSnapshotNotified = useRef(false);
+  const initialSnapshotSymbolRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!snapshot || initialSnapshotNotified.current) return;
-    initialSnapshotNotified.current = true;
+    if (!snapshot || initialSnapshotSymbolRef.current === symbol) return;
+    initialSnapshotSymbolRef.current = symbol;
     onInitialSnapshot?.(symbol);
   }, [snapshot, symbol, onInitialSnapshot]);
   const { rules } = useSymbolRules(symbol);
@@ -138,19 +138,24 @@ function OrderBookBase({ symbol, takerFeeRate, onPriceSelect, onInitialSnapshot,
   const showQuickBuy = quickBuyOverride ?? quickBuyByDefault;
   const [baseCurrency = "", quoteCurrency = ""] = symbol.split("-");
 
-  const [aggregation, setAggregation] = useState("0.000001");
+  const [aggregation, setAggregation] = useState(() => rules?.priceIncrement ?? "0.000001");
   const [viewMode, setViewMode] = useState<OrderBookViewMode>("split");
   const [pickerOpen, setPickerOpen] = useState(false);
 
   // Price step for the pair — also the base aggregation and the price formatting precision.
-  // Rules arrive asynchronously, so the first render has nothing real to go on. Re-basing
-  // during render switches to the pair's actual tick once it lands, rather than leaving the
-  // book aggregating at the fallback.
+  // `useSymbolRules` reads synchronously from the session cache when available, and switching
+  // pairs resets local overrides in place without unmounting the native row hierarchy.
   const tickSize = rules?.priceIncrement ?? "0.000001";
   const baseIncrement = rules?.baseIncrement ?? "0.000001";
 
-  const [activeTick, setActiveTick] = useState<string | null>(null);
-  if (activeTick !== tickSize) {
+  const [activeSymbol, setActiveSymbol] = useState(symbol);
+  const [activeTick, setActiveTick] = useState<string | null>(tickSize);
+  if (symbol !== activeSymbol || activeTick !== tickSize) {
+    if (symbol !== activeSymbol) {
+      setActiveSymbol(symbol);
+      setQuickBuyOverride(null);
+      setPickerOpen(false);
+    }
     setActiveTick(tickSize);
     setAggregation(tickSize);
   }
@@ -160,6 +165,7 @@ function OrderBookBase({ symbol, takerFeeRate, onPriceSelect, onInitialSnapshot,
     aggregation,
     viewMode === "split" ? VISIBLE_LEVELS : SINGLE_SIDE_LEVELS,
   );
+  const displayAsks = useMemo(() => [...depth.asks].reverse(), [depth.asks]);
   // Reserve the full depth area before the first REST snapshot arrives, so the columns do not
   // grow when the initial asks and bids are inserted. Split and single-sided modes both occupy
   // ten rows in total.
@@ -244,13 +250,13 @@ function OrderBookBase({ symbol, takerFeeRate, onPriceSelect, onInitialSnapshot,
           </View>
         ) : (
           <View style={[styles.asks, { height: depthRowsHeight }]}>
-            {[...depth.asks].reverse().map((row, index) => {
+            {displayAsks.map((row, index) => {
               const hasOrder =
                 userOrderPrices.askPrices.has(row.price) ||
                 userOrderPrices.askPrices.has(Number(row.price).toString());
               return (
                 <DepthRowView
-                  key={`ask:${depth.asks.length - 1 - index}`}
+                  key={`ask:${displayAsks.length - 1 - index}`}
                   row={row}
                   side="ask"
                   priceDecimals={priceDecimals}

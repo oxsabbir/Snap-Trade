@@ -9,8 +9,10 @@ import { router } from 'expo-router';
 import { CoinAvatar } from '@/components/CoinAvatar';
 import { StarIcon } from '@/components/Icons';
 import { RangeBar } from '@/components/RangeBar';
+import { prefetchOrderBookSnapshot } from '@/lib/kucoin/level2';
 import type { SpotMarket } from '@/lib/kucoin/types';
 import { useSetActiveCoin } from '@/state/activeCoin';
+import { prefetchTicker } from '@/state/ticker';
 import { spacing } from '@/theme';
 import { useTheme } from '@/theme/ThemeProvider';
 import { createThemedStyles } from '@/theme/themedStyles';
@@ -31,6 +33,11 @@ function SpotRowComponent({ market, isFavorite, onToggleFavorite }: Props) {
   const subtitle = market.baseName !== market.base ? `${market.baseName} · ${volume}` : volume;
   const setActiveCoin = useSetActiveCoin();
 
+  const prefetchPair = useCallback(() => {
+    void prefetchOrderBookSnapshot(market.symbol).catch(() => {});
+    prefetchTicker(market.symbol, 3_000);
+  }, [market.symbol]);
+
   const openTrade = useCallback(() => {
     setActiveCoin({
       symbol: market.symbol,
@@ -42,6 +49,7 @@ function SpotRowComponent({ market, isFavorite, onToggleFavorite }: Props) {
 
   return (
     <Pressable
+      onPressIn={prefetchPair}
       onPress={openTrade}
       accessibilityRole="button"
       accessibilityLabel={`Trade ${market.symbol}`}

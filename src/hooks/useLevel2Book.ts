@@ -3,11 +3,16 @@ import { AppState, type AppStateStatus } from 'react-native';
 
 import { Level2Socket, type Level2Status } from '@/lib/kucoin/level2';
 import type { Level2Snapshot } from '@/lib/kucoin/orderbook';
+import { getPublicSocketStatus } from '@/lib/kucoin/publicSocket';
 
 export type Level2BookState = {
   snapshot: Level2Snapshot | null;
   status: Level2Status;
 };
+
+function initialStatus(): Level2Status {
+  return getPublicSocketStatus() === 'live' ? 'live' : 'connecting';
+}
 
 /**
  * Owns the Level 2 connection for one pair and hands the UI the latest merged snapshot. The
@@ -17,7 +22,7 @@ export type Level2BookState = {
  */
 export function useLevel2Book(symbol: string): Level2BookState {
   const [snapshot, setSnapshot] = useState<Level2Snapshot | null>(null);
-  const [status, setStatus] = useState<Level2Status>('connecting');
+  const [status, setStatus] = useState<Level2Status>(initialStatus);
   const activeSocketRef = useRef<Level2Socket | null>(null);
 
   // Reset during render so a symbol switch never renders the previous pair's depth.
@@ -25,7 +30,7 @@ export function useLevel2Book(symbol: string): Level2BookState {
   if (symbol !== activeSymbol) {
     setActiveSymbol(symbol);
     setSnapshot(null);
-    setStatus('connecting');
+    setStatus(initialStatus);
   }
 
   useEffect(() => {

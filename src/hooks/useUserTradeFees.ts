@@ -1,27 +1,48 @@
 import { useEffect, useState } from 'react';
 
-import { fetchMarketStats } from '@/lib/kucoin/market';
-import { getKcsDiscountEnabled } from '@/state/kcsDiscount';
+import { fetchMarketStats, getCachedMarketStats } from '@/lib/kucoin/market';
+import { getCachedKcsDiscountEnabled, getKcsDiscountEnabled } from '@/state/kcsDiscount';
+
+function computeFeeRate(takerFeeRate: string, takerCoefficient: string, kcsEnabled: boolean): string {
+  // actual taker fee = base class rate × VIP coefficient × KCS discount
+  const base = parseFloat(takerFeeRate);
+  const coeff = parseFloat(takerCoefficient);
+  const kcsMult = kcsEnabled ? 0.8 : 1;
+  return (base * coeff * kcsMult).toFixed(6);
+}
+
+function initialFeeRate(symbol: string): string | null {
+  const kcsEnabled = getCachedKcsDiscountEnabled();
+  const stats = getCachedMarketStats(symbol);
+  if (kcsEnabled === null || !stats) return null;
+  return computeFeeRate(stats.takerFeeRate, stats.takerCoefficient, kcsEnabled);
+}
 
 export function useUserTradeFees(symbol: string): {
   takerFeeRate: string | null;
   isLoading: boolean;
 } {
-  const [takerFeeRate, setTakerFeeRate] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [activeSymbol, setActiveSymbol] = useState(symbol);
+  const [takerFeeRate, setTakerFeeRate] = useState<string | null>(() => initialFeeRate(symbol));
+  const [isLoading, setIsLoading] = useState(() => initialFeeRate(symbol) === null);
+
+  if (symbol !== activeSymbol) {
+    setActiveSymbol(symbol);
+    const cached = initialFeeRate(symbol);
+    setTakerFeeRate(cached);
+    setIsLoading(cached === null);
+  }
 
   useEffect(() => {
+    if (initialFeeRate(symbol) !== null) return;
     let cancelled = false;
     (async () => {
-      const kcsEnabled = await getKcsDiscountEnabled();
-      const stats = await fetchMarketStats(symbol);
+      const [kcsEnabled, stats] = await Promise.all([
+        getKcsDiscountEnabled(),
+        fetchMarketStats(symbol),
+      ]);
       if (cancelled) return;
-      // actual taker fee = base class rate × VIP coefficient × KCS discount
-      const base = parseFloat(stats.takerFeeRate);
-      const coeff = parseFloat(stats.takerCoefficient);
-      const kcsMult = kcsEnabled ? 0.8 : 1;
-      const actual = (base * coeff * kcsMult).toFixed(6);
-      setTakerFeeRate(actual);
+      setTakerFeeRate(computeFeeRate(stats.takerFeeRate, stats.takerCoefficient, kcsEnabled));
       setIsLoading(false);
     })();
     return () => { cancelled = true; };

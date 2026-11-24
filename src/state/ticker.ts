@@ -15,6 +15,7 @@
 import { useCallback, useSyncExternalStore } from 'react';
 
 import {
+  getPublicSocketStatus,
   subscribeTopic,
   type PublicTopicMessage,
   type SocketStatus,
@@ -121,7 +122,7 @@ function deliver(entry: Entry, update: TickerUpdate, size: number): void {
 }
 
 function open(symbol: string, entry: Entry): void {
-  entry.startTimer = setTimeout(() => {
+  const subscribeNow = () => {
     entry.startTimer = null;
     if (entry.release) return;
     const session = entry.session;
@@ -143,7 +144,14 @@ function open(symbol: string, entry: Entry): void {
         emit(entry);
       },
     });
-  }, BOOK_FIRST_DELAY_MS);
+  };
+
+  if (getPublicSocketStatus() === 'live') {
+    subscribeNow();
+    return;
+  }
+
+  entry.startTimer = setTimeout(subscribeNow, BOOK_FIRST_DELAY_MS);
 }
 
 function close(entry: Entry): void {

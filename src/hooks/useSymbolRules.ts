@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import { fetchSymbols } from '@/lib/kucoin/market';
+import { fetchSymbols, getCachedSymbolRules } from '@/lib/kucoin/market';
 import type { SymbolInfo } from '@/lib/kucoin/types';
 
 export type SymbolRulesState = {
@@ -24,10 +24,16 @@ const BLANK: Loaded = { rules: null, error: null };
  * this shares that session cache rather than issuing a request per screen — the rules for a pair
  * do not move intraday.
  */
+function initialLoaded(symbol: string): Loaded {
+  if (!symbol) return BLANK;
+  const cached = getCachedSymbolRules(symbol);
+  return cached ? { rules: cached, error: null } : BLANK;
+}
+
 export function useSymbolRules(symbol: string): SymbolRulesState {
   const [nonce, setNonce] = useState(0);
-  const [loaded, setLoaded] = useState<Loaded>(BLANK);
-  const [isLoading, setIsLoading] = useState(symbol !== '');
+  const [loaded, setLoaded] = useState<Loaded>(() => initialLoaded(symbol));
+  const [isLoading, setIsLoading] = useState(() => symbol !== '' && getCachedSymbolRules(symbol) === null);
   const mountedRef = useRef(true);
 
   useEffect(() => {
@@ -39,18 +45,20 @@ export function useSymbolRules(symbol: string): SymbolRulesState {
 
   const refresh = useCallback(() => setNonce((value) => value + 1), []);
 
-  // Reset during render so switching pairs never shows the previous pair's minimums while the
-  // new ones are in flight.
+  // Reset during render using the synchronous session cache so switching pairs has exact
+  // tick/increment rules on frame 1 with zero fallback flicker.
   const requestKey = symbol ? `${symbol}#${nonce}` : '';
   const [activeKey, setActiveKey] = useState(requestKey);
   if (requestKey !== activeKey) {
     setActiveKey(requestKey);
-    setLoaded(BLANK);
-    setIsLoading(requestKey !== '');
+    const cached = getCachedSymbolRules(symbol);
+    setLoaded(cached ? { rules: cached, error: null } : BLANK);
+    setIsLoading(requestKey !== '' && cached === null);
   }
 
   useEffect(() => {
     if (!requestKey) return;
+    if (nonce === 0 && getCachedSymbolRules(symbol) !== null) return;
     let cancelled = false;
 
     fetchSymbols().then(
@@ -73,7 +81,7 @@ export function useSymbolRules(symbol: string): SymbolRulesState {
     return () => {
       cancelled = true;
     };
-  }, [requestKey, symbol]);
+  }, [requestKey, symbol, nonce]);
 
   return { ...loaded, isLoading, refresh };
 }

@@ -21,7 +21,13 @@ function toNumber(value: string | undefined): number {
  * never re-spends rate-limit weight.
  */
 let symbolsCache: Promise<SymbolInfo[]> | null = null;
+let symbolsByName: Map<string, SymbolInfo> | null = null;
 let currenciesCache: Promise<Currency[]> | null = null;
+
+/** Synchronous read of cached trading rules for a pair, or `null` if `/symbols` has not landed yet. */
+export function getCachedSymbolRules(symbol: string): SymbolInfo | null {
+  return symbolsByName?.get(symbol) ?? null;
+}
 
 /**
  * Roughly 0.9MB of JSON between them. They no longer sit on the path to the first rows, but they
@@ -37,7 +43,14 @@ const REFERENCE_TIMEOUT_MS = 30_000;
  */
 export function fetchSymbols(): Promise<SymbolInfo[]> {
   if (!symbolsCache) {
-    const pending = request<SymbolInfo[]>('/symbols', { timeoutMs: REFERENCE_TIMEOUT_MS });
+    const pending = request<SymbolInfo[]>('/symbols', { timeoutMs: REFERENCE_TIMEOUT_MS }).then(
+      (list) => {
+        const index = new Map<string, SymbolInfo>();
+        for (const entry of list) index.set(entry.symbol, entry);
+        symbolsByName = index;
+        return list;
+      }
+    );
     symbolsCache = pending;
     pending.catch(() => {
       if (symbolsCache === pending) symbolsCache = null;
@@ -63,11 +76,19 @@ export async function fetchAllTickers(): Promise<AllTickersResponse> {
 
 /** 24h stats for a single pair, cached per symbol for the session. */
 const marketStatsCache = new Map<string, Promise<MarketStats>>();
+const marketStatsResolved = new Map<string, MarketStats>();
+
+export function getCachedMarketStats(symbol: string): MarketStats | null {
+  return marketStatsResolved.get(symbol) ?? null;
+}
 
 export function fetchMarketStats(symbol: string): Promise<MarketStats> {
   const cached = marketStatsCache.get(symbol);
   if (cached) return cached;
-  const pending = request<MarketStats>('/market/stats', { query: { symbol } });
+  const pending = request<MarketStats>('/market/stats', { query: { symbol } }).then((stats) => {
+    marketStatsResolved.set(symbol, stats);
+    return stats;
+  });
   marketStatsCache.set(symbol, pending);
   pending.catch(() => marketStatsCache.delete(symbol));
   return pending;
