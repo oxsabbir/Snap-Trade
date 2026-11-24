@@ -52,8 +52,6 @@ const MarketsList = memo(function MarketsList({
   refresh,
   onTabChange,
   favoritesCount,
-  popularSymbols,
-  onPopularSelect,
   favorites = NO_FAVORITES,
   toggleFavorite,
 }: {
@@ -67,8 +65,6 @@ const MarketsList = memo(function MarketsList({
   refresh: () => void;
   onTabChange: (tab: TabValue) => void;
   favoritesCount: number;
-  popularSymbols: string[];
-  onPopularSelect: (symbol: string) => void;
   favorites?: ReadonlySet<string>;
   toggleFavorite: (symbol: string) => void;
 }) {
@@ -91,10 +87,6 @@ const MarketsList = memo(function MarketsList({
       <View style={styles.tabs}>
         <QuoteTabs value={tab} onChange={onTabChange} favoritesCount={favoritesCount} />
       </View>
-
-      {activeQuery.length === 0 && !isLoading ? (
-        <PopularSearches symbols={popularSymbols} onSelect={onPopularSelect} />
-      ) : null}
 
       <FlatList
         data={visibleMarkets}
@@ -249,8 +241,6 @@ export default function MarketsScreen() {
             refresh={refresh}
             onTabChange={setTab}
             favoritesCount={favorites.size}
-            popularSymbols={popularSymbols}
-            onPopularSelect={commitSearch}
             favorites={favorites}
             toggleFavorite={toggleFavorite}
           />
@@ -345,6 +335,8 @@ const useStyles = createThemedStyles((colors) =>
     },
     tabs: {
       paddingBottom: spacing.md,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: colors.border,
     },
     listContent: {
       paddingHorizontal: spacing.lg,

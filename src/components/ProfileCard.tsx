@@ -9,9 +9,8 @@ import { Text, TextInput } from '@/components/AppText';
 
 import { Avatar } from '@/components/Avatar';
 import { EyeIcon, EyeOffIcon } from '@/components/Icons';
-import { TodayPnl } from '@/components/TodayPnl';
 import type { Portfolio } from '@/lib/kucoin/account';
-import type { AccountInfo, Ticker } from '@/lib/kucoin/types';
+import type { AccountInfo } from '@/lib/kucoin/types';
 import { radius, spacing } from '@/theme';
 import { useTheme } from '@/theme/ThemeProvider';
 import { createThemedStyles } from '@/theme/themedStyles';
@@ -24,14 +23,12 @@ type Props = {
   onRename?: (name: string) => void;
   accountInfo: AccountInfo | null;
   portfolio: Portfolio;
-  /** Raw tickers behind `portfolio`'s prices; PnL reuses them instead of refetching. */
-  tickers?: Ticker[];
   lastUpdated: number | null;
 };
 
 const MASK = '••••••';
 
-function ProfileCardComponent({ displayName, onRename, accountInfo, portfolio, tickers, lastUpdated }: Props) {
+function ProfileCardComponent({ displayName, onRename, accountInfo, portfolio, lastUpdated }: Props) {
   const { colors, scheme } = useTheme();
   const { balancesVisible, setBalancesVisible } = useBalanceVisibility();
   const styles = useStyles();
@@ -140,8 +137,6 @@ function ProfileCardComponent({ displayName, onRename, accountInfo, portfolio, t
       >
         {money(portfolio.total)}
       </Text>
-
-      {tickers && tickers.length > 0 ? <TodayPnl tickers={tickers} /> : null}
 
       <View style={styles.walletRow}>
         <WalletPill
