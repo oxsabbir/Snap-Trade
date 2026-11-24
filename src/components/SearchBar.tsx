@@ -3,7 +3,7 @@ import { StyleSheet } from 'react-native';
 import { TextInput } from '@/components/AppText';
 
 import { CloseIcon, SearchIcon } from '@/components/Icons';
-import { radius, spacing } from '@/theme';
+import { spacing } from '@/theme';
 import { useTheme } from '@/theme/ThemeProvider';
 import { createThemedStyles } from '@/theme/themedStyles';
 
@@ -38,7 +38,7 @@ export function SearchBar({
         onBlur={onBlur}
         onSubmitEditing={onSubmit}
         placeholder={placeholder}
-        placeholderTextColor={colors.textFaint}
+        placeholderTextColor={scheme === 'dark' ? colors.textFaint : '#929BAE'}
         keyboardAppearance={scheme === 'dark' ? 'dark' : 'light'}
         style={styles.input}
         autoCapitalize="none"
@@ -62,27 +62,28 @@ export function SearchBar({
   );
 }
 
-const useStyles = createThemedStyles((colors) =>
-  StyleSheet.create({
+const useStyles = createThemedStyles((colors) => {
+  const isDark = colors.bg === '#121212';
+  return StyleSheet.create({
     container: {
       flexDirection: 'row',
       alignItems: 'center',
-      backgroundColor: colors.surfaceAlt,
-      borderRadius: radius.md,
-      height: 40,
-      paddingHorizontal: spacing.md,
+      backgroundColor: isDark ? colors.surfaceAlt : '#F3F4F7',
+      borderRadius: 14,
+      height: 44,
+      paddingHorizontal: 14,
     },
     leadingIcon: {
       marginRight: spacing.sm,
     },
     input: {
       flex: 1,
-      color: colors.text,
+      color: isDark ? colors.text : '#111827',
       fontSize: 14,
       padding: 0,
     },
     trailingIcon: {
       marginLeft: spacing.sm,
     },
-  }),
-);
+  });
+});

@@ -366,3 +366,27 @@ export function ReconnectIcon({ size = 14, color }: IconProps) {
     </ScaledSvg>
   );
 }
+
+/** Upward zig-zag trend arrow — quick jump to the active Trade screen. */
+export function TrendIcon({ size = 18, color }: IconProps) {
+  const { colors } = useTheme();
+  const stroke = color ?? colors.text;
+  return (
+    <ScaledSvg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M22 7L13.5 15.5L8.5 10.5L2 17"
+        stroke={stroke}
+        strokeWidth={2}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <Path
+        d="M16 7H22V13"
+        stroke={stroke}
+        strokeWidth={2}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </ScaledSvg>
+  );
+}

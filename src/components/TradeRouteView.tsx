@@ -7,6 +7,7 @@ import { CoinDetail } from '@/components/CoinDetail';
 import { OrderManagement } from '@/components/OrderManagement';
 import { TradeScreen } from '@/components/TradeScreen';
 import { useAccountBalance } from '@/hooks/useAccountBalance';
+import { useFloatingTabBarInset } from '@/hooks/useFloatingTabBarInset';
 import { loadMoreOrderHistory } from '@/state/orderHistory';
 import { spacing } from '@/theme';
 import { createThemedStyles } from '@/theme/themedStyles';
@@ -40,6 +41,7 @@ const NOOP = () => {};
  */
 export function TradeRouteView({ symbol, name, decimals, signalEntry, signalTp1, quickBuyByDefault = false, onBack }: Props) {
   const styles = useStyles();
+  const tabBarInset = useFloatingTabBarInset();
   const [activeSymbol, setActiveSymbol] = useState(symbol);
   const [bookReadySymbol, setBookReadySymbol] = useState<string | null>(null);
   const [chartFallbackSymbol, setChartFallbackSymbol] = useState<string | null>(null);
@@ -85,7 +87,7 @@ export function TradeRouteView({ symbol, name, decimals, signalEntry, signalTp1,
           scroll view of its own; a section that outgrows the screen grows this one instead. */}
       <ScrollView
         style={styles.scroll}
-        contentContainerStyle={styles.content}
+        contentContainerStyle={[styles.content, !onBack && { paddingBottom: tabBarInset }]}
         keyboardShouldPersistTaps="handled"
         automaticallyAdjustKeyboardInsets
         // The chart handles its own two-finger pinch to zoom the candles. Left enabled, iOS

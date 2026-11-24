@@ -7,6 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BackIcon, CheckIcon } from '@/components/Icons';
 import { SIGNAL_DETECTION_ENABLED } from '@/lib/featureFlags';
+import { useFloatingTabBarInset } from '@/hooks/useFloatingTabBarInset';
 import { useSignalSource } from '@/hooks/useSignalSource';
 import { useBalanceVisibility } from '@/state/balanceVisibility';
 import { FONT_SIZE_OPTIONS, useFontScale } from '@/theme/FontScaleProvider';
@@ -26,6 +27,7 @@ export default function SettingsScreen() {
   const { balancesVisible, setBalancesVisible } = useBalanceVisibility();
   const signal = useSignalSource();
   const styles = useStyles();
+  const tabBarInset = useFloatingTabBarInset();
   const [signalNameInput, setSignalNameInput] = useState(signal.displayName);
   const [previousSignalName, setPreviousSignalName] = useState(signal.displayName);
   const [signalSaveState, setSignalSaveState] = useState<'idle' | 'saving' | 'saved'>('idle');
@@ -77,7 +79,10 @@ export default function SettingsScreen() {
         <View style={styles.headerBalance} />
       </View>
 
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={[styles.content, { paddingBottom: tabBarInset }]}
+        showsVerticalScrollIndicator={false}
+      >
         {SIGNAL_DETECTION_ENABLED ? (
           <View style={styles.section}>
             <Text style={styles.sectionEyebrow}>AUTOMATION</Text>

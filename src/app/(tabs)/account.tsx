@@ -8,6 +8,7 @@ import { AssetList } from '@/components/AssetList';
 import { AccountIcon } from '@/components/Icons';
 import { ProfileCard } from '@/components/ProfileCard';
 import { useAccount } from '@/hooks/useAccount';
+import { useFloatingTabBarInset } from '@/hooks/useFloatingTabBarInset';
 import { useProfile } from '@/hooks/useProfile';
 import { useApiCredentials, type OnboardingEntry } from '@/state/apiCredentials';
 import {
@@ -32,6 +33,7 @@ export default function AccountScreen() {
   const { apiKey, disconnect } = useApiCredentials();
   const { colors } = useTheme();
   const styles = useStyles();
+  const tabBarInset = useFloatingTabBarInset();
   const [accountAction, setAccountAction] = useState<OnboardingEntry | null>(null);
   const [accountActionError, setAccountActionError] = useState<string | null>(null);
   const [kcsEnabled, setKcsEnabled] = useState(false);
@@ -116,7 +118,10 @@ export default function AccountScreen() {
           style={styles.keyboardAvoidingView}
           keyboardVerticalOffset={Platform.OS === 'ios' ? 100 : 0}
         >
-          <ScrollView contentContainerStyle={styles.list} showsVerticalScrollIndicator={false}>
+          <ScrollView
+            contentContainerStyle={[styles.list, { paddingBottom: tabBarInset }]}
+            showsVerticalScrollIndicator={false}
+          >
           <ProfileCard
             displayName={displayName}
             onRename={setDisplayName}

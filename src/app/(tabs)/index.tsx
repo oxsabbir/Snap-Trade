@@ -3,12 +3,14 @@ import {
   useCallback,
   useMemo,
   useState } from "react";
-import { View } from '@/components/AppLayout';
+import { Pressable, View } from '@/components/AppLayout';
 import { ActivityIndicator, FlatList, Keyboard, RefreshControl, type ListRenderItem, StyleSheet } from 'react-native';
 import { Text } from '@/components/AppText';
-import { useIsFocused } from "expo-router";
+import { router, useIsFocused } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { TrendIcon } from "@/components/Icons";
+import { MintCornerBackground } from "@/components/MintCornerBackground";
 import {
   FAVORITES_TAB,
   QuoteTabs,
@@ -17,6 +19,7 @@ import {
 import { PopularSearches } from "@/components/PopularSearches";
 import { SearchBar } from "@/components/SearchBar";
 import { SpotRow } from "@/components/SpotRow";
+import { useFloatingTabBarInset } from "@/hooks/useFloatingTabBarInset";
 import { useSpotMarkets } from "@/hooks/useSpotMarkets";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { searchMarkets, type QuoteFilter } from "@/lib/kucoin/market";
@@ -70,6 +73,7 @@ const MarketsList = memo(function MarketsList({
 }) {
   const { colors } = useTheme();
   const styles = useStyles();
+  const tabBarInset = useFloatingTabBarInset();
   // Stable renderItem with isFavorite computed from passed favorites Set
   const renderRow = useCallback<ListRenderItem<SpotMarket>>(
     ({ item }) => (
@@ -112,7 +116,7 @@ const MarketsList = memo(function MarketsList({
             <EmptyState tab={tab} hasSearch={activeQuery.length > 0} error={error} />
           )
         }
-        ListFooterComponent={<View style={styles.footer} />}
+        ListFooterComponent={<View style={{ height: tabBarInset }} />}
         initialNumToRender={INITIAL_ROWS}
         maxToRenderPerBatch={ROWS_PER_BATCH}
         windowSize={9}
@@ -191,13 +195,27 @@ export default function MarketsScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea} edges={["top"]}>
+      <MintCornerBackground />
       <View style={styles.header}>
         <View style={styles.titleRow}>
-          <Text style={styles.title}>Spot</Text>
-          <Text style={styles.subtitle}>
-            {isLoading ? "Loading markets…" : `${visibleMarkets.length} pairs`}
-            {lastUpdated ? ` · ${formatTime(lastUpdated)}` : ""}
-          </Text>
+          <View style={styles.titleLeft}>
+            <Text style={styles.title}>Spot</Text>
+            <View style={styles.metaRow}>
+              <View style={styles.liveDot} />
+              <Text style={styles.subtitle}>
+                {isLoading ? "Loading markets…" : `${visibleMarkets.length} pairs`}
+                {lastUpdated ? ` · ${formatTime(lastUpdated)}` : ""}
+              </Text>
+            </View>
+          </View>
+          <Pressable
+            onPress={() => router.navigate("/(tabs)/trade")}
+            style={styles.actionButton}
+            accessibilityRole="button"
+            accessibilityLabel="Open trade chart"
+          >
+            <TrendIcon size={18} />
+          </Pressable>
         </View>
         <SearchBar
           value={search}
@@ -296,11 +314,12 @@ function EmptyState({
   );
 }
 
-const useStyles = createThemedStyles((colors) =>
-  StyleSheet.create({
+const useStyles = createThemedStyles((colors) => {
+  const isDark = colors.bg === "#121212";
+  return StyleSheet.create({
     safeArea: {
       flex: 1,
-      backgroundColor: colors.bg,
+      backgroundColor: isDark ? colors.bg : "#FFFFFF",
     },
     body: {
       flex: 1,
@@ -321,32 +340,58 @@ const useStyles = createThemedStyles((colors) =>
     },
     titleRow: {
       flexDirection: "row",
-      alignItems: "baseline",
-      gap: spacing.sm,
+      alignItems: "center",
+      justifyContent: "space-between",
+    },
+    titleLeft: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 10,
+    },
+    metaRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+    },
+    liveDot: {
+      width: 6,
+      height: 6,
+      borderRadius: 3,
+      backgroundColor: "#00C896",
     },
     title: {
-      color: colors.text,
+      color: isDark ? colors.text : "#111827",
       fontSize: 26,
       fontWeight: "700",
     },
     subtitle: {
-      color: colors.textFaint,
+      color: isDark ? colors.textMuted : "#7C879D",
       fontSize: 12,
+    },
+    actionButton: {
+      width: 38,
+      height: 38,
+      borderRadius: 12,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: isDark ? colors.surface : "#FFFFFF",
+      borderWidth: 1,
+      borderColor: isDark ? colors.border : "rgba(230, 235, 242, 0.8)",
+      shadowColor: "#142846",
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: isDark ? 0.25 : 0.06,
+      shadowRadius: 8,
+      elevation: 2,
     },
     tabs: {
       paddingBottom: spacing.md,
-      borderBottomWidth: StyleSheet.hairlineWidth,
-      borderBottomColor: colors.border,
     },
     listContent: {
       paddingHorizontal: spacing.lg,
+      paddingTop: 2,
     },
     separator: {
-      height: StyleSheet.hairlineWidth,
-      backgroundColor: colors.border,
-    },
-    footer: {
-      height: spacing.xl,
+      height: 10,
     },
     empty: {
       alignItems: "center",
@@ -355,18 +400,18 @@ const useStyles = createThemedStyles((colors) =>
       gap: spacing.sm,
     },
     emptyTitle: {
-      color: colors.text,
+      color: isDark ? colors.text : "#111827",
       fontSize: 15,
       fontWeight: "600",
     },
     emptyBody: {
-      color: colors.textMuted,
+      color: isDark ? colors.textMuted : "#7C879D",
       fontSize: 13,
       textAlign: "center",
     },
     emptyHint: {
-      color: colors.textFaint,
+      color: isDark ? colors.textFaint : "#A0A7B4",
       fontSize: 12,
     },
-  }),
-);
+  });
+});
