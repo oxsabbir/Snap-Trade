@@ -75,7 +75,7 @@ const PAN_FAIL_Y: [number, number] = [-14, 14];
 const TAP_SLOP = 12;
 const TAP_DURATION = 400;
 /** Window for the second tap. Shortened from the 500ms default so one tap feels immediate. */
-const DOUBLE_TAP_DELAY = 260;
+const DOUBLE_TAP_DELAY = 180;
 /**
  * How far past the edge the window may travel, as a fraction of the visible window. The window
  * hard-stops with the newest candle half a slot from the right edge; at 0.5 a full drag can
@@ -1114,47 +1114,89 @@ function PriceChartComponent({
           {caption}
         </Text>
       ) : null}
-      {active ? <Readout candle={active} decimals={decimals} /> : null}
+      {active ? (
+        <Readout
+          candle={active}
+          decimals={decimals}
+          alignRight={activeX < innerWidth / 2}
+        />
+      ) : null}
     </View>
   );
 }
 
-function Readout({ candle, decimals }: { candle: Candle; decimals?: number }) {
+const MONTH_NAMES = [
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+] as const;
+
+function formatCandleTime(ms: number): string {
+  const d = new Date(ms);
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  return `${MONTH_NAMES[d.getMonth()] ?? ""} ${d.getDate()}, ${hh}:${mm}`;
+}
+
+const Readout = memo(function Readout({
+  candle,
+  decimals,
+  alignRight,
+}: {
+  candle: Candle;
+  decimals?: number;
+  alignRight: boolean;
+}) {
+  const { colors } = useTheme();
   const styles = useStyles();
+  const isUp = candle.close >= candle.open;
+  const change =
+    candle.open !== 0 ? ((candle.close - candle.open) / candle.open) * 100 : 0;
+  const toneColor = isUp ? colors.upText : colors.downText;
+
   return (
-    <View style={styles.readout} pointerEvents="none">
-      <Text style={styles.readoutTime}>
-        {new Date(candle.time).toLocaleString(undefined, {
-          month: "short",
-          day: "numeric",
-          hour: "2-digit",
-          minute: "2-digit",
-        })}
-      </Text>
-      <View style={styles.readoutGrid}>
-        <OhlcCell label="O" value={formatPrice(candle.open, decimals)} />
-        <OhlcCell label="H" value={formatPrice(candle.high, decimals)} />
-        <OhlcCell label="L" value={formatPrice(candle.low, decimals)} />
-        <OhlcCell label="C" value={formatPrice(candle.close, decimals)} />
+    <View
+      style={[
+        styles.readout,
+        alignRight ? styles.readoutRight : styles.readoutLeft,
+      ]}
+      pointerEvents="none"
+    >
+      <View style={styles.readoutHeader}>
+        <Text style={styles.readoutTime} numberOfLines={1}>
+          {formatCandleTime(candle.time)}
+        </Text>
+        <Text style={[styles.readoutChange, { color: toneColor }]} numberOfLines={1}>
+          {formatPercent(change)}
+        </Text>
       </View>
-      <Text style={styles.readoutVolume}>
-        Vol {formatAmount(candle.volume)}
-        {candle.open !== 0
-          ? `  ${formatPercent(((candle.close - candle.open) / candle.open) * 100)}`
-          : ""}
-      </Text>
+
+      <View style={styles.readoutDivider} />
+
+      <View style={styles.readoutRow}>
+        <Text style={styles.ohlcLabel}>Open</Text>
+        <Text style={styles.ohlcValue}>{formatPrice(candle.open, decimals)}</Text>
+      </View>
+      <View style={styles.readoutRow}>
+        <Text style={styles.ohlcLabel}>High</Text>
+        <Text style={styles.ohlcValue}>{formatPrice(candle.high, decimals)}</Text>
+      </View>
+      <View style={styles.readoutRow}>
+        <Text style={styles.ohlcLabel}>Low</Text>
+        <Text style={styles.ohlcValue}>{formatPrice(candle.low, decimals)}</Text>
+      </View>
+      <View style={styles.readoutRow}>
+        <Text style={styles.ohlcLabel}>Close</Text>
+        <Text style={[styles.ohlcValue, { color: toneColor }]}>
+          {formatPrice(candle.close, decimals)}
+        </Text>
+      </View>
+      <View style={styles.readoutRow}>
+        <Text style={styles.ohlcLabel}>Vol</Text>
+        <Text style={styles.ohlcValue}>{formatAmount(candle.volume)}</Text>
+      </View>
     </View>
   );
-}
-function OhlcCell({ label, value }: { label: string; value: string }) {
-  const styles = useStyles();
-  return (
-    <View style={styles.ohlcCell}>
-      <Text style={styles.ohlcLabel}>{label}</Text>
-      <Text style={styles.ohlcValue}>{value}</Text>
-    </View>
-  );
-}
+});
 
 export const PriceChart = memo(PriceChartComponent);
 
@@ -1189,29 +1231,63 @@ const useStyles = createThemedStyles((colors) =>
     },
     readout: {
       position: "absolute",
-      top: spacing.xs,
-      left: spacing.xs,
+      top: spacing.sm,
+      width: 140,
       backgroundColor: colors.surface,
-      borderRadius: radius.sm,
+      borderRadius: radius.md,
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: colors.border,
-      paddingHorizontal: spacing.sm,
-      paddingVertical: 6,
-      gap: 3,
+      paddingHorizontal: 10,
+      paddingVertical: 8,
+      gap: 4,
+      shadowColor: colors.shadow,
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: colors.bg === "#121212" ? 0.35 : 0.08,
+      shadowRadius: 8,
+      elevation: 3,
     },
-    readoutTime: { color: colors.textMuted, fontSize: 10, fontWeight: "600" },
-    readoutGrid: { flexDirection: "row", gap: spacing.md },
-    ohlcCell: { flexDirection: "row", alignItems: "center", gap: 3 },
-    ohlcLabel: { color: colors.textFaint, fontSize: 10, fontWeight: "700" },
+    readoutLeft: {
+      left: spacing.sm,
+    },
+    readoutRight: {
+      right: AXIS_WIDTH + spacing.sm,
+    },
+    readoutHeader: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: 4,
+    },
+    readoutTime: {
+      color: colors.textMuted,
+      fontSize: 10,
+      fontWeight: "600",
+    },
+    readoutChange: {
+      fontSize: 10,
+      fontWeight: "700",
+      fontVariant: ["tabular-nums"],
+    },
+    readoutDivider: {
+      height: StyleSheet.hairlineWidth,
+      backgroundColor: colors.border,
+      marginVertical: 1,
+    },
+    readoutRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: spacing.sm,
+    },
+    ohlcLabel: {
+      color: colors.textFaint,
+      fontSize: 10,
+      fontWeight: "600",
+    },
     ohlcValue: {
       color: colors.text,
       fontSize: 10,
       fontWeight: "600",
-      fontVariant: ["tabular-nums"],
-    },
-    readoutVolume: {
-      color: colors.textMuted,
-      fontSize: 10,
       fontVariant: ["tabular-nums"],
     },
   }),

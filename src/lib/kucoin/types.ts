@@ -85,6 +85,7 @@ export type SymbolInfo = {
   minFunds: string;
   isMarginEnabled: boolean;
   enableTrading: boolean;
+  st?: boolean;
 };
 
 /**

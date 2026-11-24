@@ -16,6 +16,8 @@ type Props = {
 
 /** Global negative cache so any 404/broken icon URL is never retried while scrolling. */
 const failedUrls = new Set<string>();
+/** Tracks URLs already decoded into expo-image's memory/disk cache to skip fade-in flash on remount. */
+const loadedUrls = new Set<string>();
 
 function CoinAvatarComponent({ symbol, size = 36 }: Props) {
   const styles = useStyles();
@@ -27,10 +29,14 @@ function CoinAvatarComponent({ symbol, size = 36 }: Props) {
   const [loadedUrl, setLoadedUrl] = useState<string | null>(null);
 
   const activeUrl = kucoinIconUrl && !failedUrls.has(kucoinIconUrl) ? kucoinIconUrl : null;
-  const isLoaded = activeUrl !== null && loadedUrl === activeUrl;
+  const cachedReady = activeUrl !== null && loadedUrls.has(activeUrl);
+  const isLoaded = cachedReady || (activeUrl !== null && loadedUrl === activeUrl);
 
   const handleLoad = useCallback(() => {
-    if (activeUrl) setLoadedUrl(activeUrl);
+    if (activeUrl) {
+      loadedUrls.add(activeUrl);
+      setLoadedUrl(activeUrl);
+    }
   }, [activeUrl]);
 
   const handleError = useCallback(() => {
@@ -62,7 +68,7 @@ function CoinAvatarComponent({ symbol, size = 36 }: Props) {
           recyclingKey={activeUrl}
           cachePolicy="memory-disk"
           contentFit="cover"
-          transition={120}
+          transition={0}
           priority="low"
           onLoad={handleLoad}
           onError={handleError}

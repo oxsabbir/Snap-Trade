@@ -1,5 +1,6 @@
 import { memo, useCallback, useState } from "react";
 import { View } from '@/components/AppLayout';
+import { Text } from '@/components/AppText';
 import { StyleSheet } from 'react-native';
 
 import { OrderBook } from "@/components/OrderBook";
@@ -7,8 +8,9 @@ import {
   TradePanel,
   type ExternalPriceSelection,
 } from "@/components/TradePanel";
-import { spacing } from "@/theme";
+import { radius, spacing } from "@/theme";
 import { createThemedStyles } from "@/theme/themedStyles";
+import { useSymbolRules } from "@/hooks/useSymbolRules";
 import { useUserTradeFees } from "@/hooks/useUserTradeFees";
 import type { OrderSide } from "@/lib/kucoin/types";
 
@@ -45,6 +47,7 @@ export const TradeScreen = memo(function TradeScreen({
   quickBuyByDefault,
 }: Props) {
   const styles = useStyles();
+  const { rules } = useSymbolRules(symbol);
   const { takerFeeRate } = useUserTradeFees(symbol);
   const [selection, setSelection] = useState<ExternalPriceSelection | null>(
     null,
@@ -62,6 +65,16 @@ export const TradeScreen = memo(function TradeScreen({
 
   return (
     <View style={styles.container}>
+      {rules?.st ? (
+        <View style={styles.stBanner} accessibilityRole="text">
+          <View style={styles.stBadge}>
+            <Text style={styles.stBadgeText}>ST</Text>
+          </View>
+          <Text style={styles.stNotice} numberOfLines={1}>
+            Special Treatment · KuCoin delisting watch
+          </Text>
+        </View>
+      ) : null}
       <View style={styles.row}>
         <View style={styles.book}>
           <OrderBook
@@ -95,6 +108,39 @@ const useStyles = createThemedStyles((colors) =>
       paddingTop: spacing.sm,
       paddingBottom: spacing.md,
       paddingHorizontal: spacing.md,
+    },
+    stBanner: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.sm,
+      marginBottom: spacing.sm,
+      paddingHorizontal: spacing.sm,
+      paddingVertical: 6,
+      borderRadius: radius.sm,
+      backgroundColor:
+        colors.bg === "#121212"
+          ? "rgba(240, 185, 11, 0.12)"
+          : "rgba(180, 83, 9, 0.08)",
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.warning,
+    },
+    stBadge: {
+      paddingHorizontal: 6,
+      paddingVertical: 1,
+      borderRadius: 4,
+      backgroundColor: colors.warning,
+    },
+    stBadgeText: {
+      color: "#FFFFFF",
+      fontSize: 10,
+      fontWeight: "700",
+      letterSpacing: 0.4,
+    },
+    stNotice: {
+      flex: 1,
+      color: colors.warning,
+      fontSize: 11,
+      fontWeight: "600",
     },
     row: {
       flexDirection: "row",
