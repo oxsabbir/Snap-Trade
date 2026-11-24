@@ -3,9 +3,11 @@ import * as Linking from 'expo-linking';
 import { router } from 'expo-router';
 
 import { SIGNAL_DETECTION_ENABLED } from '@/lib/featureFlags';
+import { prefetchOrderBookSnapshot } from '@/lib/kucoin/level2';
 import { parseTradeSignalUrl } from '@/lib/signalUrl';
 import { socketLog } from '@/lib/kucoin/socketLog';
 import { snapLog } from '@/lib/snapLog';
+import { prefetchTicker } from '@/state/ticker';
 
 /**
  * Routes runtime `snaptrade://trade/<symbol>` intents to the trade screen.
@@ -34,6 +36,9 @@ export function useSignalDeepLink(): void {
       // Same anchor as the cold-start path: the copy-log block gets one `signal:received`
       // line per delivered signal, whatever route it arrived through.
       socketLog('signal:received', `${signal.symbol} via deeplink`);
+
+      void prefetchOrderBookSnapshot(signal.symbol).catch(() => {});
+      prefetchTicker(signal.symbol, 5_000);
 
       try {
         router.navigate({

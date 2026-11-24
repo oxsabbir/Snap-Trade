@@ -45,6 +45,8 @@ type Entry = {
   status: SocketStatus;
   listeners: Set<() => void>;
   release: (() => void) | null;
+  /** True from the moment `subscribeTopic` is called until `close()`, covering the synchronous status callback. */
+  active: boolean;
   /** Pending delayed subscribe, cleared if the entry closes before it fires. */
   startTimer: ReturnType<typeof setTimeout> | null;
   /** Throttle state. */
@@ -56,6 +58,10 @@ type Entry = {
   /** Guards the one-time first-tick log per subscription session. */
   deliveredFirstTick: boolean;
 };
+
+function initialSocketStatus(): SocketStatus {
+  return getPublicSocketStatus() === 'live' ? 'live' : 'connecting';
+}
 
 const entries = new Map<string, Entry>();
 
@@ -126,9 +132,10 @@ function open(symbol: string, entry: Entry): void {
     entry.startTimer = null;
     if (entry.release) return;
     const session = entry.session;
+    entry.active = true;
     entry.release = subscribeTopic(`/market/ticker:${symbol}`, {
       onMessage: (message: PublicTopicMessage) => {
-        if (!entry.release || entry.session !== session) return;
+        if (!entry.active || entry.session !== session) return;
         const tick = toTick(symbol, message);
         if (!tick) return;
         if (!entry.deliveredFirstTick) {
@@ -138,7 +145,7 @@ function open(symbol: string, entry: Entry): void {
         ingest(entry, tick);
       },
       onStatus: (status: SocketStatus) => {
-        if (!entry.release || entry.session !== session) return;
+        if (!entry.active || entry.session !== session) return;
         if (entry.status === status) return;
         entry.status = status;
         emit(entry);
@@ -155,6 +162,7 @@ function open(symbol: string, entry: Entry): void {
 }
 
 function close(entry: Entry): void {
+  entry.active = false;
   if (entry.startTimer) {
     clearTimeout(entry.startTimer);
     entry.startTimer = null;
@@ -187,9 +195,10 @@ export function subscribeTicker(symbol: string, listener: () => void): () => voi
   if (!entry) {
     entry = {
       snapshot: INITIAL,
-      status: 'connecting',
+      status: initialSocketStatus(),
       listeners: new Set(),
       release: null,
+      active: false,
       startTimer: null,
       latest: null,
       pendingSize: 0,
@@ -271,5 +280,5 @@ export function prefetchTicker(symbol: string, holdMs = 15_000): void {
  */
 export function useTickerStatus(symbol: string): SocketStatus {
   const subscribe = useCallback((notify: () => void) => subscribeTicker(symbol, notify), [symbol]);
-  return useSyncExternalStore(subscribe, () => entries.get(symbol)?.status ?? 'connecting');
+  return useSyncExternalStore(subscribe, () => entries.get(symbol)?.status ?? initialSocketStatus());
 }

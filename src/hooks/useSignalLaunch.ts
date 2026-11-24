@@ -1,6 +1,7 @@
 import { useCallback } from 'react';
 
 import { snapLog } from '@/lib/snapLog';
+import { prefetchOrderBookSnapshot } from '@/lib/kucoin/level2';
 import { socketLog } from '@/lib/kucoin/socketLog';
 import { useSetActiveCoin } from '@/state/activeCoin';
 import { prefetchTicker } from '@/state/ticker';
@@ -36,6 +37,7 @@ export function useSignalLaunch(): (symbol: string, source: string) => void {
 
       const base = symbol.split('-')[0] ?? symbol;
       setActiveCoin({ symbol, name: base, decimals: 8 });
+      void prefetchOrderBookSnapshot(symbol).catch(() => {});
       prefetchTicker(symbol);
     },
     [setActiveCoin]

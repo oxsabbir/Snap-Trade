@@ -877,8 +877,12 @@ export function reconnectPublicSocket(): void {
 function onForeground(): void {
   void (async () => {
     if (topics.size === 0) return;
-    if (socket && socket.readyState === WebSocket.OPEN && Date.now() - lastServerAt < RESUME_FRESH_WINDOW_MS) {
-      socketLog('resume', 'session fresh — kept, probing');
+    if (
+      socket &&
+      socket.readyState === WebSocket.OPEN &&
+      (Date.now() - lastServerAt < RESUME_FRESH_WINDOW_MS || isTradingModeEnabled())
+    ) {
+      socketLog('resume', 'session open — kept, probing');
       socket.send(JSON.stringify({ id: Date.now(), type: 'ping' }));
       lastPingAt = Date.now();
       return;
